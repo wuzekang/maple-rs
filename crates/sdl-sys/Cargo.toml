@@ -1,0 +1,14 @@
+[package]
+name = "sdl-sys"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "sdl_sys"
+path = "src/lib.rs"
+
+[dependencies]
+
+[build-dependencies]
+bindgen = "0.65.1"
+cmake = "0.1"

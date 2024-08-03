@@ -1,0 +1,14 @@
+[package]
+name = "client"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+glam = "0.28.0"
+image = "0.25.2"
+wz_reader = { path = "../wz-reader-rs" }
+sdl-sys = { path = "../sdl-sys" }
+indexmap = "2.3.0"
+hecs = "0.10.5"
+thiserror = "1.0.57"
+ab_glyph = "0.2.28"
