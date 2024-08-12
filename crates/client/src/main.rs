@@ -1,14 +1,17 @@
 use character::{Character, ZMap};
-use glam::{vec2, Vec2};
-use sdl::SpriteRenderer;
+use glam::{vec2, Vec2, Vec2Swizzles};
+use image::DynamicImage;
+use sdl::{NineGridTexture, Renderer, Surface, Texture};
 use sdl_sys::{
-    self, SDL_CreateRenderer, SDL_CreateWindow, SDL_Delay, SDL_Event, SDL_EventType,
+    self, SDL_CreateRenderer, SDL_CreateWindow, SDL_Delay, SDL_Event, SDL_EventType, SDL_FRect,
     SDL_GetKeyboardState, SDL_GetTicks, SDL_PollEvent, SDL_RenderClear, SDL_RenderPresent,
     SDL_Scancode::{
         self, SDL_SCANCODE_DOWN, SDL_SCANCODE_LEFT, SDL_SCANCODE_RIGHT, SDL_SCANCODE_UP,
     },
     SDL_SetRenderDrawColor, SDL_SetRenderVSync,
 };
+use sprite::Sprite;
+use ui::Button;
 
 use std::{error::Error, mem::MaybeUninit, sync::Arc};
 
@@ -19,6 +22,7 @@ mod npc;
 mod sdl;
 mod sprite;
 mod timer;
+mod ui;
 mod wz;
 
 pub fn intersect(p1: &Vec2, p2: &Vec2, p3: &Vec2, p4: &Vec2) -> Option<Vec2> {
@@ -108,7 +112,7 @@ struct Player {
 struct World {
     window: *mut sdl_sys::SDL_Window,
     renderer: *mut sdl_sys::SDL_Renderer,
-    sprite_renderer: SpriteRenderer,
+    sprite_renderer: Renderer,
     size: Vec2,
     dpr: f32,
     ticks: u64,
@@ -134,7 +138,7 @@ impl World {
             sdl_sys::SDL_SetRenderScale(renderer, dpr, dpr);
         }
 
-        let sprite_renderer = sdl::SpriteRenderer::new(dpr, renderer);
+        let sprite_renderer = sdl::Renderer::new(dpr, renderer);
 
         let ticks = unsafe { SDL_GetTicks() };
 
@@ -200,10 +204,59 @@ fn main() -> Result<(), Box<dyn Error>> {
         speed: Vec2::ONE * 40.0,
         ..Default::default()
     };
+
+    let world_map_node = node.at_path("UI/UIWindow.img/WorldMap").unwrap();
+    let world_map_title: sprite::Sprite = world_map_node.get("title").into();
+    let world_map_border: Vec<Arc<DynamicImage>> = node
+        .at_path("UI/UIWindow.img/WorldMap/Border")
+        .unwrap()
+        .into();
+
+    let world_map_helper_images: Vec<Sprite> = node
+        .at_path("Map/MapHelper.img/worldMap/mapImage")
+        .unwrap()
+        .into();
+    let world_map =
+        map::world_map::WorldMap::from(node.at_path("Map/WorldMap/WorldMap.img").unwrap());
+
     let mut world = World::new();
     let mut events = PollEvent::new();
     let state = unsafe { SDL_GetKeyboardState(std::ptr::null_mut() as *mut core::ffi::c_int) };
 
+    let surfaces = world_map_border
+        .into_iter()
+        .map(|item| item.into())
+        .collect::<Vec<Surface>>();
+
+    let tex = sdl::NineGridTexture::new(
+        (
+            &surfaces[0],
+            &surfaces[1],
+            &surfaces[2],
+            &surfaces[3],
+            &surfaces[4],
+            &surfaces[5],
+            &surfaces[6],
+            &surfaces[7],
+        ),
+        world.renderer,
+    );
+
+    let btn_close = ui::Button::from(node.at_path("UI/Basic.img/BtClose").unwrap());
+
+    let tooltip_bg: DynamicImage = image::load_from_memory(include_bytes!("./tooltip.png"))
+        .unwrap()
+        .into();
+
+    let tooltip_tex = NineGridTexture {
+        texture: Texture::from_image(&tooltip_bg, world.renderer),
+        left_width: 4,
+        middle_width: 0,
+        right_width: 4,
+        top_height: 4,
+        middle_height: 0,
+        bottom_height: 4,
+    };
     unsafe {
         SDL_SetRenderVSync(world.renderer, 1);
 
@@ -280,6 +333,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                 camera.position = player.position - world.size / 2.0;
                 // camera.position = player.position;
             }
+
+            let mut mouse_x = MaybeUninit::<f32>::uninit();
+            let mut mouse_y = MaybeUninit::<f32>::uninit();
+            sdl_sys::SDL_GetMouseState(mouse_x.as_mut_ptr(), mouse_y.as_mut_ptr());
+
+            let mouse = { vec2(mouse_x.assume_init() as f32, mouse_y.assume_init() as f32) };
 
             SDL_SetRenderDrawColor(world.renderer, 0, 0, 0, 255);
             SDL_RenderClear(world.renderer);
@@ -477,6 +536,98 @@ fn main() -> Result<(), Box<dyn Error>> {
             //     }
             // }
 
+            // let textures = {
+            //     let sprite_renderer = &mut world.sprite_renderer;
+            //     let mut textures = vec![];
+            //     for item in &world_map_border {
+            //         textures.push(sprite_renderer.texture(item));
+            //     }
+            //     textures
+            // };
+
+            let content_size = vec2(640.0, 470.0);
+            let window_size = content_size + tex.border_size();
+            let window_offset = (world.size - window_size) / 2.0;
+            tex.draw(window_offset, window_size);
+
+            let frame = &btn_close.normal.frames[0];
+            world.sprite_renderer.draw(
+                &world_map_title,
+                window_offset + vec2(tex.left_width as f32 + 4.0, 9.5),
+            );
+            world.sprite_renderer.draw(
+                frame,
+                window_offset
+                    + vec2(window_size.x, 0.0)
+                    + vec2(-(tex.right_width as f32 + frame.image.width() as f32), 6.0),
+            );
+
+            let content_position = window_offset
+                + vec2(tex.left_width as f32, tex.top_height as f32)
+                + (content_size / 2.0);
+            world
+                .sprite_renderer
+                .draw(&world_map.base_img, content_position);
+
+            for (_, item) in world_map.map_link.iter() {
+                let lt = content_position - item.link_img.origin;
+                let rb = lt + item.link_img.size;
+                if (mouse.cmpge(lt).all()) && mouse.cmplt(rb).all() {
+                    let pt = mouse - lt;
+
+                    let pixel = item
+                        .link_img
+                        .image
+                        .as_rgba8()
+                        .unwrap()
+                        .get_pixel(pt.x as u32, pt.y as u32);
+
+                    if pixel.0[3] > 0 {
+                        world.sprite_renderer.draw(&item.link_img, content_position);
+                        break;
+                    }
+                }
+
+                // let size = vec2(
+                //     item.link_img.image.width() as f32,
+                //     item.link_img.image.height() as f32,
+                // );
+                // world.sprite_renderer.render_rect(&SDL_FRect {
+                //     x: p.x,
+                //     y: p.y,
+                //     w: size.x,
+                //     h: size.y,
+                // })
+            }
+
+            for (_, item) in world_map.map_list.iter() {
+                // if let Some(path) = &item.path {
+                //     world.sprite_renderer.draw(path, content_position);
+                // }
+                let spot_image = &world_map_helper_images[3];
+                world
+                    .sprite_renderer
+                    .draw(spot_image, content_position + item.spot);
+                // world.sprite_renderer.render_rect(&SDL_FRect {
+                //     x: item.spot.x + content_position.x,
+                //     y: item.spot.y + content_position.y,
+                //     w: 20.0,
+                //     h: 20.0,
+                // })
+            }
+
+            tooltip_tex.draw(vec2(50.0, 50.0), vec2(400.0, 400.0));
+            // sdl_sys::SDL_RenderTexture(
+            //     world.renderer,
+            //     tex.texture,
+            //     std::ptr::null(),
+            //     &SDL_FRect {
+            //         x: 0.0,
+            //         y: 0.0,
+            //         w: tex.size.x,
+            //         h: tex.size.y,
+            //     },
+            // );
             SDL_RenderPresent(world.renderer);
             SDL_Delay(16);
         }

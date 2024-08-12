@@ -1,4 +1,4 @@
-use glam::Vec2;
+use glam::{vec2, Vec2};
 use image::DynamicImage;
 use std::sync::Arc;
 
@@ -8,6 +8,7 @@ use crate::wz::Node;
 pub struct Sprite {
     pub path: String,
     pub image: Arc<DynamicImage>,
+    pub size: Vec2,
     pub origin: Vec2,
     pub a0: i32,
     pub a1: i32,
@@ -44,6 +45,7 @@ impl SpriteAnimation {
 impl From<Node> for Sprite {
     fn from(node: Node) -> Self {
         let origin: Vec2 = node.get("origin").into();
+        let image: Arc<DynamicImage> = node.clone().into();
         Self {
             path: node.path(),
             origin,
@@ -52,7 +54,8 @@ impl From<Node> for Sprite {
             a0: node.try_get("a0").map(Into::into).unwrap_or(0),
             a1: node.try_get("a1").map(Into::into).unwrap_or(0),
             alpha: 255,
-            image: node.into(),
+            size: vec2(image.width() as f32, image.height() as f32),
+            image,
         }
     }
 }

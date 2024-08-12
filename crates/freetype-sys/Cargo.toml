@@ -1,11 +1,10 @@
 [package]
-name = "sdl-sys"
+name = "freetype-sys"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "sdl_sys"
-path = "src/lib.rs"
+name = "freetype_sys"
 
 [dependencies]
 

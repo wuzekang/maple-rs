@@ -978,6 +978,7 @@ name = "client"
 version = "0.1.0"
 dependencies = [
  "ab_glyph",
+ "freetype-sys 0.1.0",
  "glam",
  "hecs",
  "image",
@@ -1685,7 +1686,7 @@ dependencies = [
  "dirs",
  "dwrote",
  "float-ord",
- "freetype-sys",
+ "freetype-sys 0.20.1",
  "lazy_static",
  "libc",
  "log",
@@ -1730,6 +1731,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e13624c2627564efccf4934284bdd98cbaa14e79b0b5a141218e507b3a823456"
 dependencies = [
  "percent-encoding",
+]
+
+[[package]]
+name = "freetype-sys"
+version = "0.1.0"
+dependencies = [
+ "bindgen",
+ "cmake",
+ "pkg-config",
 ]
 
 [[package]]
@@ -3585,6 +3595,7 @@ version = "0.1.0"
 dependencies = [
  "bindgen",
  "cmake",
+ "pkg-config",
 ]
 
 [[package]]
@@ -4155,9 +4166,9 @@ dependencies = [
 
 [[package]]
 name = "ttf-parser"
-version = "0.24.0"
+version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8686b91785aff82828ed725225925b33b4fde44c4bb15876e5f7c832724c420a"
+checksum = "5be21190ff5d38e8b4a2d3b6a3ae57f612cc39c96e83cedeaf7abc338a8bac4a"
 
 [[package]]
 name = "type-map"

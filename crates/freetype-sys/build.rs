@@ -1,9 +1,8 @@
 use std::{env, path::PathBuf};
 
 fn main() {
-    let dst = cmake::Config::new("SDL")
-        .define("SDL_STATIC", "ON")
-        .define("SDL_SHARED", "OFF")
+    let dst = cmake::Config::new("freetype")
+        .define("DISABLE_FORCE_DEBUG_POSTFIX", "ON")
         .build();
 
     env::set_var(
@@ -11,7 +10,7 @@ fn main() {
         format!("{}/lib/pkgconfig", dst.display()),
     );
 
-    let pkg = pkg_config::probe_library("sdl3").unwrap();
+    let pkg = pkg_config::probe_library("freetype2").unwrap();
 
     let include_paths = pkg
         .include_paths
@@ -25,6 +24,7 @@ fn main() {
         // The input header we would like to generate
         // bindings for.
         .use_core()
+        // .derive_debug(false)
         .default_enum_style(bindgen::EnumVariation::ModuleConsts)
         .clang_args(include_paths)
         .header("wrapper.h")

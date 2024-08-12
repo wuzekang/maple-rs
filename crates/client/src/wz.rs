@@ -3,6 +3,7 @@ use image::DynamicImage;
 use indexmap::{Equivalent, IndexMap};
 use std::collections::{HashMap, VecDeque};
 use std::num::ParseIntError;
+use std::ops::Not;
 use std::sync::{Arc, Mutex, OnceLock};
 use wz_reader::node::Error;
 use wz_reader::{property::Vector2D, WzNodeArc};

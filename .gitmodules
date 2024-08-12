@@ -1,3 +1,9 @@
 [submodule "crates/wz-reader-rs"]
 	path = crates/wz-reader-rs
 	url = https://github.com/wuzekang/wz-reader-rs.git
+[submodule "crates/freetype-sys/freetype"]
+	path = crates/freetype-sys/freetype
+	url = https://github.com/freetype/freetype.git
+[submodule "crates/sdl-sys/SDL"]
+	path = crates/sdl-sys/SDL
+	url = https://github.com/libsdl-org/SDL.git
