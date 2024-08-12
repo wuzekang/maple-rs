@@ -1,16 +1,34 @@
 use character::{Character, ZMap};
-use glam::{vec2, Vec2};
-use sdl::SpriteRenderer;
-use sdl_sys::{
-    self, SDL_CreateRenderer, SDL_CreateWindow, SDL_Delay, SDL_Event, SDL_EventType,
-    SDL_GetKeyboardState, SDL_GetTicks, SDL_PollEvent, SDL_RenderClear, SDL_RenderPresent,
-    SDL_Scancode::{
-        self, SDL_SCANCODE_DOWN, SDL_SCANCODE_LEFT, SDL_SCANCODE_RIGHT, SDL_SCANCODE_UP,
+use glam::{vec2, Vec2, Vec2Swizzles};
+use image::DynamicImage;
+use map::world_map::WorldMap;
+use sdl::{NineGridTexture, Renderer, Surface, Texture};
+use sdl3_sys::{
+    events::{SDL_Event, SDL_EventType, SDL_PollEvent},
+    keyboard::SDL_GetKeyboardState,
+    mouse::SDL_GetMouseState,
+    rect::SDL_FRect,
+    render::{
+        SDL_CreateRenderer, SDL_RenderClear, SDL_RenderPresent, SDL_SetRenderDrawColor,
+        SDL_SetRenderVSync,
+        SDL_SetRenderScale,
+        SDL_Renderer
     },
-    SDL_SetRenderDrawColor, SDL_SetRenderVSync,
+    scancode::{SDL_Scancode, SDL_SCANCODE_DOWN},
+    timer::{SDL_Delay, SDL_GetTicks},
+    video::{SDL_CreateWindow, SDL_GetWindowPixelDensity, SDL_Window},
+    init::{SDL_Init,SDL_INIT_VIDEO}
 };
-
-use std::{error::Error, mem::MaybeUninit, sync::Arc};
+use slotmap::{DefaultKey, SlotMap};
+use sprite::Sprite;
+use std::{borrow::Borrow, error::Error, mem::MaybeUninit, sync::Arc};
+use wz::Node;
+use ui::{
+    taffy::prelude::*,
+    peniko::Color,
+    reactive::{RwSignal, SignalGet, SignalUpdate},
+    dynamic, fragment, view, Element, Fragment, Image, IntoElement, Root, Text,
+};
 
 mod character;
 mod layout;
@@ -74,13 +92,13 @@ impl PollEvent {
     }
 }
 
-impl Iterator for &mut PollEvent {
-    type Item = SDL_Event;
+impl<'a> Iterator for &'a mut PollEvent {
+    type Item = &'a SDL_Event;
 
     fn next(&mut self) -> Option<Self::Item> {
         unsafe {
-            if SDL_PollEvent(self.event.as_mut_ptr()) == 1 {
-                Some(self.event.assume_init())
+            if SDL_PollEvent(self.event.as_mut_ptr()) {
+                Some(&*self.event.as_ptr())
             } else {
                 None
             }
@@ -106,9 +124,9 @@ struct Player {
 }
 
 struct World {
-    window: *mut sdl_sys::SDL_Window,
-    renderer: *mut sdl_sys::SDL_Renderer,
-    sprite_renderer: SpriteRenderer,
+    window: *mut SDL_Window,
+    renderer: *mut SDL_Renderer,
+    sprite_renderer: Renderer,
     size: Vec2,
     dpr: f32,
     ticks: u64,
@@ -119,7 +137,7 @@ struct World {
 impl World {
     pub fn new() -> Self {
         unsafe {
-            sdl_sys::SDL_Init(sdl_sys::SDL_INIT_VIDEO);
+            SDL_Init(SDL_INIT_VIDEO);
         }
 
         // let size = vec2(1024.0, 768.0);
@@ -128,13 +146,13 @@ impl World {
             unsafe { SDL_CreateWindow(c"Maple RS".as_ptr(), size.x as i32, size.y as i32, 0x2000) };
         let renderer = unsafe { SDL_CreateRenderer(window, std::ptr::null()) };
 
-        let dpr = unsafe { sdl_sys::SDL_GetWindowPixelDensity(window) };
+        let dpr = unsafe { SDL_GetWindowPixelDensity(window) };
 
         unsafe {
-            sdl_sys::SDL_SetRenderScale(renderer, dpr, dpr);
+            SDL_SetRenderScale(renderer, dpr, dpr);
         }
 
-        let sprite_renderer = sdl::SpriteRenderer::new(dpr, renderer);
+        let sprite_renderer = sdl::Renderer::new(dpr, renderer);
 
         let ticks = unsafe { SDL_GetTicks() };
 
@@ -160,9 +178,173 @@ impl World {
     }
 }
 
+struct EventContext {
+    pub listeners: SlotMap<DefaultKey, fn(&SDL_Event) -> ()>,
+}
+
+impl EventContext {
+    pub fn new() -> Self {
+        Self {
+            listeners: SlotMap::new(),
+        }
+    }
+}
+
+struct WorldMapWindow {
+    open: bool,
+    world_map: WorldMap,
+    title: sprite::Sprite,
+
+    // btn_close: ui::Button,
+    map_image: Vec<Sprite>,
+
+    background: NineGridTexture,
+}
+
+impl WorldMapWindow {
+    pub fn new(world: &World, base: Node) -> Self {
+        let world_map_node = base.at_path("UI/UIWindow.img/WorldMap").unwrap();
+        let title: sprite::Sprite = world_map_node.get("title").into();
+        let border: Vec<Arc<DynamicImage>> = base
+            .at_path("UI/UIWindow.img/WorldMap/Border")
+            .unwrap()
+            .into();
+
+        let map_image: Vec<Sprite> = base
+            .at_path("Map/MapHelper.img/worldMap/mapImage")
+            .unwrap()
+            .into();
+
+        let world_map =
+            map::world_map::WorldMap::from(base.at_path("Map/WorldMap/WorldMap.img").unwrap());
+
+        // let btn_close = ui::Button::from(base.at_path("UI/Basic.img/BtClose").unwrap());
+
+        let surfaces = border
+            .into_iter()
+            .map(|item| item.into())
+            .collect::<Vec<Surface>>();
+
+        let background = sdl::NineGridTexture::new(
+            (
+                &surfaces[0],
+                &surfaces[1],
+                &surfaces[2],
+                &surfaces[3],
+                &surfaces[4],
+                &surfaces[5],
+                &surfaces[6],
+                &surfaces[7],
+            ),
+            world.renderer,
+        );
+
+        Self {
+            open: true,
+            world_map,
+            title,
+            // btn_close,
+            map_image,
+            background,
+        }
+        // let tooltip_bg: DynamicImage = image::load_from_memory(include_bytes!("./tooltip.png"))
+        //     .unwrap()
+        //     .into();
+
+        // let tooltip_tex = NineGridTexture {
+        //     texture: Texture::from_image(&tooltip_bg, world.renderer),
+        //     left_width: 4,
+        //     middle_width: 0,
+        //     right_width: 4,
+        //     top_height: 4,
+        //     middle_height: 0,
+        //     bottom_height: 4,
+        // };
+    }
+
+    pub fn render(&self, world: &mut World, mouse: Vec2) {
+        if !self.open {
+            return;
+        }
+
+        let tex = &self.background;
+        let content_size = vec2(640.0, 470.0);
+        let window_size = content_size + tex.border_size();
+        let window_offset = (world.size - window_size) / 2.0;
+        tex.draw(window_offset, window_size);
+
+        // let frame = &self.btn_close.normal.frames[0];
+        world.sprite_renderer.draw(
+            &self.title,
+            window_offset + vec2(tex.left_width as f32 + 4.0, 9.5),
+        );
+        // world.sprite_renderer.draw(
+        //     frame,
+        //     window_offset
+        //         + vec2(window_size.x, 0.0)
+        //         + vec2(-(tex.right_width as f32 + frame.image.width() as f32), 6.0),
+        // );
+
+        let content_position = window_offset
+            + vec2(tex.left_width as f32, tex.top_height as f32)
+            + (content_size / 2.0);
+
+        world
+            .sprite_renderer
+            .draw(&self.world_map.base_img, content_position);
+
+        for (_, item) in self.world_map.map_link.iter() {
+            let lt = content_position - item.link_img.origin;
+            let rb = lt + item.link_img.size;
+            if (mouse.cmpge(lt).all()) && mouse.cmplt(rb).all() {
+                let pt = mouse - lt;
+
+                let pixel = item
+                    .link_img
+                    .image
+                    .as_rgba8()
+                    .unwrap()
+                    .get_pixel(pt.x as u32, pt.y as u32);
+
+                if pixel.0[3] > 0 {
+                    world.sprite_renderer.draw(&item.link_img, content_position);
+                    break;
+                }
+            }
+
+            // let size = vec2(
+            //     item.link_img.image.width() as f32,
+            //     item.link_img.image.height() as f32,
+            // );
+            // world.sprite_renderer.render_rect(&SDL_FRect {
+            //     x: p.x,
+            //     y: p.y,
+            //     w: size.x,
+            //     h: size.y,
+            // })
+        }
+
+        for (_, item) in self.world_map.map_list.iter() {
+            // if let Some(path) = &item.path {
+            //     world.sprite_renderer.draw(path, content_position);
+            // }
+            let spot_image = &self.map_image[3];
+            world
+                .sprite_renderer
+                .draw(spot_image, content_position + item.spot);
+            // world.sprite_renderer.render_rect(&SDL_FRect {
+            //     x: item.spot.x + content_position.x,
+            //     y: item.spot.y + content_position.y,
+            //     w: 20.0,
+            //     h: 20.0,
+            // })
+        }
+    }
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
-    let node = wz::resolve_base().unwrap();
-    let mut map = map::Map::new(&node, "002000000").unwrap();
+    let base = wz::resolve_base().unwrap();
+    let mut map = map::Map::new(&base, "002000000").unwrap();
     // let mut map = map::Map::new(&node, "222020111").unwrap();
     let position = map.portals.iter().fold(None, |acc: Option<Vec2>, item| {
         if item.pn != "sp" {
@@ -178,7 +360,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             Some(item.position)
         }
     });
-    let z_map: Arc<ZMap> = Arc::new(node.at_path("zmap.img").unwrap().into());
+    let z_map: Arc<ZMap> = Arc::new(base.at_path("zmap.img").unwrap().into());
     let mut player = Player {
         avatar: character::Character::new(
             [
@@ -191,7 +373,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 "Face/00020000",
             ]
             .iter()
-            .map(|path| node.at_path(&format!("Character/{path}.img")).unwrap())
+            .map(|path| base.at_path(&format!("Character/{path}.img")).unwrap())
             .collect(),
             z_map,
         ),
@@ -200,10 +382,20 @@ fn main() -> Result<(), Box<dyn Error>> {
         speed: Vec2::ONE * 40.0,
         ..Default::default()
     };
+
     let mut world = World::new();
     let mut events = PollEvent::new();
+    let mut cx = EventContext::new();
+    let root = Root::new(ui_view, world.renderer);
+    cx.listeners.insert(|event| unsafe {
+        println!("l1 {:?}", event.r#type);
+    });
+    cx.listeners.insert(|event| unsafe {
+        println!("l2 {:?}", event.r#type);
+    });
     let state = unsafe { SDL_GetKeyboardState(std::ptr::null_mut() as *mut core::ffi::c_int) };
 
+    let world_map_window = WorldMapWindow::new(&world, base);
     unsafe {
         SDL_SetRenderVSync(world.renderer, 1);
 
@@ -215,43 +407,48 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                 let camera = &mut world.camera;
 
-                let pressed_left = *state.offset(SDL_SCANCODE_LEFT as isize) != 0;
-                let pressed_right = *state.offset(SDL_SCANCODE_RIGHT as isize) != 0;
-                let pressed_up = *state.offset(SDL_SCANCODE_UP as isize) != 0;
-                let pressed_down = *state.offset(SDL_SCANCODE_DOWN as isize) != 0;
+                let pressed_left = *state.offset(SDL_Scancode::LEFT.0 as isize);
+                let pressed_right = *state.offset(SDL_Scancode::RIGHT.0 as isize);
+                let pressed_up = *state.offset(SDL_Scancode::UP.0 as isize);
+                let pressed_down = *state.offset(SDL_Scancode::DOWN.0 as isize);
 
                 let prev = player.direction;
                 for event in &mut events {
-                    match event.type_ as SDL_EventType::Type {
-                        SDL_EventType::SDL_EVENT_QUIT => {
+                    root.dispatch_event(event);
+                    for (_, listener) in &cx.listeners {
+                        listener(event);
+                    }
+                    match SDL_EventType(event.r#type) {
+                        SDL_EventType::QUIT => {
                             exited = true;
                         }
-                        SDL_EventType::SDL_EVENT_KEY_DOWN => match event.key.scancode {
-                            SDL_Scancode::SDL_SCANCODE_LEFT => {
+                        SDL_EventType::KEY_DOWN => match event.key.scancode {
+                            SDL_Scancode::LEFT => {
                                 player.direction.x = -1.0;
                             }
-                            SDL_Scancode::SDL_SCANCODE_RIGHT => {
+                            SDL_Scancode::RIGHT => {
                                 player.direction.x = 1.0;
                             }
-                            SDL_Scancode::SDL_SCANCODE_UP => {
+                            SDL_Scancode::UP => {
                                 player.direction.y = -1.0;
                             }
-                            SDL_Scancode::SDL_SCANCODE_DOWN => {
+                            SDL_Scancode::DOWN => {
                                 player.direction.y = 1.0;
                             }
                             _ => {}
                         },
-                        SDL_EventType::SDL_EVENT_KEY_UP => match event.key.scancode {
-                            SDL_Scancode::SDL_SCANCODE_LEFT => {
+
+                        SDL_EventType::KEY_UP => match event.key.scancode {
+                            SDL_Scancode::LEFT => {
                                 player.direction.x = if pressed_right { 1.0 } else { 0.0 };
                             }
-                            SDL_Scancode::SDL_SCANCODE_RIGHT => {
+                            SDL_Scancode::RIGHT => {
                                 player.direction.x = if pressed_left { -1.0 } else { 0.0 };
                             }
-                            SDL_Scancode::SDL_SCANCODE_UP => {
+                            SDL_Scancode::UP => {
                                 player.direction.y = if pressed_down { 1.0 } else { 0.0 };
                             }
-                            SDL_Scancode::SDL_SCANCODE_DOWN => {
+                            SDL_Scancode::DOWN => {
                                 player.direction.y = if pressed_up { -1.0 } else { 0.0 };
                             }
                             _ => {}
@@ -266,21 +463,46 @@ fn main() -> Result<(), Box<dyn Error>> {
                     player.flip = !player.flip;
                 }
 
-                if prev.x == 0.0 && player.direction.x != 0.0 {
-                    player.avatar.set_action("walk1");
+                if player.foothold == 0 {
+                    player.avatar.set_action("jump");
+                    let prev = player.position;
+                    player.position += vec2(0.0, 0.5);
+                    for (i, fh) in map.footholds.iter() {
+                        if let Some(p) = intersect(&fh.start, &fh.end, &prev, &player.position) {
+                            println!("foothold: {p:?}");
+                            player.position = p;
+                            player.foothold = *i;
+                            player.avatar.set_action("stand1");
+                            break;
+                        }
+                    }
+                } else {
+                    let fh = map.footholds.get(&player.foothold).unwrap();
+
+                    if prev.x == 0.0 && player.direction.x != 0.0 {
+                        player.avatar.set_action("walk1");
+                    }
+
+                    if prev.x != 0.0 && player.direction.x == 0.0 {
+                        player.avatar.set_action("stand1");
+                    }
+
+                    let direction = player.direction;
+                    let speed = player.speed;
+                    player.position += direction * speed;
                 }
 
-                if prev.x != 0.0 && player.direction.x == 0.0 {
-                    player.avatar.set_action("stand1");
-                }
-
-                let direction = player.direction;
-                let speed = player.speed;
-                player.position += direction * speed;
                 camera.position = player.position - world.size / 2.0;
                 // camera.position = player.position;
             }
 
+            let mut mouse_x = MaybeUninit::<f32>::uninit();
+            let mut mouse_y = MaybeUninit::<f32>::uninit();
+            SDL_GetMouseState(mouse_x.as_mut_ptr(), mouse_y.as_mut_ptr());
+
+            let mouse = { vec2(mouse_x.assume_init() as f32, mouse_y.assume_init() as f32) };
+
+            root.layout();
             SDL_SetRenderDrawColor(world.renderer, 0, 0, 0, 255);
             SDL_RenderClear(world.renderer);
 
@@ -372,7 +594,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
 
                 // unsafe {
-                //     sdl_sys::SDL_RenderRect(
+                //     SDL_RenderRect(
                 //         renderer,
                 //         &SDL_FRect {
                 //             x: x - sprite.origin.x - world.camera.position.x,
@@ -463,24 +685,123 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
             }
 
-            // {
-            //     let sprite_renderer = &mut world.sprite_renderer;
-            //     for layer in &mut map.layers {
-            //         for item in &mut layer.objects {
-            //             for sprite in &item.sprites {
-            //                 sprite_renderer.draw_text(
-            //                     &format!("{}", sprite.path),
-            //                     item.position - world.camera.position,
-            //                 );
-            //             }
-            //         }
-            //     }
-            // }
+            {
+                let sprite_renderer = &mut world.sprite_renderer;
+                for layer in &mut map.layers {
+                    for item in &mut layer.objects {
+                        for sprite in &item.sprites {
+                            sprite_renderer.draw_text(
+                                &format!("{}", sprite.path),
+                                item.position - world.camera.position,
+                            );
+                        }
+                    }
+                }
+            }
 
+            world_map_window.render(&mut world, mouse);
+            // tooltip_tex.draw(vec2(50.0, 50.0), vec2(400.0, 400.0));
+            // SDL_RenderTexture(
+            //     world.renderer,
+            //     tex.texture,
+            //     std::ptr::null(),
+            //     &SDL_FRect {
+            //         x: 0.0,
+            //         y: 0.0,
+            //         w: tex.size.x,
+            //         h: tex.size.y,
+            //     },
+            // );
+
+            root.paint();
             SDL_RenderPresent(world.renderer);
             SDL_Delay(16);
         }
     }
 
     Ok(())
+}
+
+
+fn ui_view() -> impl IntoElement {
+    let height = RwSignal::new(100.0);
+    view((
+        dynamic(move || {
+            if height.get() > 50.0 {
+                view(()).style(|s| {
+                    s.width(length(10.0))
+                        .height(length(10.0))
+                        .background(Color::RED)
+                })
+            } else {
+                view(()).style(|s| {
+                    s.width(length(10.0))
+                        .height(length(20.0))
+                        .background(Color::GREEN)
+                })
+            }
+        }),
+        view((
+            view(()).style(|s| {
+                s.background(Color::RED)
+                    .flex_grow(1.0)
+                    .width(Dimension::Auto)
+                    .height(length(20.0))
+            }),
+            view(()).style(|s| {
+                s.background(Color::GREEN)
+                    .flex_grow(1.0)
+                    .width(Dimension::Auto)
+                    .height(length(20.0))
+            }),
+            Fragment::new((
+                view(()).style(|s| {
+                    s.background(Color::BLUE)
+                        .flex_grow(1.0)
+                        .width(Dimension::Auto)
+                        .height(length(20.0))
+                }),
+            )),
+        ))
+        .style(move |s| {
+            s.background(Color::BLACK)
+                .width(length(100.0))
+                .height(length(height.get()))
+        })
+        .on_click(move |event| match SDL_EventType(unsafe { event.r#type }) {
+            SDL_EventType::MOUSE_BUTTON_DOWN => {
+                height.set(if height.get() == 50.0 { 100.0 } else { 50.0 });
+            }
+            _ => {}
+        }),
+        view((
+            view(()).style(|s| {
+                s.width(length(100.0))
+                    .height(length(10.0))
+                    .background(Color::GREEN)
+            }),
+            view(()).style(|s| {
+                s.width(length(100.0))
+                    .height(length(10.0))
+                    .background(Color::BROWN)
+            }),
+            view(
+                Text::new(move || format!("ABCDEFG\nABCD\n{}", height.get()))
+                    .style(|s| s.color(Color::RED)),
+            )
+            .style(|s| {
+                s.flex_grow(1.0)
+                    .justify_content(AlignContent::Center)
+                    .align_items(AlignItems::Center)
+                    .background(Color::BLUE)
+            }),
+        ))
+        .style(|s| {
+            s.background(Color::PURPLE)
+                .width(length(100.0))
+                .height(length(100.0))
+                .flex_direction(FlexDirection::Column)
+        }),
+    ))
+    .style(|s| s.flex_direction(FlexDirection::Column))
 }

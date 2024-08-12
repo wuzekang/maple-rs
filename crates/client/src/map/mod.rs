@@ -7,6 +7,8 @@ use crate::sprite::{self, Sprite, SpriteAnimation};
 use crate::timer::Timer;
 use crate::wz::Node;
 
+pub mod world_map;
+
 pub struct MapHelper {
     pub pv: Vec<Sprite>,
 }

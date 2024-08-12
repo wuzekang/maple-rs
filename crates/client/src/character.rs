@@ -197,6 +197,9 @@ impl Character {
     }
 
     pub fn set_action(&mut self, action: &str) {
+        if self.action == action {
+            return;
+        }
         self.action = action.to_string();
         self.timer = Timer::new(
             self.slots["Bd"].variant[&self.action]
@@ -243,6 +246,7 @@ impl Character {
                     origin: item.origin + offset(&slot, &part, &item.map),
                     z: self.z_map.layers[&item.z],
                     delay: 0,
+                    size: Vec2::new(item.image.width() as f32, item.image.height() as f32),
                 })
             }
         }

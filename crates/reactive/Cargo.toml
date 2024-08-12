@@ -1,0 +1,7 @@
+[package]
+name = "reactive"
+edition = "2021"
+description = "A native Rust UI library with fine-grained reactivity"
+
+[dependencies]
+smallvec = "1.10.0"
