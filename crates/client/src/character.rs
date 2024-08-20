@@ -197,6 +197,9 @@ impl Character {
     }
 
     pub fn set_action(&mut self, action: &str) {
+        if self.action == action {
+            return;
+        }
         self.action = action.to_string();
         self.timer = Timer::new(
             self.slots["Bd"].variant[&self.action]
