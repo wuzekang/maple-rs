@@ -1,22 +1,23 @@
-use ab_glyph::FontVec;
-use glam::{vec2, Vec2, Vec4};
+use crate::sprite::Sprite;
+use glam::{vec2, Vec2};
 use image::DynamicImage;
 use sdl3_sys::{
-    blendmode::{SDL_BlendMode, SDL_BLENDMODE_BLEND},
     pixels::SDL_PixelFormat,
     rect::{SDL_FRect, SDL_Rect},
     render::{
-        SDL_CreateTexture, SDL_DestroyTexture, SDL_RenderFillRect, SDL_RenderRect,
-        SDL_RenderTexture9Grid, SDL_RenderTextureRotated, SDL_Renderer, SDL_SetRenderDrawColor,
-        SDL_SetTextureAlphaMod, SDL_SetTextureBlendMode, SDL_SetTextureScaleMode, SDL_Texture,
-        SDL_CreateTextureFromSurface,
-        SDL_TextureAccess, SDL_UpdateTexture, SDL_TEXTUREACCESS_STATIC,
+        SDL_CreateTexture, SDL_CreateTextureFromSurface, SDL_DestroyTexture,
+        SDL_RenderRect, SDL_RenderTexture9Grid, SDL_RenderTextureRotated,
+        SDL_Renderer, SDL_SetTextureAlphaMod, SDL_SetTextureScaleMode,
+        SDL_Texture,
+        SDL_TextureAccess, SDL_UpdateTexture,
     },
-    surface::{SDL_FlipMode, SDL_ScaleMode, SDL_DestroySurface, SDL_CreateSurfaceFrom, SDL_BlitSurface, SDL_CreateSurface, SDL_Surface},
+    surface::{SDL_BlitSurface, SDL_CreateSurface, SDL_CreateSurfaceFrom, SDL_DestroySurface, SDL_FlipMode, SDL_ScaleMode, SDL_Surface},
 };
-use std::{borrow::Borrow, collections::HashMap, sync::Arc};
-
-use crate::sprite::Sprite;
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::{collections::HashMap, sync::Arc};
+use ui::taffy::prelude::*;
+use ui::{Drawable, ViewId};
 
 pub struct Surface {
     pub surface: *mut SDL_Surface,
@@ -65,7 +66,7 @@ impl From<Arc<DynamicImage>> for Surface {
     fn from(value: Arc<DynamicImage>) -> Self {
         let w = value.width() as i32;
         let h = value.height() as i32;
-        let bytes = match value.borrow() {
+        let bytes = match &*value {
             DynamicImage::ImageRgba8(data) => data,
             _ => &value.clone().to_rgba8(),
         };
@@ -152,8 +153,9 @@ impl Drop for Texture {
     }
 }
 
+#[derive(Clone)]
 pub struct NineGridTexture {
-    pub texture: Texture,
+    pub texture: Rc<Texture>,
     pub left_width: i32,
     pub middle_width: i32,
     pub right_width: i32,
@@ -199,7 +201,7 @@ impl NineGridTexture {
         rb.blit(&dest, left_width + middle_width, top_height + middle_height);
 
         Self {
-            texture: Texture::from_surface(&dest, renderer),
+            texture: Rc::new(Texture::from_surface(&dest, renderer)),
             left_width,
             middle_width,
             right_width,
@@ -213,7 +215,24 @@ impl NineGridTexture {
         self.texture.ptr()
     }
 
-    pub fn draw(&self, offset: Vec2, size: Vec2) {
+    pub fn border_size(&self) -> Vec2 {
+        vec2(
+            (self.left_width + self.right_width) as f32,
+            (self.top_height + self.bottom_height) as f32,
+        )
+    }
+
+    pub fn border(&self) -> Rect<LengthPercentage> {
+        Rect{
+            left: length(self.left_width as f32),
+            right: length(self.right_width as f32),
+            top: length(self.top_height as f32),
+            bottom: length(self.bottom_height as f32),
+        }
+    }
+
+    pub fn render(&self, position: Vec2, size: Option<Vec2>) {
+        let size = size.unwrap_or(self.texture.size);
         unsafe {
             SDL_RenderTexture9Grid(
                 self.texture.renderer,
@@ -225,29 +244,39 @@ impl NineGridTexture {
                 self.bottom_height as f32,
                 1.0,
                 &SDL_FRect {
-                    x: offset.x,
-                    y: offset.y,
+                    x: position.x,
+                    y: position.y,
                     w: size.x,
                     h: size.y,
                 },
             );
         }
     }
+}
 
-    pub fn border_size(&self) -> Vec2 {
-        vec2(
-            (self.left_width + self.right_width) as f32,
-            (self.top_height + self.bottom_height) as f32,
-        )
+pub struct NineGridDrawable {
+    pub texture: NineGridTexture,
+}
+
+impl Drawable for NineGridDrawable {
+    fn draw(&self, id: ViewId) {
+        let layout = id.get_layout().unwrap();
+        let state = id.state();
+        let viewport = state.borrow().viewport;
+        let location = layout.location + viewport;
+        let size = layout.size;
+        self.texture.render(vec2(location.x, location.y), Some(vec2(size.width, size.height)));
+    }
+
+    fn size(&self) -> Vec2 {
+        self.texture.texture.size
     }
 }
 
 pub struct Renderer {
     dpr: f32,
-    font: FontVec,
     renderer: *mut SDL_Renderer,
-    textures: HashMap<*const DynamicImage, Arc<Texture>>,
-    text_textures: HashMap<String, Arc<Texture>>,
+    textures: RefCell<HashMap<*const DynamicImage, Arc<Texture>>>,
 }
 
 unsafe impl Send for Renderer {}
@@ -255,97 +284,32 @@ unsafe impl Sync for Renderer {}
 
 impl Renderer {
     pub fn new(dpr: f32, renderer: *mut SDL_Renderer) -> Self {
-        let font =
-            // FontRef::try_from_slice(include_bytes!("../../.././Data/WenQuanYiMicroHei.ttf"))?;
-        // FontVec::try_from_vec(include_bytes!("../../.././Data/SourceHanSerifSC-Regular.otf").to_vec()).unwrap();
-        FontVec::try_from_vec(include_bytes!("../../.././Data/simsun.ttc").to_vec()).unwrap();
-        // FontVec::try_from_vec(include_bytes!("../../.././Data/NSimSun.ttf").to_vec()).unwrap();
         Self {
             dpr,
-            font,
             renderer,
             textures: Default::default(),
-            text_textures: Default::default(),
         }
     }
 
-    pub fn texture(&mut self, image: &Arc<DynamicImage>) -> Arc<Texture> {
+    pub fn texture(&self, image: &Arc<DynamicImage>) -> Arc<Texture> {
         self.textures
+            .borrow_mut()
             .entry(Arc::as_ptr(image))
             .or_insert_with(|| Texture::from_image(image, self.renderer).into())
             .clone()
     }
 
-    pub fn draw(&mut self, sprite: &Sprite, position: Vec2) {
+    pub fn draw(&self, sprite: &Sprite, position: Vec2) {
         self.draw_flip(sprite, position, false);
     }
 
-    pub fn draw_text(&mut self, text: &str, position: Vec2) {
-        if text.is_empty() {
-            return;
-        }
-        let texture = self
-            .text_textures
-            .entry(text.to_string())
-            .or_insert_with(|| unsafe {
-                let image = crate::layout::draw_image(&self.font, 14.0 * self.dpr, text);
-
-                let text_texture = SDL_CreateTexture(
-                    self.renderer,
-                    SDL_PixelFormat::ABGR8888,
-                    SDL_TextureAccess::STATIC,
-                    image.width() as i32,
-                    image.height() as i32,
-                );
-                SDL_UpdateTexture(
-                    text_texture,
-                    std::ptr::null(),
-                    image.as_ptr() as *const core::ffi::c_void,
-                    image.width() as i32 * 4,
-                );
-                SDL_SetTextureScaleMode(text_texture, SDL_ScaleMode::NEAREST);
-                SDL_SetTextureBlendMode(text_texture, SDL_BLENDMODE_BLEND);
-
-                Texture {
-                    texture: text_texture,
-                    renderer: self.renderer,
-                    size: vec2(
-                        image.width() as f32 / self.dpr,
-                        image.height() as f32 / self.dpr,
-                    ),
-                }
-                .into()
-            })
-            .clone();
-        unsafe {
-            SDL_SetRenderDrawColor(self.renderer, 255, 255, 255, 255);
-            SDL_RenderFillRect(
-                self.renderer,
-                &SDL_FRect {
-                    x: position.x - 4.0,
-                    y: position.y - 2.0,
-                    w: texture.size.x + 8.0,
-                    h: texture.size.y + 4.0,
-                },
-            );
-        }
-        self.render_texture(
-            &texture,
-            position,
-            Vec2::ZERO,
-            255,
-            None,
-            SDL_FlipMode::NONE,
-        );
-    }
-
-    pub fn draw_flip(&mut self, sprite: &Sprite, position: Vec2, flip: bool) {
+    pub fn draw_flip(&self, sprite: &Sprite, position: Vec2, flip: bool) {
         let texture = self.texture(&sprite.image);
         self.render_texture(
             &texture,
             position,
             sprite.origin,
-            sprite.alpha,
+            sprite.alpha.get(),
             None,
             if flip {
                 SDL_FlipMode::HORIZONTAL

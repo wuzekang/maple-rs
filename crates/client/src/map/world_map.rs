@@ -5,7 +5,7 @@ use crate::{sprite::Sprite, wz::Node};
 
 pub struct Item {
     pub r#type: i32,
-    pub map_no: IndexMap<String, i32>,
+    pub map_no: Option<IndexMap<String, i32>>,
     pub spot: Vec2,
     pub title: Option<String>,
     pub desc: Option<String>,
@@ -16,7 +16,7 @@ impl From<Node> for Item {
     fn from(node: Node) -> Self {
         Self {
             r#type: node.get("type").into(),
-            map_no: node.get("mapNo").into(),
+            map_no: node.try_get("mapNo").map(Into::into),
             spot: node.get("spot").into(),
             title: node.try_get("title").map(Into::into),
             desc: node.try_get("desc").map(Into::into),
@@ -44,7 +44,7 @@ impl From<Node> for Link {
 pub struct WorldMap {
     pub base_img: Sprite,
     pub map_list: IndexMap<String, Item>,
-    pub map_link: IndexMap<String, Link>,
+    pub map_link: Option<IndexMap<String, Link>>,
 }
 
 impl From<Node> for WorldMap {
@@ -52,7 +52,7 @@ impl From<Node> for WorldMap {
         Self {
             base_img: node.at_path("BaseImg/0").unwrap().into(),
             map_list: node.get("MapList").into(),
-            map_link: node.get("MapLink").into(),
+            map_link: node.try_get("MapLink").map(Into::into),
         }
     }
 }

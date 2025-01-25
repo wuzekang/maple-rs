@@ -1,12 +1,10 @@
 use crate::{
-    element::Element,
-    runtime::RUNTIME,
-    sdl::Painter,
-    style::{Style, StyleBuilder},
-    view_id::ViewId,
+    element::Element, runtime::RUNTIME, sdl::Painter, style::StyleBuilder, view_id::ViewId,
 };
-use cosmic_text::Attrs;
+use cosmic_text::{Attrs, Metrics};
+use peniko::Color;
 use reactive::{create_effect, RwSignal, SignalUpdate, SignalWith};
+use std::fmt::Display;
 use taffy::{AvailableSpace, Size};
 
 pub struct Text {
@@ -14,7 +12,10 @@ pub struct Text {
     buffer: RwSignal<cosmic_text::Buffer>,
 }
 impl Text {
-    pub fn new<F: (Fn() -> String) + 'static>(f: F) -> Self {
+    pub fn new<S>(f: impl (Fn() -> S) + 'static) -> Self
+    where
+        S: Display + 'static,
+    {
         let id = ViewId::new();
         let buffer = RwSignal::new({
             RUNTIME.with_borrow_mut(|s| {
@@ -29,16 +30,16 @@ impl Text {
                 buffer.update(|buffer| {
                     buffer.set_text(
                         &mut s.font_system,
-                        &content,
+                        &content.to_string(),
                         Attrs::new(),
-                        cosmic_text::Shaping::Advanced,
+                        cosmic_text::Shaping::Basic,
                     );
-                    for line in &mut buffer.lines {
-                        line.set_align(Some(cosmic_text::Align::Center));
-                    }
-                    // TODO: layout
-                    buffer.set_wrap(&mut s.font_system, cosmic_text::Wrap::None);
-                    buffer.set_wrap(&mut s.font_system, cosmic_text::Wrap::Word);
+                    // for line in &mut buffer.lines {
+                    //     line.set_align(Some(cosmic_text::Align::Center));
+                    // }
+                    // // TODO: layout
+                    // buffer.set_wrap(&mut s.font_system, cosmic_text::Wrap::Word);
+                    // buffer.set_wrap(&mut s.font_system, cosmic_text::Wrap::None);
                 });
             })
         });
@@ -55,10 +56,7 @@ impl Text {
                 .borrow_mut()
                 .set_style(node, style.taffy_style.clone())
                 .unwrap();
-            state.borrow_mut().style = Style {
-                background: style.background,
-                color: style.color,
-            };
+            state.borrow_mut().style = style.style.clone();
         });
         self
     }
@@ -69,14 +67,19 @@ impl Element for Text {
         self.id
     }
 
-    fn paint(&self, cx: &Painter) {
+    fn paint(&self, ctx: &Painter) {
         let layout = self.id.get_layout().unwrap();
         let state = self.id.state();
         let viewport = state.borrow().viewport;
         let style = state.borrow().style.clone();
+
+        if style.background != Color::TRANSPARENT {
+            ctx.fill_rect(style.background, layout.location + viewport, layout.size);
+        }
+
         RUNTIME.with_borrow_mut(|s| {
             self.buffer.with_untracked(|buffer| {
-                cx.fill_text(
+                ctx.fill_text(
                     style.color(),
                     layout.location + viewport,
                     &mut s.swash_cache,
@@ -92,15 +95,23 @@ impl Element for Text {
         known_dimensions: Size<Option<f32>>,
         available_space: Size<AvailableSpace>,
     ) -> Size<f32> {
+        let id = self.id;
+
         let width_constraint = known_dimensions.width.or(match available_space.width {
             AvailableSpace::MinContent => Some(0.0),
             AvailableSpace::MaxContent => None,
             AvailableSpace::Definite(width) => Some(width),
         });
 
+        let style = id.state().borrow().style.clone();
+        let metrics = Metrics::new(
+            style.font_size.unwrap_or(20.0),
+            style.line_height.unwrap_or(24.0),
+        );
+
         RUNTIME.with_borrow_mut(|s| {
             self.buffer.update(|buffer| {
-                buffer.set_size(&mut s.font_system, width_constraint, None);
+                buffer.set_metrics_and_size(&mut s.font_system, metrics, width_constraint, None);
                 buffer.shape_until_scroll(&mut s.font_system, false);
             });
         });
@@ -118,4 +129,11 @@ impl Element for Text {
 
         taffy::Size { width, height }
     }
+}
+
+pub fn text<S>(f: impl (Fn() -> S) + 'static) -> Text
+where
+    S: Display + 'static,
+{
+    Text::new(f)
 }

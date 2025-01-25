@@ -3,7 +3,6 @@ use image::DynamicImage;
 use indexmap::{Equivalent, IndexMap};
 use std::collections::{HashMap, VecDeque};
 use std::num::ParseIntError;
-use std::ops::Not;
 use std::sync::{Arc, Mutex, OnceLock};
 use wz_reader::node::Error;
 use wz_reader::{property::Vector2D, WzNodeArc};
@@ -145,11 +144,20 @@ impl From<Node> for Vec2 {
 
 impl From<Node> for i32 {
     fn from(node: Node) -> i32 {
-        node.wz_node
-            .read()
-            .unwrap()
-            .try_as_int()
-            .unwrap()
+        let v = node.wz_node.read().unwrap();
+
+        v.try_as_int()
+            .map(|v| *v)
+            .unwrap_or_else(|| {
+                let v: i32 = v
+                    .try_as_string()
+                    .unwrap()
+                    .get_string()
+                    .unwrap()
+                    .parse()
+                    .unwrap();
+                v
+            })
             .to_owned()
     }
 }

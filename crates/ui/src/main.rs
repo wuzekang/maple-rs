@@ -88,8 +88,6 @@ fn counter_view() -> impl Element {
                 })
             }
         }),
-        Image::new(|| load_from_memory(include_bytes!("./img.png")).unwrap())
-            .style(|s| s.width(length(100.0))),
         view((
             view(()).style(|s| {
                 s.background(Color::RED)

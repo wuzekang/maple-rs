@@ -57,6 +57,12 @@ where
     run_initial_effect(effect);
 }
 
+pub fn on_cleanup(f: impl Fn() + 'static) {
+    let id = Id::next();
+    id.add_cleanup(f);
+    id.set_scope();
+}
+
 struct UpdaterEffect<T, I, C, U>
 where
     C: Fn(Option<T>) -> (I, T),

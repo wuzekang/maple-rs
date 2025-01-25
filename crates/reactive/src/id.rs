@@ -22,6 +22,17 @@ impl Id {
     pub(crate) fn add_signal(&self, signal: Signal) {
         RUNTIME.with(|runtime| runtime.signals.borrow_mut().insert(*self, signal));
     }
+    
+    pub(crate) fn add_cleanup(&self, f: impl Fn() + 'static) {
+        RUNTIME.with(|runtime| {
+            runtime
+                .cleanups
+                .borrow_mut()
+                .entry(*self)
+                .or_default()
+                .push(Box::new(f))
+        });
+    }
 
     /// Make this Id a child of the current Scope
     pub(crate) fn set_scope(&self) {
@@ -36,10 +47,11 @@ impl Id {
     /// Dispose the relevant resources that's linking to this Id, and the all the children
     /// and grandchildren.
     pub(crate) fn dispose(&self) {
-        if let Ok((children, signal)) = RUNTIME.try_with(|runtime| {
+        if let Ok((children, signal, cleanup)) = RUNTIME.try_with(|runtime| {
             (
                 runtime.children.borrow_mut().remove(self),
                 runtime.signals.borrow_mut().remove(self),
+                runtime.cleanups.borrow_mut().remove(self),
             )
         }) {
             if let Some(children) = children {
@@ -51,6 +63,12 @@ impl Id {
             if let Some(signal) = signal {
                 for (_, effect) in signal.subscribers() {
                     observer_clean_up(&effect);
+                }
+            }
+
+            if let Some(cleanup) = cleanup {
+                for callback in cleanup {
+                    callback();
                 }
             }
         }

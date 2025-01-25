@@ -240,7 +240,7 @@ impl Character {
                 frame.push(Sprite {
                     a0: 0,
                     a1: 0,
-                    alpha: 255,
+                    alpha: 255.into(),
                     path: "".to_string(),
                     image: item.image.clone(),
                     origin: item.origin + offset(&slot, &part, &item.map),

@@ -1,8 +1,5 @@
 use crate::{view_id::ViewId, view_tuple::ViewTuple};
-use reactive::{
-    as_child_of_current_scope, create_effect, create_memo, create_signal, Memo, SignalGet,
-    SignalRead, SignalUpdate,
-};
+use reactive::{as_child_of_current_scope, create_effect, create_memo, create_rw_signal, create_signal, Memo, ReadSignal, Scope, SignalGet, SignalRead, SignalUpdate};
 
 pub fn create_children_effect<VT: ViewTuple, F: Fn() -> VT + 'static>(id: ViewId, f: F) {
     create_effect(move |_| {
@@ -17,12 +14,11 @@ pub fn create_children_effect<VT: ViewTuple, F: Fn() -> VT + 'static>(id: ViewId
 }
 
 pub struct Dynamic {
-    pub signal: Memo<Vec<ViewId>>,
+    pub signal: ReadSignal<Vec<ViewId>>,
 }
 
 impl Dynamic {
     pub fn new<VT: ViewTuple, F: Fn() -> VT + 'static>(view_fn: F) -> Self {
-        let id = ViewId::new();
         let view_fn = Box::new(as_child_of_current_scope(move |_: ()| {
             view_fn()
                 .into_vec()
@@ -31,19 +27,20 @@ impl Dynamic {
                 .flatten()
                 .collect::<Vec<_>>()
         }));
-        let (getter, setter) = create_signal(view_fn(()));
-        let reader = getter.read_untracked();
-        create_effect(move |_| {
-            reader.borrow().1.dispose();
-            for child in id.children() {
-                child.remove();
+
+        let (getter, setter) = create_signal(vec![]);
+
+        create_effect(move |prev: Option<Scope>| {
+            if let Some(scope) = prev {
+                scope.dispose();
             }
-            setter.set(view_fn(()));
+
+            let (vec, scope) = view_fn(());
+            setter.set(vec);
+            scope
         });
 
-        let signal = create_memo(move |_| getter.get().0);
-
-        Self { signal }
+        Self { signal: getter }
     }
 }
 

@@ -1,32 +1,19 @@
-use crate::dynamic::dynamic;
-use crate::image::Image;
-use crate::view::view;
-use ::image::load_from_memory;
 use crate::element::{Element, IntoElement};
-use crate::fragment::Fragment;
-use glam::{vec2, Vec2};
-use peniko::Color;
-use reactive::{RwSignal, SignalGet, SignalUpdate};
 use crate::runtime::RUNTIME;
-use crate::sdl::{Painter, PollEvent};
+use crate::sdl::Painter;
+use crate::view::View;
+use crate::view_id::ViewId;
+use glam::{vec2, Vec2};
+use reactive::{provide_context, RwSignal, SignalGet, SignalUpdate};
 use sdl3_sys::{
     events::{SDL_Event, SDL_EventType},
-    init::{SDL_Init, SDL_Quit, SDL_INIT_VIDEO},
-    render::{
-        SDL_CreateRenderer, SDL_GetRenderWindow, SDL_RenderClear, SDL_RenderPresent, SDL_Renderer,
-        SDL_SetRenderDrawColor, SDL_SetRenderScale, SDL_SetRenderVSync,
-        SDL_RENDERER_VSYNC_ADAPTIVE,
-    },
-    timer::SDL_Delay,
-    video::{SDL_CreateWindow, SDL_GetWindowPixelDensity, SDL_GetWindowSize},
+    render::{SDL_GetRenderWindow, SDL_Renderer},
+    video::SDL_GetWindowSize,
 };
 use taffy::{
     prelude::{length, TaffyMaxContent},
-    Dimension, NodeId, Point, Size, TaffyTree,
+    NodeId, Point, Size, TaffyTree,
 };
-use crate::text::Text;
-use crate::view::View;
-use crate::view_id::ViewId;
 
 fn compute_layout(taffy: &mut TaffyTree, parent: NodeId, viewport: Point<f32>) {
     let children = taffy.children(parent).unwrap();
@@ -58,8 +45,14 @@ impl Root {
             SDL_GetWindowSize(window, &mut x, &mut y);
             vec2(x as f32, y as f32)
         });
-        let view =
-            view(f()).style(move |s| s.width(length(size.get().x)).height(length(size.get().y)));
+
+        let id = ViewId::new();
+        provide_context(renderer);
+        provide_context(id);
+
+        let view = View::new(id, f())
+            .style(move |s| s.width(length(size.get().x)).height(length(size.get().y)));
+
         Self {
             view,
             size,

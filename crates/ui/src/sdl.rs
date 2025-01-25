@@ -16,6 +16,7 @@ use sdl3_sys::{
     surface::{SDL_FlipMode, SDL_ScaleMode},
 };
 use std::{cell::RefCell, collections::HashMap, mem::MaybeUninit};
+use crate::{Drawable, ViewId};
 
 pub struct PollEvent {
     event: MaybeUninit<SDL_Event>,
@@ -54,7 +55,9 @@ struct TextTexture {
 pub struct ImageTexture {
     pub texture: *mut SDL_Texture,
     pub renderer: *mut SDL_Renderer,
-    pub size: glam::Vec2,
+    pub size: Vec2,
+    pub flip: SDL_FlipMode,
+    pub alpha: u8,
 }
 
 impl Drop for ImageTexture {
@@ -93,31 +96,36 @@ impl ImageTexture {
             texture,
             renderer,
             size: vec2(image.width() as f32, image.height() as f32),
+            flip: SDL_FlipMode::NONE,
+            alpha: 255,
         }
     }
+}
 
-    pub fn draw(
-        &self,
-        position: Vec2,
-        origin: Vec2,
-        alpha: i32,
-        size: Option<Vec2>,
-        flip: SDL_FlipMode,
-    ) {
-        let size = size.unwrap_or(self.size);
+impl Drawable for ImageTexture {
+    fn draw(&self, id: ViewId) {
+        let layout = id.get_layout().unwrap();
+        let state = id.state();
+        let viewport = state.borrow().viewport;
+        let location = layout.location + viewport;
+        let size = layout.size;
+        let position = vec2(location.x, location.y);
+        let size = vec2(size.width, size.height);
+        let origin = vec2(0.0,0.0);
+
         unsafe {
-            SDL_SetTextureAlphaMod(self.texture, alpha as u8);
+            SDL_SetTextureAlphaMod(self.texture, self.alpha);
             SDL_RenderTextureRotated(
                 self.renderer,
                 self.texture,
                 std::ptr::null(),
                 &SDL_FRect {
-                    x: if flip == SDL_FlipMode::HORIZONTAL {
+                    x: if self.flip == SDL_FlipMode::HORIZONTAL {
                         position.x - (self.size.x - origin.x)
                     } else {
                         position.x - origin.x
                     },
-                    y: if flip == SDL_FlipMode::VERTICAL {
+                    y: if self.flip == SDL_FlipMode::VERTICAL {
                         position.y - (self.size.y - origin.y)
                     } else {
                         position.y - origin.y
@@ -127,9 +135,13 @@ impl ImageTexture {
                 },
                 0.0,
                 std::ptr::null(),
-                flip,
+                self.flip,
             );
         }
+    }
+
+    fn size(&self) -> Vec2 {
+        self.size
     }
 }
 
@@ -159,10 +171,6 @@ impl Painter {
                 } as *const SDL_FRect,
             )
         };
-    }
-
-    pub fn create_image_texture(&self, image: &DynamicImage) -> ImageTexture {
-        ImageTexture::new(self.renderer, image)
     }
 
     pub fn fill_text(

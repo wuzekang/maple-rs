@@ -8,14 +8,7 @@ use taffy::{AvailableSpace, Size};
 
 pub trait Element {
     fn id(&self) -> ViewId;
-    // fn layout(&self) {
-    //     let id = self.id();
-    //     let node = id.state().borrow().node;
-    //     id.taffy().borrow_mut().add_child(parent, node).unwrap();
-    //     for child in id.children() {
-    //         child.element().borrow().layout(node);
-    //     }
-    // }
+
     fn paint(&self, cx: &Painter) {
         for child in self.id().children() {
             child.element().borrow().paint(cx);
@@ -61,7 +54,7 @@ impl IntoElement for Fragment {
 }
 
 impl IntoElement for Dynamic {
-    type V = Memo<Vec<ViewId>>;
+    type V = ReadSignal<Vec<ViewId>>;
     fn into_element(self) -> Self::V {
         self.signal
     }
@@ -102,6 +95,6 @@ impl<T: IntoElement + 'static> IntoElement for Vec<T> {
 impl IntoElement for i32 {
     type V = ReadSignal<Vec<ViewId>>;
     fn into_element(self) -> Self::V {
-        Text::new(move || self.to_string()).into_element()
+        Text::new(move || self).into_element()
     }
 }

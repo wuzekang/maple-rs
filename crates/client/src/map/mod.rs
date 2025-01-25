@@ -1,10 +1,13 @@
+use std::cell::RefCell;
 use glam::{vec2, Vec2};
 use std::collections::HashMap;
+use std::rc::Rc;
 use wz_reader::node::Error;
 
 use crate::npc::Npc;
 use crate::sprite::{self, Sprite, SpriteAnimation};
 use crate::timer::Timer;
+use crate::{map, Context};
 use crate::wz::Node;
 
 pub mod world_map;
@@ -133,7 +136,7 @@ pub struct MapBackground {
     pub cx: i32,
     pub cy: i32,
     pub a: i32,
-    pub sprite: Drawable,
+    pub sprite: BackgroundSprite,
     pub offset_x: f32,
     pub offset_y: f32,
 }
@@ -166,9 +169,9 @@ impl From<Node> for MapLife {
     }
 }
 
-pub enum Drawable {
-    Sprite(sprite::Sprite),
-    SpriteAnimation(sprite::SpriteAnimation),
+pub enum BackgroundSprite {
+    Sprite(Sprite),
+    SpriteAnimation(SpriteAnimation),
 }
 
 impl MapBackground {
@@ -195,9 +198,9 @@ impl MapBackground {
         let y = i32::from(node.get("y")) as f32;
         let background = Self {
             sprite: if ani == 0 {
-                Drawable::Sprite(Sprite::from(back_node))
+                BackgroundSprite::Sprite(Sprite::from(back_node))
             } else {
-                Drawable::SpriteAnimation(SpriteAnimation::from(back_node))
+                BackgroundSprite::SpriteAnimation(SpriteAnimation::from(back_node))
             },
             offset_x: x,
             offset_y: y,
@@ -367,4 +370,112 @@ impl Map {
             helper,
         })
     }
+}
+
+
+
+fn draw_back(world: &Rc<RefCell<Context>>, item: &mut map::MapBackground) {
+    let delta = world.borrow().delta;
+    let camera_position = world.borrow().camera.position.clone();
+    let size = world.borrow().size;
+    let sprite_renderer = &world.borrow().sprite_renderer;
+    let offset = camera_position + size / 2.0;
+
+    match item.r#type {
+        4 | 6 => {
+            item.offset_x += item.rx as f32 * 5.0 * delta / 1000.0;
+            item.offset_y = item.y + offset.y * (item.ry + 100) as f32 / 100.0;
+        }
+        5 | 7 => {
+            item.offset_x = item.x + offset.x * (item.rx + 100) as f32 / 100.0;
+            item.offset_y += item.ry as f32 * 5.0 * delta / 1000.0;
+        }
+        _ => {
+            item.offset_x = item.x + offset.x * (item.rx + 100) as f32 / 100.0;
+            item.offset_y = item.y + offset.y * (item.ry + 100) as f32 / 100.0;
+        }
+    }
+
+    let sprite = match &mut item.sprite {
+        map::BackgroundSprite::Sprite(sprite) => sprite,
+        map::BackgroundSprite::SpriteAnimation(animation) => animation.tick(delta),
+    };
+    let w = sprite.image.width() as f32;
+    let h = sprite.image.height() as f32;
+    let cw = if item.cx > 0 { item.cx as f32 } else { w };
+    let ch = if item.cy > 0 { item.cy as f32 } else { h };
+
+    let x = item.offset_x;
+    let y = item.offset_y;
+    let lb = x - sprite.origin.x;
+    let rb = lb + w;
+    let tb = y - sprite.origin.y;
+    let bb = tb + h;
+
+    let hs = f32::ceil((camera_position.x - rb) / cw) as i32;
+    let he = f32::ceil((camera_position.x + size.x - rb) / cw) as i32 + 1;
+
+    let vs = f32::ceil((camera_position.y - bb) / ch) as i32;
+    let ve = f32::ceil((camera_position.y + size.y - bb) / ch) as i32 + 1;
+
+    match item.r#type {
+        1 | 4 => {
+            for i in hs..he {
+                sprite_renderer.draw_flip(
+                    sprite,
+                    vec2(x + i as f32 * cw, y) - camera_position,
+                    item.flip,
+                );
+            }
+        }
+        2 | 5 => {
+            for i in vs..ve {
+                sprite_renderer.draw_flip(
+                    sprite,
+                    vec2(x, y + i as f32 * ch) - camera_position,
+                    item.flip,
+                );
+            }
+        }
+        3 | 6 | 7 => {
+            for i in vs..ve {
+                for j in hs..he {
+                    sprite_renderer.draw_flip(
+                        sprite,
+                        vec2(x + j as f32 * cw, y + i as f32 * ch)
+                            - camera_position,
+                        item.flip,
+                    );
+                }
+            }
+        }
+        _ => {
+            sprite_renderer.draw_flip(
+                sprite,
+                vec2(x, y) - camera_position,
+                item.flip,
+            );
+        }
+    }
+
+    // unsafe {
+    //     SDL_RenderRect(
+    //         renderer,
+    //         &SDL_FRect {
+    //             x: x - sprite.origin.x - world.camera.position.x,
+    //             y: y - sprite.origin.y - world.camera.position.y,
+    //             w,
+    //             h,
+    //         },
+    //     );
+    // }
+    // sprite_renderer.draw(
+    //     &sprite.image,
+    //     sprite.origin,
+    //     vec2(x as f32, y as f32) - world.camera.position,
+    // );
+
+}
+pub fn background_update_system(world: &mut hecs::World) {
+
 }
