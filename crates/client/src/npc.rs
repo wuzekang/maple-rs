@@ -3,13 +3,13 @@ use std::collections::HashMap;
 use crate::{sprite::SpriteAnimation, wz::Node};
 
 pub struct NPCInfo {
-    pub speak: HashMap<String, String>,
+    pub speak: Option<HashMap<String, String>>,
 }
 
 impl From<Node> for NPCInfo {
     fn from(node: Node) -> Self {
         Self {
-            speak: node.get("speak").into(),
+            speak: node.try_get("speak").map(Into::into),
         }
     }
 }

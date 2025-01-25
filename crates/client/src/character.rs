@@ -7,6 +7,7 @@ use wz_reader::WzNodeCast;
 
 use crate::sprite::Sprite;
 use crate::wz::Node;
+use crate::timer::Timer;
 
 #[derive(Debug)]
 pub struct AvatarFramePart {
@@ -125,38 +126,7 @@ impl From<Node> for AvatarPartInfo {
         }
     }
 }
-#[derive(Debug, Default)]
-pub struct Timer {
-    elapsed: f32,
-    intervals: Vec<f32>,
-    total: f32,
-    pub index: usize,
-}
 
-impl Timer {
-    pub fn new(intervals: Vec<f32>) -> Self {
-        Self {
-            total: intervals.iter().sum(),
-            elapsed: 0.0,
-            intervals,
-            index: 0,
-        }
-    }
-
-    pub fn tick(&mut self, delta: f32) -> bool {
-        if self.intervals.is_empty() || self.total == 0.0 {
-            return false;
-        }
-        let prev = self.index;
-        self.elapsed += delta;
-        self.elapsed %= self.total;
-        while self.elapsed >= self.intervals[self.index] {
-            self.elapsed -= self.intervals[self.index];
-            self.index = (self.index + 1) % self.intervals.len();
-        }
-        self.index != prev
-    }
-}
 #[derive(Default)]
 pub struct Character {
     pub slots: HashMap<String, AvatarPart>,
@@ -192,7 +162,7 @@ impl Character {
         self.slots.insert(part.info.slot.clone(), part);
     }
 
-    pub fn tick(&mut self, delta: f32) -> bool {
+    pub fn tick(&self, delta: f32) -> bool {
         self.timer.tick(delta)
     }
 
@@ -212,7 +182,7 @@ impl Character {
     pub fn frame(&self) -> Vec<Sprite> {
         let action = &self.action;
         let emotion = &self.emotion;
-        let index = self.timer.index;
+        let index = self.timer.index.get();
 
         let body = &self.slots["Bd"].variant[action][index].parts["body"].map;
         let head = &self.slots["Hd"].variant[action][index].parts["head"].map;

@@ -1,11 +1,12 @@
+use crate::scene::{Camera, MainScene, EventEmitter};
 use crate::map::world_map::WorldMap;
 use crate::sdl::{NineGridDrawable, Surface};
 use crate::sprite::Sprite;
-use crate::{map, sdl, Camera, WzBase};
+use crate::{map, sdl, WzBase};
 use glam::vec2;
 use image::DynamicImage;
-use sdl3_sys::events::SDL_EventType;
 use sdl3_sys::everything::SDL_Renderer;
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 use ui::event::Interactive;
@@ -15,21 +16,42 @@ use ui::reactive::{
 };
 use ui::taffy::prelude::{length, percent};
 use ui::taffy::{AlignItems, FlexDirection, JustifyContent, Position};
-use ui::{dynamic, fragment, text, view, Image, ImageTexture, IntoElement, ViewId};
+use ui::{dynamic, fragment, text, view, Drawable, Image, ImageTexture, IntoElement, ViewId};
 
 pub fn ui_view() -> impl IntoElement {
     let open = RwSignal::new(true);
+    let current_map = RwSignal::new("002000000".to_string());
 
-    fragment((map_scene(), world_map_window(open)))
+    fragment((
+        dynamic(move || map_scene(&current_map.get())),
+        world_map_window(open, current_map),
+    ))
 }
 
-pub fn map_scene() -> impl IntoElement {
+pub fn map_scene(map_name: &str) -> impl IntoElement {
     let WzBase { node: base } = use_context().unwrap();
-    let map::Map {
-        layers,
-        ..
-    } = map::Map::new(&base, "002000000").unwrap();
-    let camera_signal: RwSignal<Camera> = use_context().unwrap();
+    let map::Map { layers, .. } = map::Map::new(&base, map_name).unwrap();
+    let window = use_context().unwrap();
+    let renderer = use_context().unwrap();
+    let camera_signal = create_rw_signal(Camera::default());
+    let size = vec2(800.0, 600.0);
+
+    let map_scene_drawable: Rc<RefCell<Box<dyn Drawable>>> = Rc::new(RefCell::new(Box::new(
+        MainScene::new(window, renderer, size, map_name, camera_signal),
+    )));
+
+    let update_event: EventEmitter = use_context().unwrap();
+
+    let key = update_event.on({
+        let d = map_scene_drawable.clone();
+        move || {
+            d.borrow_mut().update();
+        }
+    });
+
+    on_cleanup(move || {
+        update_event.off(key);
+    });
 
     let mut texts = vec![];
     for layer in &layers {
@@ -50,7 +72,7 @@ pub fn map_scene() -> impl IntoElement {
         }
     }
 
-    view((fragment(texts),)).style(move |s| {
+    view((Image::new(map_scene_drawable), fragment(texts))).style(move |s| {
         let camera = camera_signal.get();
         s.position(Position::Absolute)
             .width(percent(1.0))
@@ -60,16 +82,16 @@ pub fn map_scene() -> impl IntoElement {
     })
 }
 
-pub fn world_map_window(open: RwSignal<bool>) -> impl IntoElement {
+pub fn world_map_window(open: RwSignal<bool>, current_map: RwSignal<String>) -> impl IntoElement {
     let root = use_context::<ViewId>().unwrap();
-    let remove = root.add_event_listener(
-        SDL_EventType::KEY_DOWN,
-        Box::new(move |event| {
-            if unsafe { event.event.key.scancode } == sdl3_sys::scancode::SDL_SCANCODE_W {
-                open.set(!open.get());
-            }
-        }),
-    );
+    let remove = root.add_event_listener(Box::new(move |event| {
+        if unsafe { event.event.r#type } != sdl3_sys::events::SDL_EventType::KEY_DOWN.0 {
+            return;
+        }
+        if unsafe { event.event.key.scancode } == sdl3_sys::scancode::SDL_SCANCODE_W {
+            open.set(!open.get());
+        }
+    }));
     on_cleanup(move || {
         remove();
     });
@@ -135,6 +157,7 @@ pub fn world_map_window(open: RwSignal<bool>) -> impl IntoElement {
                         let spot_type = item.r#type as usize;
                         let origin = map_image.get_untracked()[spot_type].origin;
                         let position = vec2(item.spot.x, item.spot.y) - origin + content_size / 2.0;
+                        let map_no = item.map_no.clone();
                         Image::new(ImageTexture::new(
                             renderer,
                             &map_image.get_untracked()[spot_type].image,
@@ -143,6 +166,13 @@ pub fn world_map_window(open: RwSignal<bool>) -> impl IntoElement {
                             s.position(Position::Absolute)
                                 .margin_left(length(position.x))
                                 .margin_top(length(position.y))
+                        })
+                        .on_click(move |_| {
+                            if let Some(map_no) = map_no.as_ref() {
+                                if map_no.len() == 1 {
+                                    current_map.set(format!("{:0>9}", map_no["0"]))
+                                }
+                            }
                         })
                     })
                     .collect::<Vec<_>>()

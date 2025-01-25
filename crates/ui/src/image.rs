@@ -1,4 +1,4 @@
-use crate::event::Interactive;
+use crate::event::{Event, Interactive};
 use crate::{
     element::Element,
     sdl::{ImageTexture, Painter},
@@ -22,6 +22,7 @@ pub trait Drawable {
     fn draw(&self, id: ViewId);
     fn size(&self) -> Vec2;
     fn update(&mut self) {}
+    fn event(&mut self, event: &Event) {}
 }
 
 pub trait IntoDrawable: Sized {
@@ -46,6 +47,12 @@ impl<T: Drawable + 'static> IntoDrawable for T {
     }
 }
 
+impl IntoDrawable for Rc<RefCell<Box<dyn Drawable>>> {
+    fn into_drawable(self) -> Rc<RefCell<Box<dyn Drawable>>> {
+        self
+    }
+}
+
 pub struct Image {
     id: ViewId,
     state: Rc<RefCell<Box<dyn Drawable>>>,
@@ -53,9 +60,14 @@ pub struct Image {
 impl Image {
     pub fn new(image: impl IntoDrawable) -> Self {
         let id = ViewId::new();
+        let state = image.into_drawable();
+        let s = state.clone();
+        let _ = id.add_event_listener(Box::new(move |event| {
+            s.borrow_mut().event(&event);
+        }));
         Self {
             id,
-            state: image.into_drawable(),
+            state,
         }
     }
 
@@ -81,7 +93,6 @@ impl Element for Image {
     }
 
     fn paint(&self, cx: &Painter) {
-        self.state.borrow_mut().update();
         self.state.borrow().draw(self.id);
     }
 

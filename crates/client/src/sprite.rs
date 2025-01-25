@@ -1,10 +1,9 @@
-use std::cell::Cell;
-use glam::{vec2, Vec2};
-use image::DynamicImage;
-use std::sync::Arc;
-
 use crate::timer::Timer;
 use crate::wz::Node;
+use glam::{vec2, Vec2};
+use image::DynamicImage;
+use std::cell::Cell;
+use std::sync::Arc;
 
 pub struct Sprite {
     pub path: String,
@@ -34,11 +33,13 @@ impl From<Node> for SpriteAnimation {
 }
 
 impl SpriteAnimation {
-    pub fn tick(&mut self, delta: f32) -> &Sprite {
+    pub fn tick(&self, delta: f32) -> &Sprite {
         self.timer.tick(delta);
-        let sprite = &mut self.frames[self.timer.index.get()];
+        let sprite = &self.frames[self.timer.index.get()];
         let p = self.timer.progress();
-        *sprite.alpha.get_mut() = ((1.0 - p) * sprite.a0 as f32 + p * sprite.a1 as f32) as i32;
+        sprite
+            .alpha
+            .set(((1.0 - p) * sprite.a0 as f32 + p * sprite.a1 as f32) as i32);
         sprite
     }
 }
