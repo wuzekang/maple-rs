@@ -46,7 +46,7 @@ pub trait Interactive: Sized + Element {
     {
         let event_type = event_type.0.clone();
         let _ = self.id().add_event_listener(Box::new(move |e| {
-            if unsafe{e.event.r#type} == event_type {
+            if unsafe { e.event.r#type } == event_type {
                 f(e)
             }
         }));

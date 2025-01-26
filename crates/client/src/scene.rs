@@ -321,6 +321,10 @@ fn player_move(context: &mut MainScene) {
             player.avatar.set_action("walk1");
         }
 
+        if player.direction.y > 0.0 {
+            player.avatar.set_action("prone");
+        }
+
         let direction = player.direction;
         let speed = player.speed;
         player.position += direction * speed;

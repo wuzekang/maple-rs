@@ -1,7 +1,7 @@
 use crate::{
     element::Element, runtime::RUNTIME, sdl::Painter, style::StyleBuilder, view_id::ViewId,
 };
-use cosmic_text::{Attrs, Metrics};
+use cosmic_text::{Attrs, Family, Metrics};
 use peniko::Color;
 use reactive::{create_effect, RwSignal, SignalUpdate, SignalWith};
 use std::fmt::Display;
@@ -28,10 +28,11 @@ impl Text {
             let content = f();
             RUNTIME.with_borrow_mut(move |s| {
                 buffer.update(|buffer| {
+                    let len = content.to_string().len();
                     buffer.set_text(
                         &mut s.font_system,
                         &content.to_string(),
-                        Attrs::new(),
+                        Attrs::new().family(Family::Name("SimSun")),
                         cosmic_text::Shaping::Basic,
                     );
                     // for line in &mut buffer.lines {
@@ -73,15 +74,18 @@ impl Element for Text {
         let viewport = state.borrow().viewport;
         let style = state.borrow().style.clone();
 
+        let location = layout.location + viewport;
+        let size = layout.size;
+
         if style.background != Color::TRANSPARENT {
-            ctx.fill_rect(style.background, layout.location + viewport, layout.size);
+            ctx.fill_rect(style.background, location, size);
         }
 
         RUNTIME.with_borrow_mut(|s| {
             self.buffer.with_untracked(|buffer| {
                 ctx.fill_text(
                     style.color(),
-                    layout.location + viewport,
+                    location,
                     &mut s.swash_cache,
                     &mut s.font_system,
                     buffer,

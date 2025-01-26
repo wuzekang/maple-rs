@@ -1,5 +1,5 @@
 use crate::{element::Element, view_state::ViewState};
-use cosmic_text::{FontSystem, SwashCache};
+use cosmic_text::{fontdb::Source, FontSystem, SwashCache};
 use slotmap::{DefaultKey, SecondaryMap, SlotMap};
 use std::{cell::RefCell, rc::Rc};
 use taffy::{NodeId, TaffyTree};
@@ -18,9 +18,11 @@ pub struct Runtime {
 
 impl Default for Runtime {
     fn default() -> Self {
+        let font_system = FontSystem::new_with_fonts([Source::File("Data/simsun.ttc".into())]);
+
         Self {
             taffy: Rc::new(RefCell::new(TaffyTree::new())),
-            font_system: FontSystem::new(),
+            font_system,
             swash_cache: SwashCache::new(),
             states: Default::default(),
             elements: Default::default(),

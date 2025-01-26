@@ -1,7 +1,8 @@
-use crate::scene::{Camera, MainScene, EventEmitter};
 use crate::map::world_map::WorldMap;
+use crate::scene::{Camera, EventEmitter, MainScene};
 use crate::sdl::{NineGridDrawable, Surface};
 use crate::sprite::Sprite;
+use crate::wz::Node;
 use crate::{map, sdl, WzBase};
 use glam::vec2;
 use image::DynamicImage;
@@ -15,8 +16,9 @@ use ui::reactive::{
     create_rw_signal, on_cleanup, use_context, RwSignal, SignalGet, SignalUpdate, SignalWith,
 };
 use ui::taffy::prelude::{length, percent};
-use ui::taffy::{AlignItems, FlexDirection, JustifyContent, Position};
-use ui::{dynamic, fragment, text, view, Drawable, Image, ImageTexture, IntoElement, ViewId};
+use ui::taffy::{AlignItems, Display, FlexDirection, JustifyContent, Position, Size};
+use ui::view_tuple::ViewTuple;
+use ui::{dynamic, fragment, text, view, Drawable, Image, ImageTexture, IntoElement, View, ViewId};
 
 pub fn ui_view() -> impl IntoElement {
     let open = RwSignal::new(true);
@@ -24,8 +26,25 @@ pub fn ui_view() -> impl IntoElement {
 
     fragment((
         dynamic(move || map_scene(&current_map.get())),
+        status_bar(),
         world_map_window(open, current_map),
     ))
+}
+
+pub fn button(btn_node: Node) -> Image {
+    let btn_state = create_rw_signal("normal".to_string());
+    Image::new(Box::new(move || {
+        let path = format!("{}/0", btn_state.get());
+        let image: Arc<DynamicImage> = btn_node.at_path(&path).unwrap().into();
+        ImageTexture::new(use_context().unwrap(), &image)
+    }) as Box<dyn Fn() -> ImageTexture>)
+    .style(|s| s.background(Color::RED))
+    .on_mouse_enter(move |_| {
+        btn_state.set("mouseOver".to_string());
+    })
+    .on_mouse_leave(move |_| {
+        btn_state.set("normal".to_string());
+    })
 }
 
 pub fn map_scene(map_name: &str) -> impl IntoElement {
@@ -72,7 +91,11 @@ pub fn map_scene(map_name: &str) -> impl IntoElement {
         }
     }
 
-    view((Image::new(map_scene_drawable), fragment(texts))).style(move |s| {
+    view((
+        Image::new(map_scene_drawable),
+        if false { fragment(texts) } else { fragment(()) },
+    ))
+    .style(move |s| {
         let camera = camera_signal.get();
         s.position(Position::Absolute)
             .width(percent(1.0))
@@ -82,6 +105,254 @@ pub fn map_scene(map_name: &str) -> impl IntoElement {
     })
 }
 
+pub fn level_no<F>(value: F) -> View
+where
+    F: Fn() -> i32 + 'static,
+{
+    let WzBase { node: base } = use_context().unwrap();
+    let node = base.at_path("UI/Basic.img/LevelNo").unwrap();
+    let images: Vec<Arc<DynamicImage>> = (0..9).map(|i| node.get(&i.to_string()).into()).collect();
+    view((Image::new(images[1].clone()), Image::new(images[8].clone()))).style(|s| {
+        s.justify_content(JustifyContent::FlexStart)
+            .align_items(AlignItems::FlexStart)
+            .gap(Size {
+                width: length(1.0),
+                height: length(0.0),
+            })
+    })
+}
+
+pub fn bracket_wrap(children: impl ViewTuple) -> View {
+    let WzBase { node: base } = use_context().unwrap();
+    let node = base.at_path("UI/StatusBar.img/number").unwrap();
+    let left: Arc<DynamicImage> = node.get("Lbracket").into();
+    let right: Arc<DynamicImage> = node.get("Rbracket").into();
+    view(fragment(
+        ((Image::new(left), fragment(children), Image::new(right))),
+    ))
+    .style(|s| {
+        s.justify_content(JustifyContent::FlexStart)
+            .align_items(AlignItems::Center)
+            .gap(Size {
+                width: length(1.0),
+                height: length(0.0),
+            })
+    })
+}
+
+pub fn status_bar_number(f: impl (Fn() -> String) + 'static) -> View {
+    let WzBase { node: base } = use_context().unwrap();
+    let node = base.at_path("UI/StatusBar.img/number").unwrap();
+    let images: Vec<Arc<DynamicImage>> = (0..10).map(|i| node.get(&i.to_string()).into()).collect();
+    let slash: Arc<DynamicImage> = node.get("slash").into();
+    let percent: Arc<DynamicImage> = node.get("percent").into();
+
+    view(dynamic(move || {
+        f().chars()
+            .filter_map(|ch| {
+                if ch >= '0' && ch <= '9' {
+                    Some(images[ch as usize - '0' as usize].clone())
+                } else if ch == '/' {
+                    Some(slash.clone())
+                } else if ch == '%' {
+                    Some(percent.clone())
+                } else {
+                    None
+                }
+            })
+            .map(|item| Image::new(item))
+            .collect::<Vec<_>>()
+    }))
+    .style(|s| {
+        s.justify_content(JustifyContent::FlexStart)
+            .align_items(AlignItems::FlexStart)
+    })
+}
+
+pub fn status_bar() -> impl IntoElement {
+    let WzBase { node: base } = use_context().unwrap();
+    let img = base.at_path("UI/StatusBar.img").unwrap();
+    let background: Arc<DynamicImage> = img.at_path("base").unwrap().get("backgrnd").into();
+    let background2: Arc<DynamicImage> = img.at_path("base").unwrap().get("backgrnd2").into();
+
+    let gauge = img.at_path("gauge").unwrap();
+    let graduation: Arc<DynamicImage> = gauge.get("graduation").into();
+    let bar: Arc<DynamicImage> = gauge.get("bar").into();
+
+    let base_box: Arc<DynamicImage> = img.at_path("base/box").unwrap().into();
+
+    let icon_memo: Arc<DynamicImage> = img.at_path("base/iconMemo").unwrap().into();
+    let icon_blue: Arc<DynamicImage> = img.at_path("base/iconBlue").unwrap().into();
+
+    view((
+        Image::new(background),
+        Image::new(background2).style(|s| {
+            s.position(Position::Absolute)
+                .left(length(4.0))
+                .bottom(length(0.0))
+        }),
+        view((
+            view((
+                Image::new(base_box),
+                view((
+                    view((Image::new(icon_blue))).style(|s| {
+                        s.width(length(20.0))
+                            .justify_content(JustifyContent::Center)
+                            .align_items(AlignItems::Center)
+                    }),
+                    view((Image::new(icon_memo))).style(|s| {
+                        s.width(length(20.0))
+                            .justify_content(JustifyContent::Center)
+                            .align_items(AlignItems::Center)
+                    }),
+                ))
+                .style(|s| {
+                    s.position(Position::Absolute)
+                        .width(percent(1.0))
+                        .height(percent(1.0))
+                        .justify_content(JustifyContent::SpaceBetween)
+                }),
+            ))
+            .style(|s| {
+                s.margin_right(length(3.0))
+                    .justify_content(JustifyContent::FlexStart)
+                    .align_items(AlignItems::FlexStart)
+            }),
+            view((
+                button(img.get("EquipKey")),
+                button(img.get("InvenKey")),
+                button(img.get("StatKey")),
+                button(img.get("SkillKey")),
+                button(img.get("KeySet")),
+                button(img.get("QuickSlot")),
+            ))
+            .style(|s| {
+                s.justify_content(JustifyContent::FlexStart)
+                    .align_items(AlignItems::FlexStart)
+                    .gap(Size {
+                        width: length(2.0),
+                        height: length(0.0),
+                    })
+            }),
+        ))
+        .style(|s| {
+            s.position(Position::Absolute)
+                .justify_content(JustifyContent::FlexEnd)
+                .align_items(AlignItems::FlexStart)
+                .top(length(8.0))
+                .right(length(4.0))
+        }),
+        view(
+            //
+            (view((
+                // level card
+                view(
+                    // level no
+                    view(level_no(|| 18)).style(|s| {
+                        s.position(Position::Absolute)
+                            .left(length(27.0))
+                            .bottom(length(8.0))
+                            .width(length(47.0))
+                            .height(length(11.0))
+                            .justify_content(JustifyContent::Center)
+                            .align_items(AlignItems::Center)
+                    }),
+                )
+                .style(|s| {
+                    s.margin_left(length(3.0))
+                        .width(length(74.0))
+                        .height(length(30.0))
+                }),
+                // job name
+                view((
+                    view((
+                        (text(|| "魔法师")
+                            .style(|s| s.color(Color::WHITE).font_size(12.0).line_height(15.0))),
+                        bracket_wrap(
+                            text(|| "魔法师")
+                                .style(|s| s.color(Color::WHITE).font_size(12.0).line_height(15.0)),
+                        ),
+                    ))
+                    .style(|s| {
+                        s.justify_content(JustifyContent::FlexStart)
+                            .align_items(AlignItems::FlexStart)
+                            .column_gap(length(2.0))
+                    }),
+                    text(|| "三个榔头")
+                        .style(|s| s.color(Color::WHITE).font_size(12.0).line_height(15.0)),
+                ))
+                .style(|s| {
+                    s.margin_left(length(8.0))
+                        .flex_grow(1.0)
+                        .height(length(30.0))
+                        .flex_direction(FlexDirection::Column)
+                }),
+            ))
+            .style(|s| {
+                s.width(length(208.0))
+                    .justify_content(JustifyContent::FlexStart)
+                    .align_items(AlignItems::Center)
+            }),),
+        )
+        .style(|s| {
+            s.position(Position::Absolute)
+                .left(length(2.0))
+                .right(length(4.0))
+                .bottom(length(1.0))
+                .height(length(34.0))
+                .justify_content(JustifyContent::FlexStart)
+        }),
+        view((
+            Image::new(bar),
+            Image::new(graduation).style(|s| s.position(Position::Absolute).bottom(length(0.0))),
+            view(bracket_wrap(status_bar_number(|| "124/274".to_string()))).style(|s| {
+                s.position(Position::Absolute)
+                    .display(Display::Block)
+                    .top(length(3.0))
+                    .left(length(19.0))
+            }),
+            view(bracket_wrap(status_bar_number(|| "118/617".to_string()))).style(|s| {
+                s.position(Position::Absolute)
+                    .display(Display::Block)
+                    .top(length(3.0))
+                    .left(length(131.0))
+            }),
+            view(bracket_wrap(status_bar_number(|| "6839/13716".to_string()))).style(|s| {
+                s.position(Position::Absolute)
+                    .display(Display::Block)
+                    .top(length(3.0))
+                    .left(length(248.0))
+            }),
+        ))
+        .style(|s| {
+            s.position(Position::Absolute)
+                .display(Display::Block)
+                .left(length(218.0))
+                .bottom(length(1.0))
+        }),
+        view((
+            button(img.get("BtShop")),
+            button(img.get("BtNPT")),
+            button(img.get("BtMenu")),
+            button(img.get("BtShort")),
+        ))
+        .style(|s| {
+            s.position(Position::Absolute)
+                .justify_content(JustifyContent::SpaceBetween)
+                .right(length(4.0))
+                .bottom(length(1.0))
+                .width(length(224.0))
+                .height(length(34.0))
+        }),
+    ))
+    .style(|s| {
+        s.position(Position::Absolute)
+            .display(Display::Block)
+            .left(length(0.0))
+            .right(length(0.0))
+            .bottom(length(0.0))
+    })
+}
 pub fn world_map_window(open: RwSignal<bool>, current_map: RwSignal<String>) -> impl IntoElement {
     let root = use_context::<ViewId>().unwrap();
     let remove = root.add_event_listener(Box::new(move |event| {
@@ -158,22 +429,19 @@ pub fn world_map_window(open: RwSignal<bool>, current_map: RwSignal<String>) -> 
                         let origin = map_image.get_untracked()[spot_type].origin;
                         let position = vec2(item.spot.x, item.spot.y) - origin + content_size / 2.0;
                         let map_no = item.map_no.clone();
-                        Image::new(ImageTexture::new(
-                            renderer,
-                            &map_image.get_untracked()[spot_type].image,
-                        ))
-                        .style(move |s| {
-                            s.position(Position::Absolute)
-                                .margin_left(length(position.x))
-                                .margin_top(length(position.y))
-                        })
-                        .on_click(move |_| {
-                            if let Some(map_no) = map_no.as_ref() {
-                                if map_no.len() == 1 {
-                                    current_map.set(format!("{:0>9}", map_no["0"]))
+                        Image::new(map_image.get_untracked()[spot_type].image.clone())
+                            .style(move |s| {
+                                s.position(Position::Absolute)
+                                    .margin_left(length(position.x))
+                                    .margin_top(length(position.y))
+                            })
+                            .on_click(move |_| {
+                                if let Some(map_no) = map_no.as_ref() {
+                                    if map_no.len() == 1 {
+                                        current_map.set(format!("{:0>9}", map_no["0"]))
+                                    }
                                 }
-                            }
-                        })
+                            })
                     })
                     .collect::<Vec<_>>()
             }))
@@ -192,7 +460,7 @@ pub fn world_map_window(open: RwSignal<bool>, current_map: RwSignal<String>) -> 
                     (image, position, link_map)
                 }));
                 fragment(
-                    Image::new(ImageTexture::new(renderer, &image))
+                    Image::new(image)
                         .style(move |s| {
                             s.position(Position::Absolute)
                                 .left(length(position.x))
@@ -223,11 +491,10 @@ pub fn world_map_window(open: RwSignal<bool>, current_map: RwSignal<String>) -> 
                     view((
                         dynamic(move || {
                             world_map_signal.with(|world_map| {
-                                Image::new(ImageTexture::new(renderer, &world_map.base_img.image))
-                                    .style(move |s| {
-                                        s.width(length(content_size.x))
-                                            .height(length(content_size.y))
-                                    })
+                                Image::new(world_map.base_img.image.clone()).style(move |s| {
+                                    s.width(length(content_size.x))
+                                        .height(length(content_size.y))
+                                })
                             })
                         }),
                         active_link_view,
@@ -275,19 +542,8 @@ pub fn world_map_window(open: RwSignal<bool>, current_map: RwSignal<String>) -> 
                     move |s| s.position(Position::Relative).padding(padding)
                 }),
                 view((
-                    Image::new(ImageTexture::new(renderer, &title.image)),
-                    Image::new(Box::new(move || {
-                        let path = format!("UI/Basic.img/BtClose/{}/0", btn_state.get());
-                        let btn_close: Sprite = base.at_path(&path).unwrap().into();
-                        ImageTexture::new(renderer, &btn_close.image)
-                    }) as Box<dyn (Fn() -> ImageTexture)>)
-                    .on_mouse_enter(move |_| {
-                        btn_state.set("mouseOver".to_string());
-                    })
-                    .on_mouse_leave(move |_| {
-                        btn_state.set("normal".to_string());
-                    })
-                    .on_click(move |_| {
+                    Image::new(title.image),
+                    button(base.at_path("UI/Basic.img/BtClose").unwrap()).on_click(move |_| {
                         open.set(false);
                     }),
                 ))

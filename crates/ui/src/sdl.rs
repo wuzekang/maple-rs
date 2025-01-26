@@ -1,3 +1,4 @@
+use crate::{Drawable, ViewId};
 use cosmic_text::{FontSystem, Placement, SwashCache};
 use glam::{vec2, Vec2};
 use image::DynamicImage;
@@ -16,7 +17,6 @@ use sdl3_sys::{
     surface::{SDL_FlipMode, SDL_ScaleMode},
 };
 use std::{cell::RefCell, collections::HashMap, mem::MaybeUninit};
-use crate::{Drawable, ViewId};
 
 pub struct PollEvent {
     event: MaybeUninit<SDL_Event>,
@@ -111,7 +111,7 @@ impl Drawable for ImageTexture {
         let size = layout.size;
         let position = vec2(location.x, location.y);
         let size = vec2(size.width, size.height);
-        let origin = vec2(0.0,0.0);
+        let origin = vec2(0.0, 0.0);
 
         unsafe {
             SDL_SetTextureAlphaMod(self.texture, self.alpha);

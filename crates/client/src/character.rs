@@ -171,12 +171,16 @@ impl Character {
             return;
         }
         self.action = action.to_string();
-        self.timer = Timer::new(
-            self.slots["Bd"].variant[&self.action]
-                .iter()
-                .map(|frame| frame.delay.unwrap() as f32)
-                .collect(),
-        );
+        if self.slots["Bd"].variant[&self.action].len() > 1 {
+            self.timer = Timer::new(
+                self.slots["Bd"].variant[&self.action]
+                    .iter()
+                    .map(|frame| frame.delay.unwrap() as f32)
+                    .collect(),
+            );
+        } else {
+            self.timer = Timer::new(vec![]);
+        }
     }
 
     pub fn frame(&self) -> Vec<Sprite> {

@@ -5,11 +5,12 @@ use crate::{
     style::StyleBuilder,
     view_id::ViewId,
 };
-use glam::{vec2, Vec2};
+use glam::Vec2;
 use image::DynamicImage;
-use reactive::{create_effect, SignalWith};
+use reactive::{create_effect, use_context};
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 use taffy::{AvailableSpace, Size};
 
 enum ImageState {
@@ -53,6 +54,13 @@ impl IntoDrawable for Rc<RefCell<Box<dyn Drawable>>> {
     }
 }
 
+impl IntoDrawable for Arc<DynamicImage> {
+    fn into_drawable(self) -> Rc<RefCell<Box<dyn Drawable>>> {
+        let renderer: *mut sdl3_sys::render::SDL_Renderer = use_context().unwrap();
+        Rc::new(RefCell::new(Box::new(ImageTexture::new(renderer, &self))))
+    }
+}
+
 pub struct Image {
     id: ViewId,
     state: Rc<RefCell<Box<dyn Drawable>>>,
@@ -65,10 +73,7 @@ impl Image {
         let _ = id.add_event_listener(Box::new(move |event| {
             s.borrow_mut().event(&event);
         }));
-        Self {
-            id,
-            state,
-        }
+        Self { id, state }
     }
 
     pub fn style<F: Fn(StyleBuilder) -> StyleBuilder + 'static>(self, f: F) -> Self {

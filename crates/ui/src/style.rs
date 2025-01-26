@@ -83,6 +83,21 @@ impl StyleBuilder {
         self
     }
 
+    pub fn gap(mut self, gap: Size<LengthPercentage>) -> Self {
+        self.taffy_style.gap = gap;
+        self
+    }
+
+    pub fn column_gap(mut self, width: LengthPercentage) -> Self {
+        self.taffy_style.gap.width = width;
+        self
+    }
+
+    pub fn row_gap(mut self, height: LengthPercentage) -> Self {
+        self.taffy_style.gap.height = height;
+        self
+    }
+
     pub fn position(mut self, value: Position) -> Self {
         self.taffy_style.position = value;
         self
@@ -105,6 +120,11 @@ impl StyleBuilder {
 
     pub fn bottom(mut self, value: LengthPercentageAuto) -> Self {
         self.taffy_style.inset.bottom = value;
+        self
+    }
+
+    pub fn display(mut self, value: Display) -> Self {
+        self.taffy_style.display = value;
         self
     }
 
