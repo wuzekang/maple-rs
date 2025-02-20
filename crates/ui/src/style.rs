@@ -1,10 +1,90 @@
+use crate::Drawable;
 use peniko::Color;
+use sdl3_sys::everything::{
+    SDL_CreateSystemCursor, SDL_Cursor, SDL_DestroyCursor, SDL_SystemCursor,
+};
+use std::rc::Rc;
 use taffy::prelude::*;
 
 #[derive(Default)]
 pub struct StyleBuilder {
     pub taffy_style: taffy::Style,
     pub style: Style,
+}
+
+#[derive(Clone, PartialEq)]
+pub struct SystemCursor {
+    cursor: *mut SDL_Cursor,
+}
+
+impl SystemCursor {
+    pub fn new(cursor: SDL_SystemCursor) -> Self {
+        Self {
+            cursor: unsafe { SDL_CreateSystemCursor(cursor) },
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct DrawableCursor(pub Rc<dyn Fn() -> Box<dyn Drawable>>);
+
+impl PartialEq for DrawableCursor {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::as_ptr(&self.0) == Rc::as_ptr(&other.0)
+    }
+}
+
+impl Drop for SystemCursor {
+    fn drop(&mut self) {
+        unsafe {
+            SDL_DestroyCursor(self.cursor);
+        }
+    }
+}
+
+#[derive(Clone, PartialEq)]
+pub enum Cursor {
+    None,
+    Inherit,
+    System(SystemCursor),
+    Drawable(DrawableCursor),
+}
+
+impl Cursor {
+    pub fn is_some(&self) -> bool {
+        match *self {
+            Cursor::None => false,
+            _ => true,
+        }
+    }
+
+    pub fn is_inherit(&self) -> bool {
+        match *self {
+            Cursor::Inherit => true,
+            _ => false,
+        }
+    }
+
+    pub fn system_pointer() -> Self {
+        Cursor::System(SystemCursor::new(SDL_SystemCursor::POINTER))
+    }
+
+    pub fn system_default() -> Self {
+        Cursor::System(SystemCursor::new(SDL_SystemCursor::DEFAULT))
+    }
+
+    pub fn from_drawable<T>(f: T) -> Self
+    where
+        T: Fn() -> Box<dyn Drawable> + 'static,
+    {
+        Self::Drawable(DrawableCursor(Rc::new(f)))
+    }
+}
+
+impl Default for Cursor {
+    fn default() -> Self {
+        Cursor::Inherit
+    }
 }
 
 impl StyleBuilder {
@@ -147,14 +227,20 @@ impl StyleBuilder {
         self.style.line_height = Some(value);
         self
     }
+
+    pub fn cursor(mut self, value: Cursor) -> Self {
+        self.style.cursor = value;
+        self
+    }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Style {
     pub background: Color,
     pub color: Color,
     pub line_height: Option<f32>,
     pub font_size: Option<f32>,
+    pub cursor: Cursor,
 }
 
 impl Style {
@@ -163,5 +249,32 @@ impl Style {
     }
     pub fn color(self) -> Color {
         self.color
+    }
+}
+
+pub struct StyleComputeContext {
+    pub style: Style,
+    pub stack: Vec<Style>,
+}
+
+impl StyleComputeContext {
+    pub fn new() -> Self {
+        Self {
+            style: Style {
+                cursor: Cursor::default(),
+                ..Default::default()
+            },
+            stack: Vec::new(),
+        }
+    }
+
+    pub fn push(&mut self) {
+        self.stack.push(self.style.clone());
+    }
+
+    pub fn pop(&mut self) {
+        if let Some(style) = self.stack.pop() {
+            self.style = style;
+        }
     }
 }

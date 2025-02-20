@@ -1,12 +1,14 @@
 use crate::{
-    element::Element, runtime::RUNTIME, sdl::Painter, style::StyleBuilder, view_id::ViewId,
+    element::Element, runtime::RUNTIME, sdl::Renderer, style::StyleBuilder, view_id::ViewId,
 };
 use cosmic_text::{Attrs, Family, Metrics};
+use glam::vec2;
 use peniko::Color;
 use reactive::{create_effect, RwSignal, SignalUpdate, SignalWith};
 use std::fmt::Display;
 use taffy::{AvailableSpace, Size};
 
+#[derive(Debug)]
 pub struct Text {
     id: ViewId,
     buffer: RwSignal<cosmic_text::Buffer>,
@@ -68,8 +70,8 @@ impl Element for Text {
         self.id
     }
 
-    fn paint(&self, ctx: &Painter) {
-        let layout = self.id.get_layout().unwrap();
+    fn paint(&self, ctx: &Renderer) {
+        let layout = self.id.layout().unwrap();
         let state = self.id.state();
         let viewport = state.borrow().viewport;
         let style = state.borrow().style.clone();
@@ -78,7 +80,11 @@ impl Element for Text {
         let size = layout.size;
 
         if style.background != Color::TRANSPARENT {
-            ctx.fill_rect(style.background, location, size);
+            ctx.fill_rect(
+                style.background,
+                vec2(location.x, location.y),
+                vec2(size.width, size.height),
+            );
         }
 
         RUNTIME.with_borrow_mut(|s| {

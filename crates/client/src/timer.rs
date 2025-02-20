@@ -1,6 +1,6 @@
 use std::cell::Cell;
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Timer {
     elapsed: Cell<f32>,
     intervals: Vec<f32>,

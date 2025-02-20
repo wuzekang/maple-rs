@@ -1,10 +1,12 @@
 use crate::event::Interactive;
 use crate::{
-    element::Element, sdl::Painter, style::StyleBuilder, view_id::ViewId, view_tuple::ViewTuple,
+    element::Element, sdl::Renderer, style::StyleBuilder, view_id::ViewId, view_tuple::ViewTuple,
 };
+use glam::vec2;
 use peniko::Color;
 use reactive::create_effect;
 
+#[derive(Debug)]
 pub struct View {
     id: ViewId,
 }
@@ -19,18 +21,23 @@ impl Element for View {
     fn id(&self) -> ViewId {
         self.id
     }
-    fn paint(&self, ctx: &Painter) {
-        let layout = self.id.get_layout().unwrap();
+    fn paint(&self, ctx: &Renderer) {
+        let layout = self.id.layout().unwrap();
         let state = self.id.state();
         let viewport = state.borrow().viewport;
         let style = &state.borrow().style;
+        let location = layout.location + viewport;
 
         if style.background != Color::TRANSPARENT {
-            ctx.fill_rect(style.background, layout.location + viewport, layout.size);
+            ctx.fill_rect(
+                style.background,
+                vec2(location.x, location.y),
+                vec2(layout.size.width, layout.size.height),
+            );
         }
 
         for child in self.id().children() {
-            child.element().borrow().paint(ctx);
+            child.element().paint(ctx);
         }
     }
 }

@@ -1,4 +1,4 @@
-use crate::event::Event;
+use crate::event::{Event, EventType};
 use crate::style::Style;
 use slotmap::{DefaultKey, SlotMap};
 use std::rc::Rc;

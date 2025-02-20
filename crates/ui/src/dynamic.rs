@@ -1,5 +1,9 @@
+use crate::root::EventManager;
 use crate::{view_id::ViewId, view_tuple::ViewTuple};
-use reactive::{as_child_of_current_scope, create_effect, create_memo, create_rw_signal, create_signal, Memo, ReadSignal, Scope, SignalGet, SignalRead, SignalUpdate};
+use reactive::{
+    as_child_of_current_scope, create_effect, create_signal,
+    use_context, ReadSignal, Scope, SignalGet, SignalUpdate,
+};
 
 pub fn create_children_effect<VT: ViewTuple, F: Fn() -> VT + 'static>(id: ViewId, f: F) {
     create_effect(move |_| {
@@ -30,14 +34,20 @@ impl Dynamic {
 
         let (getter, setter) = create_signal(vec![]);
 
-        create_effect(move |prev: Option<Scope>| {
-            if let Some(scope) = prev {
-                scope.dispose();
-            }
+        let event_manager: EventManager = use_context().unwrap();
+        create_effect({
+            let event_manager = event_manager.clone();
+            move |prev: Option<(Vec<ViewId>, Scope)>| {
+                if let Some((vec, scope)) = prev {
+                    for item in vec {
+                        event_manager.remove(item, scope)
+                    }
+                }
 
-            let (vec, scope) = view_fn(());
-            setter.set(vec);
-            scope
+                let (vec, scope) = view_fn(());
+                setter.set(vec.clone());
+                (vec, scope)
+            }
         });
 
         Self { signal: getter }

@@ -1,11 +1,12 @@
-use crate::event::{Event, Interactive};
+use crate::event::Interactive;
+use crate::sdl::{Bounds, Drawable};
 use crate::{
     element::Element,
-    sdl::{ImageTexture, Painter},
+    sdl::{ImageTexture, Renderer},
     style::StyleBuilder,
     view_id::ViewId,
 };
-use glam::Vec2;
+use glam::{vec2, Vec2};
 use image::DynamicImage;
 use reactive::{create_effect, use_context};
 use std::cell::RefCell;
@@ -19,66 +20,69 @@ enum ImageState {
     Loaded(ImageTexture),
 }
 
-pub trait Drawable {
-    fn draw(&self, id: ViewId);
-    fn size(&self) -> Vec2;
-    fn update(&mut self) {}
-    fn event(&mut self, event: &Event) {}
-}
-
 pub trait IntoDrawable: Sized {
-    fn into_drawable(self) -> Rc<RefCell<Box<dyn Drawable>>>;
-}
-
-impl<T: Drawable + 'static> IntoDrawable for Box<dyn (Fn() -> T) + 'static> {
-    fn into_drawable(self) -> Rc<RefCell<Box<dyn Drawable>>> {
-        let image: Rc<RefCell<Box<dyn Drawable>>> = Rc::new(RefCell::new(Box::new(self())));
-
-        create_effect({
-            let image = image.clone();
-            move |_| *image.borrow_mut() = Box::new(self())
-        });
-        image.clone()
-    }
+    fn into_drawable(self) -> Box<dyn Drawable>;
 }
 
 impl<T: Drawable + 'static> IntoDrawable for T {
-    fn into_drawable(self) -> Rc<RefCell<Box<dyn Drawable>>> {
-        Rc::new(RefCell::new(Box::new(self)))
-    }
-}
-
-impl IntoDrawable for Rc<RefCell<Box<dyn Drawable>>> {
-    fn into_drawable(self) -> Rc<RefCell<Box<dyn Drawable>>> {
-        self
+    fn into_drawable(self) -> Box<dyn Drawable> {
+        Box::new(self)
     }
 }
 
 impl IntoDrawable for Arc<DynamicImage> {
-    fn into_drawable(self) -> Rc<RefCell<Box<dyn Drawable>>> {
+    fn into_drawable(self) -> Box<dyn Drawable> {
         let renderer: *mut sdl3_sys::render::SDL_Renderer = use_context().unwrap();
-        Rc::new(RefCell::new(Box::new(ImageTexture::new(renderer, &self))))
+        Box::new(ImageTexture::new(renderer, &self))
+    }
+}
+
+impl Drawable for Rc<RefCell<dyn Drawable>> {
+    fn draw(&self, painter: &Renderer) {
+        self.borrow().draw(painter);
+    }
+
+    fn size(&self) -> Vec2 {
+        self.borrow().size()
+    }
+
+    fn set_bounds(&mut self, bounds: Bounds) {
+        self.borrow_mut().set_bounds(bounds);
     }
 }
 
 pub struct Image {
     id: ViewId,
-    state: Rc<RefCell<Box<dyn Drawable>>>,
+    drawable: Rc<RefCell<Option<Box<dyn Drawable>>>>,
 }
 impl Image {
-    pub fn new(image: impl IntoDrawable) -> Self {
+    pub fn new(drawable: impl IntoDrawable) -> Self {
         let id = ViewId::new();
-        let state = image.into_drawable();
-        let s = state.clone();
-        let _ = id.add_event_listener(Box::new(move |event| {
-            s.borrow_mut().event(&event);
-        }));
-        Self { id, state }
+        Self {
+            id,
+            drawable: Rc::new(RefCell::new(Some(drawable.into_drawable()))),
+        }
+    }
+
+    pub fn dynamic<T, D>(f: T) -> Self
+    where
+        T: Fn() -> D + 'static,
+        D: IntoDrawable,
+    {
+        let drawable: Rc<RefCell<Option<Box<dyn Drawable>>>> = Default::default();
+        create_effect({
+            let drawable = drawable.clone();
+            move |_| *drawable.borrow_mut() = Some(f().into_drawable())
+        });
+        Self {
+            id: ViewId::new(),
+            drawable,
+        }
     }
 
     pub fn style<F: Fn(StyleBuilder) -> StyleBuilder + 'static>(self, f: F) -> Self {
+        let id = self.id;
         create_effect(move |_| {
-            let id = self.id;
             let state = id.state();
             let node = id.node();
             let style = f(StyleBuilder::default());
@@ -97,8 +101,19 @@ impl Element for Image {
         self.id
     }
 
-    fn paint(&self, cx: &Painter) {
-        self.state.borrow().draw(self.id);
+    fn paint(&self, cx: &Renderer) {
+        if let Some(drawable) = self.drawable.borrow_mut().as_mut() {
+            let id = self.id();
+            let layout = id.layout().unwrap();
+            let state = id.state();
+            let viewport = state.borrow().viewport;
+            let location = layout.location + viewport;
+            let size = layout.size;
+            let position = vec2(location.x, location.y);
+            let size = vec2(size.width, size.height);
+            drawable.set_bounds(Bounds { position, size });
+            drawable.draw(cx);
+        }
     }
 
     fn measure(
@@ -106,21 +121,25 @@ impl Element for Image {
         known_dimensions: Size<Option<f32>>,
         available_space: Size<AvailableSpace>,
     ) -> Size<f32> {
-        let image_size = self.state.borrow().size();
-        match (known_dimensions.width, known_dimensions.height) {
-            (Some(width), Some(height)) => Size { width, height },
-            (Some(width), None) => Size {
-                width,
-                height: (width / image_size.x) * image_size.y,
-            },
-            (None, Some(height)) => Size {
-                width: (height / image_size.y) * image_size.x,
-                height,
-            },
-            (None, None) => Size {
-                width: image_size.x,
-                height: image_size.y,
-            },
+        if let Some(image) = self.drawable.borrow().as_ref() {
+            let image_size = image.size();
+            match (known_dimensions.width, known_dimensions.height) {
+                (Some(width), Some(height)) => Size { width, height },
+                (Some(width), None) => Size {
+                    width,
+                    height: (width / image_size.x) * image_size.y,
+                },
+                (None, Some(height)) => Size {
+                    width: (height / image_size.y) * image_size.x,
+                    height,
+                },
+                (None, None) => Size {
+                    width: image_size.x,
+                    height: image_size.y,
+                },
+            }
+        } else {
+            Size::ZERO
         }
     }
 }

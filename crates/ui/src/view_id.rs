@@ -1,19 +1,52 @@
 use crate::event::Event;
+use crate::style::StyleComputeContext;
 use crate::{element::Element, runtime::RUNTIME, view_state::ViewState};
-use sdl3_sys::events::SDL_Event;
+use glam::Vec2;
+use std::cmp::PartialEq;
 use std::{cell::RefCell, rc::Rc};
 use taffy::{NodeId, Style, TaffyTree};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rect {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+impl Rect {
+    pub fn contains(&self, point: Vec2) -> bool {
+        let Vec2 { x, y } = point;
+        let left = self.x;
+        let top = self.y;
+        let right = self.x + self.width;
+        let bottom = self.y + self.height;
+        x >= left && x < right && y >= top && y < bottom
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ViewId(pub NodeId);
 
 impl ViewId {
     pub fn new() -> Self {
-        Self(RUNTIME.with_borrow_mut(|r| r.taffy.borrow_mut().new_leaf(Style::DEFAULT).unwrap()))
+        let id =
+            RUNTIME.with_borrow_mut(|r| r.taffy.borrow_mut().new_leaf(Style::DEFAULT).unwrap());
+        RUNTIME.with_borrow_mut(|s| {
+            s.states
+                .entry(id.into())
+                .unwrap()
+                .or_insert_with(|| Rc::new(RefCell::new(ViewState::new())))
+                .clone()
+        });
+        Self(id)
     }
 
     pub fn node(&self) -> NodeId {
         self.0
+    }
+
+    pub fn parent(&self) -> Option<ViewId> {
+        RUNTIME.with_borrow(|r| r.taffy.borrow().parent(self.0).map(|item| ViewId(item)))
     }
 
     pub fn children(&self) -> Vec<ViewId> {
@@ -34,8 +67,14 @@ impl ViewId {
         self.taffy().borrow_mut().set_children(self.0, &children);
     }
 
-    pub fn remove(&self) {
+    pub fn remove(&self) -> Vec<ViewId> {
+        let mut vec = Vec::new();
+        for child in self.children() {
+            vec.append(&mut child.remove());
+        }
         self.taffy().borrow_mut().remove(self.0);
+        vec.push(*self);
+        vec
     }
 
     pub fn taffy(&self) -> Rc<RefCell<TaffyTree>> {
@@ -43,20 +82,14 @@ impl ViewId {
     }
 
     pub fn state(&self) -> Rc<RefCell<ViewState>> {
-        RUNTIME.with_borrow_mut(|s| {
-            s.states
-                .entry(self.0.into())
-                .unwrap()
-                .or_insert_with(|| Rc::new(RefCell::new(ViewState::new())))
-                .clone()
-        })
+        RUNTIME.with_borrow_mut(|s| s.states.get(self.0.into()).unwrap().clone())
     }
 
-    pub fn element(&self) -> Rc<RefCell<Box<dyn Element>>> {
+    pub fn element(&self) -> Rc<dyn Element> {
         RUNTIME.with_borrow(|s| s.elements.get(self.0.into()).cloned().unwrap())
     }
 
-    pub fn get_layout(&self) -> Option<taffy::Layout> {
+    pub fn layout(&self) -> Option<taffy::Layout> {
         self.taffy().borrow_mut().layout(self.0).cloned().ok()
     }
 
@@ -77,22 +110,55 @@ impl ViewId {
         })
     }
 
-    pub fn dispatch_event(&self, event: &SDL_Event) {
-        let event_ = Event {
-            event,
-            target: *self,
-        };
-        let state = self.state();
-        let listeners = state.borrow().listeners.clone();
-        for (_, listener) in listeners {
-            listener(&event_);
+    pub fn event_capture(&self, location: Vec2, target: &mut Option<ViewId>) {
+        if self.rect().contains(location) {
+            *target = Some(*self);
         }
         for child in self.children() {
-            child.dispatch_event(event);
+            child.event_capture(location, target);
         }
     }
 
-    pub fn mark_dirty(&self) {
-        self.taffy().borrow_mut().mark_dirty(self.0).unwrap();
+    pub fn dispatch_event(&self, event: &Event, bubble: bool) {
+        let state = self.state();
+        let listeners = state.borrow().listeners.clone();
+        for (_, listener) in listeners {
+            listener(event);
+        }
+        if bubble {
+            if let Some(parent) = self.parent() {
+                event.current_target.set(parent);
+                parent.dispatch_event(event, bubble);
+            }
+        }
+    }
+
+    pub fn compute_style(&self, ctx: &mut StyleComputeContext) {
+        ctx.push();
+        let state = self.state();
+        let style = state.borrow().style.clone();
+        if !style.cursor.is_inherit() {
+            ctx.style.cursor = style.cursor.clone();
+        } else {
+            state.borrow_mut().style.cursor = ctx.style.cursor.clone();
+        }
+        for child in self.children() {
+            child.compute_style(ctx);
+        }
+        ctx.pop();
+    }
+
+    pub fn rect(&self) -> Rect {
+        let layout = self.layout().unwrap();
+        let viewport = self.state().borrow().viewport;
+        let location = layout.location + viewport;
+        let size = layout.size;
+
+        Rect {
+            x: location.x,
+            y: location.y,
+            width: size.width,
+            height: size.height,
+        }
     }
 }

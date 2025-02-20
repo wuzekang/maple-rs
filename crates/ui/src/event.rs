@@ -1,30 +1,77 @@
 use crate::{Element, ViewId};
 use glam::{vec2, Vec2};
 use sdl3_sys::events::{SDL_Event, SDL_EventType};
+use slotmap::DefaultKey;
+use std::cell::{Cell, RefCell};
+use std::cmp::PartialEq;
+use std::rc::Rc;
+use sdl3_sys::everything::{SDL_MouseMotionEvent, SDL_MouseWheelEvent};
+
+#[derive(Clone)]
+pub struct EventEmitter {
+    listeners: Rc<RefCell<slotmap::SlotMap<DefaultKey, Box<dyn Fn()>>>>,
+}
+
+impl EventEmitter {
+    pub fn new() -> Self {
+        Self {
+            listeners: Default::default(),
+        }
+    }
+
+    pub fn emit(&self) {
+        for (_, f) in self.listeners.borrow().iter() {
+            f();
+        }
+    }
+
+    pub fn on(&self, f: impl Fn() + 'static) -> DefaultKey {
+        self.listeners.borrow_mut().insert(Box::new(f))
+    }
+
+    pub fn off(&self, key: DefaultKey) {
+        self.listeners.borrow_mut().remove(key);
+    }
+}
+
+#[derive(Eq, PartialEq,Copy,Clone)]
+pub enum EventType {
+    MouseEnter,
+    MouseLeave,
+    MouseMove,
+    MouseWheel,
+    MouseDown,
+    MouseUp,
+    Click,
+    None,
+}
+
 pub struct Event<'a> {
+    pub event_type: EventType,
     pub event: &'a SDL_Event,
     pub target: ViewId,
+    pub current_target: Cell<ViewId>,
 }
 
 impl Event<'_> {
     pub fn client(&self) -> Vec2 {
         unsafe {
             Vec2 {
-                x: self.event.button.x,
-                y: self.event.button.y,
+                x: self.event.motion.x,
+                y: self.event.motion.y,
             }
         }
     }
 
     pub fn offset(&self) -> Vec2 {
-        let location = self.target.get_layout().unwrap().location;
-        let viewport = self.target.state().borrow().viewport;
+        let location = self.current_target.get().layout().unwrap().location;
+        let viewport = self.current_target.get().state().borrow().viewport;
         self.client() - vec2(viewport.x, viewport.y) - vec2(location.x, location.y)
     }
 
     pub fn in_view_rect(&self) -> bool {
         let id = self.target;
-        let layout = id.get_layout().unwrap();
+        let layout = id.layout().unwrap();
         let viewport = id.state().borrow().viewport;
 
         let x = unsafe { self.event.button.x } - viewport.x;
@@ -37,17 +84,32 @@ impl Event<'_> {
 
         x >= left && x < right && y >= top && y < bottom
     }
+
+    pub fn is_pointer_event(&self) -> bool {
+        match self.sdl_event_type() {
+            SDL_EventType::MOUSE_MOTION
+            | SDL_EventType::MOUSE_BUTTON_DOWN
+            | SDL_EventType::MOUSE_BUTTON_UP
+            | SDL_EventType::MOUSE_WHEEL => true,
+            _ => false,
+        }
+    }
+
+    pub fn sdl_event_type(&self) -> SDL_EventType {
+        SDL_EventType(unsafe { self.event.r#type })
+    }
 }
 
+
+
 pub trait Interactive: Sized + Element {
-    fn on_event<F>(self, event_type: SDL_EventType, f: F) -> Self
+    fn on_event<F>(self, event_type: EventType, f: F) -> Self
     where
         F: (Fn(&Event) -> ()) + 'static,
     {
-        let event_type = event_type.0.clone();
-        let _ = self.id().add_event_listener(Box::new(move |e| {
-            if unsafe { e.event.r#type } == event_type {
-                f(e)
+        let _ = self.id().add_event_listener(Box::new(move |event| {
+            if event.event_type == event_type {
+                f(event)
             }
         }));
         self
@@ -57,10 +119,8 @@ pub trait Interactive: Sized + Element {
     where
         F: (Fn(&Event) -> ()) + 'static,
     {
-        self.on_event(SDL_EventType::MOUSE_BUTTON_DOWN, move |event| {
-            if event.in_view_rect() {
-                f(event);
-            }
+        self.on_event(EventType::MouseDown, move |event| {
+            f(event);
         })
     }
 
@@ -68,10 +128,8 @@ pub trait Interactive: Sized + Element {
     where
         F: (Fn(&Event) -> ()) + 'static,
     {
-        self.on_event(SDL_EventType::MOUSE_MOTION, move |event| {
-            if event.in_view_rect() {
-                f(event);
-            }
+        self.on_event(EventType::MouseMove, move |event| {
+            f(event);
         })
     }
 
@@ -80,12 +138,8 @@ pub trait Interactive: Sized + Element {
         F: (Fn(&Event) -> ()) + 'static,
     {
         let id = self.id();
-        self.on_event(SDL_EventType::MOUSE_MOTION, move |event| {
-            let state = id.state();
-            if !state.borrow().hovered && event.in_view_rect() {
-                state.borrow_mut().hovered = true;
-                f(event);
-            }
+        self.on_event(EventType::MouseEnter, move |event| {
+            f(event);
         })
     }
     fn on_mouse_leave<F>(self, f: F) -> Self
@@ -93,12 +147,8 @@ pub trait Interactive: Sized + Element {
         F: (Fn(&Event) -> ()) + 'static,
     {
         let id = self.id();
-        self.on_event(SDL_EventType::MOUSE_MOTION, move |event| {
-            let state = id.state();
-            if state.borrow().hovered && !event.in_view_rect() {
-                state.borrow_mut().hovered = false;
-                f(event);
-            }
+        self.on_event(EventType::MouseLeave, move |event| {
+            f(event);
         })
     }
 }

@@ -1,50 +1,68 @@
 use crate::map::world_map::WorldMap;
-use crate::scene::{Camera, EventEmitter, MainScene};
-use crate::sdl::{NineGridDrawable, Surface};
-use crate::sprite::Sprite;
+use crate::scene::{Camera, MainScene};
+use crate::sprite::{Sprite, SpriteAnimation, SpriteAnimationDrawable};
 use crate::wz::Node;
-use crate::{map, sdl, WzBase};
+use crate::{map, WzBase};
 use glam::vec2;
 use image::DynamicImage;
 use sdl3_sys::everything::SDL_Renderer;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
-use ui::event::Interactive;
+use ui::event::{EventEmitter, Interactive};
 use ui::peniko::Color;
 use ui::reactive::{
     create_rw_signal, on_cleanup, use_context, RwSignal, SignalGet, SignalUpdate, SignalWith,
 };
+use ui::style::Cursor;
 use ui::taffy::prelude::{length, percent};
 use ui::taffy::{AlignItems, Display, FlexDirection, JustifyContent, Position, Size};
 use ui::view_tuple::ViewTuple;
-use ui::{dynamic, fragment, text, view, Drawable, Image, ImageTexture, IntoElement, View, ViewId};
+use ui::{
+    dynamic, fragment, text, view, Drawable, Image, ImageTexture, IntoElement, NineGridTexture,
+    Surface, View, ViewId,
+};
+
+pub fn cursor(name: &str) -> Cursor {
+    Cursor::from_drawable({
+        let WzBase { node: base } = use_context().unwrap();
+        let basic = base.at_path("UI/Basic.img").unwrap();
+        let cursor: SpriteAnimation = basic.at_path(&format!("Cursor/{}", name)).unwrap().into();
+        move || Box::new(SpriteAnimationDrawable::new(cursor.clone()))
+    })
+}
 
 pub fn ui_view() -> impl IntoElement {
     let open = RwSignal::new(true);
     let current_map = RwSignal::new("002000000".to_string());
 
-    fragment((
+    view((
         dynamic(move || map_scene(&current_map.get())),
         status_bar(),
         world_map_window(open, current_map),
     ))
+    .style(move |s| {
+        s.cursor(cursor("0"))
+            .position(Position::Absolute)
+            .width(percent(1.0))
+            .height(percent(1.0))
+    })
 }
 
 pub fn button(btn_node: Node) -> Image {
     let btn_state = create_rw_signal("normal".to_string());
-    Image::new(Box::new(move || {
+    Image::dynamic(move || {
         let path = format!("{}/0", btn_state.get());
         let image: Arc<DynamicImage> = btn_node.at_path(&path).unwrap().into();
         ImageTexture::new(use_context().unwrap(), &image)
-    }) as Box<dyn Fn() -> ImageTexture>)
-    .style(|s| s.background(Color::RED))
+    })
     .on_mouse_enter(move |_| {
         btn_state.set("mouseOver".to_string());
     })
     .on_mouse_leave(move |_| {
         btn_state.set("normal".to_string());
     })
+    .style(|s| s.cursor(cursor("1")))
 }
 
 pub fn map_scene(map_name: &str) -> impl IntoElement {
@@ -54,23 +72,6 @@ pub fn map_scene(map_name: &str) -> impl IntoElement {
     let renderer = use_context().unwrap();
     let camera_signal = create_rw_signal(Camera::default());
     let size = vec2(800.0, 600.0);
-
-    let map_scene_drawable: Rc<RefCell<Box<dyn Drawable>>> = Rc::new(RefCell::new(Box::new(
-        MainScene::new(window, renderer, size, map_name, camera_signal),
-    )));
-
-    let update_event: EventEmitter = use_context().unwrap();
-
-    let key = update_event.on({
-        let d = map_scene_drawable.clone();
-        move || {
-            d.borrow_mut().update();
-        }
-    });
-
-    on_cleanup(move || {
-        update_event.off(key);
-    });
 
     let mut texts = vec![];
     for layer in &layers {
@@ -91,8 +92,32 @@ pub fn map_scene(map_name: &str) -> impl IntoElement {
         }
     }
 
+    let main_scene = MainScene::new(window, renderer, size, map_name, camera_signal);
+    let main_scene = Rc::new(RefCell::new(main_scene));
+
+    let root: ViewId = use_context().unwrap();
+    let cleanup = root.add_event_listener({
+        let state = main_scene.clone();
+        Box::new(move |event| {
+            state.borrow_mut().event(&event);
+        })
+    });
+    on_cleanup(cleanup);
+
+    let update_event: EventEmitter = use_context().unwrap();
+    let key = update_event.on({
+        let state = main_scene.clone();
+        move || {
+            state.borrow_mut().update();
+        }
+    });
+
+    on_cleanup(move || {
+        update_event.off(key);
+    });
+
     view((
-        Image::new(map_scene_drawable),
+        Image::new(main_scene.clone() as Rc<RefCell<dyn Drawable>>),
         if false { fragment(texts) } else { fragment(()) },
     ))
     .style(move |s| {
@@ -169,7 +194,7 @@ pub fn status_bar_number(f: impl (Fn() -> String) + 'static) -> View {
     })
 }
 
-pub fn status_bar() -> impl IntoElement {
+pub fn status_bar() -> View {
     let WzBase { node: base } = use_context().unwrap();
     let img = base.at_path("UI/StatusBar.img").unwrap();
     let background: Arc<DynamicImage> = img.at_path("base").unwrap().get("backgrnd").into();
@@ -384,7 +409,7 @@ pub fn world_map_window(open: RwSignal<bool>, current_map: RwSignal<String>) -> 
             .map(|item| item.into())
             .collect::<Vec<Surface>>();
 
-        let bg = sdl::NineGridTexture::new(
+        let bg = NineGridTexture::new(
             (
                 &surfaces[0],
                 &surfaces[1],
@@ -411,7 +436,6 @@ pub fn world_map_window(open: RwSignal<bool>, current_map: RwSignal<String>) -> 
             base.at_path("Map/WorldMap/WorldMap.img").unwrap(),
         ));
 
-        let btn_state = create_rw_signal("normal".to_string());
         let hovered_link = create_rw_signal(None);
 
         let content_size = vec2(640.0, 470.0);
@@ -429,17 +453,27 @@ pub fn world_map_window(open: RwSignal<bool>, current_map: RwSignal<String>) -> 
                         let origin = map_image.get_untracked()[spot_type].origin;
                         let position = vec2(item.spot.x, item.spot.y) - origin + content_size / 2.0;
                         let map_no = item.map_no.clone();
+                        let clickable = map_no.and_then(|map_no| {
+                            if map_no.len() == 1 {
+                                Some(map_no["0"])
+                            } else {
+                                None
+                            }
+                        });
                         Image::new(map_image.get_untracked()[spot_type].image.clone())
                             .style(move |s| {
                                 s.position(Position::Absolute)
                                     .margin_left(length(position.x))
                                     .margin_top(length(position.y))
+                                    .cursor(if clickable.is_some() {
+                                        cursor("1")
+                                    } else {
+                                        cursor("0")
+                                    })
                             })
                             .on_click(move |_| {
-                                if let Some(map_no) = map_no.as_ref() {
-                                    if map_no.len() == 1 {
-                                        current_map.set(format!("{:0>9}", map_no["0"]))
-                                    }
+                                if let Some(map_no) = clickable {
+                                    current_map.set(format!("{:0>9}", map_no))
                                 }
                             })
                     })
@@ -465,6 +499,7 @@ pub fn world_map_window(open: RwSignal<bool>, current_map: RwSignal<String>) -> 
                             s.position(Position::Absolute)
                                 .left(length(position.x))
                                 .top(length(position.y))
+                                .cursor(cursor("1"))
                         })
                         .on_click(move |_| {
                             let WzBase { node: base } = use_context().unwrap();
@@ -480,9 +515,14 @@ pub fn world_map_window(open: RwSignal<bool>, current_map: RwSignal<String>) -> 
             }
         });
 
+        let close_button =
+            button(base.at_path("UI/Basic.img/BtClose").unwrap()).on_click(move |_| {
+                open.set(false);
+            });
+
         return fragment(
             view(view((
-                Image::new(NineGridDrawable { texture: bg }).style(|s| {
+                Image::new(bg).style(|s| {
                     s.position(Position::Absolute)
                         .width(percent(1.0))
                         .height(percent(1.0))
@@ -526,13 +566,13 @@ pub fn world_map_window(open: RwSignal<bool>, current_map: RwSignal<String>) -> 
                             return None;
                         });
 
-                        if hovered_link.get() != key {
+                        if hovered_link.get_untracked() != key {
                             hovered_link.set(key);
                         }
                     })
                     .on_mouse_enter(|_| {})
                     .on_mouse_leave(move |_| {
-                        if hovered_link.get().is_some() {
+                        if hovered_link.get_untracked().is_some() {
                             hovered_link.set(None);
                         }
                     }),
@@ -541,13 +581,7 @@ pub fn world_map_window(open: RwSignal<bool>, current_map: RwSignal<String>) -> 
                     let padding = padding.clone();
                     move |s| s.position(Position::Relative).padding(padding)
                 }),
-                view((
-                    Image::new(title.image),
-                    button(base.at_path("UI/Basic.img/BtClose").unwrap()).on_click(move |_| {
-                        open.set(false);
-                    }),
-                ))
-                .style(move |s| {
+                view((Image::new(title.image), close_button)).style(move |s| {
                     s.position(Position::Absolute)
                         .width(percent(1.0))
                         .margin_top(length(5.0))

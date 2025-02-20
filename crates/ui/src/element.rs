@@ -1,5 +1,5 @@
 use crate::{
-    dynamic::Dynamic, fragment::Fragment, runtime::RUNTIME, sdl::Painter, text::Text,
+    dynamic::Dynamic, fragment::Fragment, runtime::RUNTIME, sdl::Renderer, text::Text,
     view_id::ViewId,
 };
 use reactive::{create_memo, create_rw_signal, Memo, ReadSignal, SignalGet};
@@ -9,9 +9,9 @@ use taffy::{AvailableSpace, Size};
 pub trait Element {
     fn id(&self) -> ViewId;
 
-    fn paint(&self, cx: &Painter) {
+    fn paint(&self, cx: &Renderer) {
         for child in self.id().children() {
-            child.element().borrow().paint(cx);
+            child.element().paint(cx);
         }
     }
     fn measure(
@@ -34,12 +34,26 @@ impl<T: Element + 'static> IntoElement for T {
         let id = self.id();
         RUNTIME.with_borrow_mut(|r| {
             r.elements
-                .insert(id.node().into(), Rc::new(RefCell::new(Box::new(self))));
+                .insert(id.node().into(), Rc::new(self));
         });
         create_rw_signal(vec![id]).read_only()
     }
 }
 
+impl<T: Element + 'static> IntoElement for Rc<T> {
+    type V = ReadSignal<Vec<ViewId>>;
+    fn into_element(self) -> Self::V {
+        let id = self.id();
+        RUNTIME.with_borrow_mut({
+            let element = self.clone() as Rc<dyn Element>;
+            move |r| {
+                r.elements
+                    .insert(id.node().into(), element);
+            }
+        });
+        create_rw_signal(vec![id]).read_only()
+    }
+}
 impl IntoElement for Fragment {
     type V = Memo<Vec<ViewId>>;
     fn into_element(self) -> Self::V {

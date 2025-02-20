@@ -5,6 +5,7 @@ use crate::wz::Node;
 use glam::{vec2, Vec2};
 use std::collections::HashMap;
 use wz_reader::node::Error;
+use crate::map;
 
 pub mod world_map;
 
@@ -168,6 +169,15 @@ impl From<Node> for MapLife {
 pub enum BackgroundSprite {
     Sprite(Sprite),
     SpriteAnimation(SpriteAnimation),
+}
+
+impl BackgroundSprite {
+    pub fn current_frame(&self) -> &Sprite {
+        match self {
+            BackgroundSprite::Sprite(sprite) => sprite,
+            BackgroundSprite::SpriteAnimation(animation) => animation.current_frame(),
+        }
+    }
 }
 
 impl MapBackground {

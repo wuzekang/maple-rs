@@ -13,7 +13,7 @@ pub struct Runtime {
     pub font_system: FontSystem,
     pub swash_cache: SwashCache,
     pub states: SecondaryMap<DefaultKey, Rc<RefCell<ViewState>>>,
-    pub elements: SecondaryMap<DefaultKey, Rc<RefCell<Box<dyn Element>>>>,
+    pub elements: SecondaryMap<DefaultKey, Rc<dyn Element>>,
 }
 
 impl Default for Runtime {

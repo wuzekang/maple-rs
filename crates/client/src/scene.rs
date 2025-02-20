@@ -2,8 +2,7 @@ use crate::character::Character;
 use crate::character::ZMap;
 use crate::map;
 use crate::math;
-use crate::sdl;
-use crate::sdl::Renderer;
+use crate::sprite::SpriteRenderer;
 use crate::wz;
 use glam::{vec2, Vec2};
 use hecs::World;
@@ -12,13 +11,10 @@ use sdl3_sys::everything::{
     SDL_GetKeyboardState, SDL_GetTicks, SDL_GetWindowPixelDensity, SDL_Renderer, SDL_Scancode,
     SDL_SetRenderScale, SDL_Window,
 };
-use slotmap::DefaultKey;
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::sync::Arc;
 use ui::event::Event;
 use ui::reactive::{RwSignal, SignalGet, SignalUpdate};
-use ui::{Drawable, ViewId};
+use ui::Drawable;
 
 #[derive(Default, Clone)]
 pub struct Camera {
@@ -40,7 +36,6 @@ struct Player {
 pub struct MainScene {
     window: *mut SDL_Window,
     renderer: *mut SDL_Renderer,
-    sprite_renderer: Renderer,
     size: Vec2,
     ticks: u64,
     delta: f32,
@@ -65,8 +60,6 @@ impl MainScene {
         unsafe {
             SDL_SetRenderScale(renderer, dpr, dpr);
         }
-
-        let sprite_renderer = sdl::Renderer::new(dpr, renderer);
 
         let ticks = unsafe { SDL_GetTicks() };
 
@@ -118,7 +111,6 @@ impl MainScene {
             renderer,
             ticks,
             delta: 0.0,
-            sprite_renderer,
             camera: Camera {
                 speed: Vec2::ONE * 40.0,
                 ..Default::default()
@@ -136,25 +128,96 @@ impl MainScene {
         self.delta = (now - self.ticks) as f32;
         self.ticks = now;
     }
+
+    pub fn event(&mut self, event: &Event) {
+        let event = event.event;
+        let Self { state, player, .. } = self;
+
+        let pressed_left = unsafe { *state.offset(SDL_Scancode::LEFT.0 as isize) };
+        let pressed_right = unsafe { *state.offset(SDL_Scancode::RIGHT.0 as isize) };
+        let pressed_up = unsafe { *state.offset(SDL_Scancode::UP.0 as isize) };
+        let pressed_down = unsafe { *state.offset(SDL_Scancode::DOWN.0 as isize) };
+
+        match SDL_EventType(unsafe { event.r#type }) {
+            SDL_EventType::KEY_DOWN => match unsafe { event.key.scancode } {
+                SDL_Scancode::LEFT => {
+                    player.direction.x = -1.0;
+                }
+                SDL_Scancode::RIGHT => {
+                    player.direction.x = 1.0;
+                }
+                SDL_Scancode::UP => {
+                    player.direction.y = -1.0;
+                }
+                SDL_Scancode::DOWN => {
+                    player.direction.y = 1.0;
+                }
+                _ => {}
+            },
+
+            SDL_EventType::KEY_UP => match unsafe { event.key.scancode } {
+                SDL_Scancode::LEFT => {
+                    player.direction.x = if pressed_right { 1.0 } else { 0.0 };
+                }
+                SDL_Scancode::RIGHT => {
+                    player.direction.x = if pressed_left { -1.0 } else { 0.0 };
+                }
+                SDL_Scancode::UP => {
+                    player.direction.y = if pressed_down { 1.0 } else { 0.0 };
+                }
+                SDL_Scancode::DOWN => {
+                    player.direction.y = if pressed_up { -1.0 } else { 0.0 };
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+
+    pub fn update(&mut self) {
+        self.tick();
+
+        player_move(self);
+
+        {
+            let Self {
+                camera,
+                camera_signal,
+                map,
+                size,
+                delta,
+                ..
+            } = self;
+            if camera.position != camera_signal.get().position {
+                camera_signal.set(camera.clone());
+            }
+
+            let camera_position = camera.position;
+
+            for item in &mut map.backgrounds {
+                update_back(*delta, camera_position, *size, item);
+            }
+        }
+    }
 }
 
 impl Drawable for MainScene {
-    fn draw(&self, _: ViewId) {
+    fn draw(&self, renderer: &ui::Renderer) {
         let Self {
             delta,
             size,
             camera,
-            sprite_renderer,
             map,
             player,
             ..
         } = self;
 
+        let sprite_renderer = &SpriteRenderer::new(renderer);
         let camera_position = camera.position;
 
         for item in &map.backgrounds {
             if !item.front {
-                draw_back(*delta, camera_position, *size, sprite_renderer, item);
+                draw_back(camera_position, *size, sprite_renderer, item);
             }
         }
 
@@ -210,78 +273,9 @@ impl Drawable for MainScene {
             }
         }
     }
+
     fn size(&self) -> Vec2 {
         self.size
-    }
-    fn update(&mut self) {
-        self.tick();
-
-        player_move(self);
-
-        {
-            let Self {
-                camera,
-                camera_signal,
-                map,
-                size,
-                delta,
-                ..
-            } = self;
-            if camera.position != camera_signal.get().position {
-                camera_signal.set(camera.clone());
-            }
-
-            let camera_position = camera.position;
-
-            for item in &mut map.backgrounds {
-                update_back(*delta, camera_position, *size, item);
-            }
-        }
-    }
-
-    fn event(&mut self, event: &Event) {
-        let event = event.event;
-        let Self { state, player, .. } = self;
-
-        let pressed_left = unsafe { *state.offset(SDL_Scancode::LEFT.0 as isize) };
-        let pressed_right = unsafe { *state.offset(SDL_Scancode::RIGHT.0 as isize) };
-        let pressed_up = unsafe { *state.offset(SDL_Scancode::UP.0 as isize) };
-        let pressed_down = unsafe { *state.offset(SDL_Scancode::DOWN.0 as isize) };
-
-        match SDL_EventType(unsafe { event.r#type }) {
-            SDL_EventType::KEY_DOWN => match unsafe { event.key.scancode } {
-                SDL_Scancode::LEFT => {
-                    player.direction.x = -1.0;
-                }
-                SDL_Scancode::RIGHT => {
-                    player.direction.x = 1.0;
-                }
-                SDL_Scancode::UP => {
-                    player.direction.y = -1.0;
-                }
-                SDL_Scancode::DOWN => {
-                    player.direction.y = 1.0;
-                }
-                _ => {}
-            },
-
-            SDL_EventType::KEY_UP => match unsafe { event.key.scancode } {
-                SDL_Scancode::LEFT => {
-                    player.direction.x = if pressed_right { 1.0 } else { 0.0 };
-                }
-                SDL_Scancode::RIGHT => {
-                    player.direction.x = if pressed_left { -1.0 } else { 0.0 };
-                }
-                SDL_Scancode::UP => {
-                    player.direction.y = if pressed_down { 1.0 } else { 0.0 };
-                }
-                SDL_Scancode::DOWN => {
-                    player.direction.y = if pressed_up { -1.0 } else { 0.0 };
-                }
-                _ => {}
-            },
-            _ => {}
-        }
     }
 }
 
@@ -350,19 +344,22 @@ fn update_back(delta: f32, camera_position: Vec2, size: Vec2, item: &mut map::Ma
             item.offset_y = item.y + offset.y * (item.ry + 100) as f32 / 100.0;
         }
     }
+
+    match &item.sprite {
+        map::BackgroundSprite::SpriteAnimation(animation) => {
+            animation.tick(delta);
+        }
+        _ => {}
+    };
 }
 
 fn draw_back(
-    delta: f32,
     camera_position: Vec2,
     size: Vec2,
-    sprite_renderer: &Renderer,
+    sprite_renderer: &SpriteRenderer,
     item: &map::MapBackground,
 ) {
-    let sprite = match &item.sprite {
-        map::BackgroundSprite::Sprite(sprite) => sprite,
-        map::BackgroundSprite::SpriteAnimation(animation) => animation.tick(delta),
-    };
+    let sprite = item.sprite.current_frame();
     let w = sprite.image.width() as f32;
     let h = sprite.image.height() as f32;
     let cw = if item.cx > 0 { item.cx as f32 } else { w };
@@ -414,32 +411,5 @@ fn draw_back(
         _ => {
             sprite_renderer.draw_flip(sprite, vec2(x, y) - camera_position, item.flip);
         }
-    }
-}
-
-#[derive(Clone)]
-pub struct EventEmitter {
-    listeners: Rc<RefCell<slotmap::SlotMap<DefaultKey, Box<dyn Fn()>>>>,
-}
-
-impl EventEmitter {
-    pub fn new() -> Self {
-        Self {
-            listeners: Default::default(),
-        }
-    }
-
-    pub fn emit(&self) {
-        for (_, f) in self.listeners.borrow().iter() {
-            f();
-        }
-    }
-
-    pub fn on(&self, f: impl Fn() + 'static) -> DefaultKey {
-        self.listeners.borrow_mut().insert(Box::new(f))
-    }
-
-    pub fn off(&self, key: DefaultKey) {
-        self.listeners.borrow_mut().remove(key);
     }
 }
