@@ -11,6 +11,7 @@ use crate::{
     effect::{run_effect, EffectTrait},
     id::Id,
     signal::Signal,
+    reference::Reference
 };
 
 thread_local! {
@@ -24,6 +25,7 @@ pub(crate) struct Runtime {
     pub(crate) current_scope: RefCell<Id>,
     pub(crate) children: RefCell<HashMap<Id, HashSet<Id>>>,
     pub(crate) signals: RefCell<HashMap<Id, Signal>>,
+    pub(crate) references: RefCell<HashMap<Id, Reference>>,
     pub(crate) cleanups: RefCell<HashMap<Id, Vec<Box<dyn Fn()>>>>,
     pub(crate) contexts: RefCell<HashMap<TypeId, Box<dyn Any>>>,
     pub(crate) batching: Cell<bool>,
@@ -43,6 +45,7 @@ impl Runtime {
             current_scope: RefCell::new(Id::next()),
             children: RefCell::new(HashMap::new()),
             signals: Default::default(),
+            references: Default::default(),
             cleanups: Default::default(),
             contexts: Default::default(),
             batching: Cell::new(false),

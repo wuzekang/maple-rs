@@ -1,24 +1,32 @@
 use crate::element::{Element, IntoElement};
-use crate::event::{Event, EventEmitter, EventType};
+use crate::event::{
+    BlurEvent, Event, EventEmitter, EventTarget, EventType, FocusEvent, KeyboardEvent,
+    MouseMotionEvent, TextInputEvent, UnhandledEvent,
+};
 use crate::runtime::RUNTIME;
 use crate::sdl::{PollEvent, Renderer};
-use crate::style::{Cursor, StyleComputeContext};
+use crate::style::{Cursor, StyleComputeContext, Styleable};
 use crate::view::View;
 use crate::view_id::ViewId;
 use crate::{Bounds, Drawable};
 use glam::{vec2, Vec2};
 use peniko::Color;
 use reactive::{provide_context, RwSignal, Scope, SignalGet, SignalUpdate};
-use sdl3_sys::everything::{SDL_Delay, SDL_GetTicks, SDL_HideCursor, SDL_RenderClear, SDL_RenderPresent, SDL_SetRenderDrawColor, SDL_SetRenderVSync, SDL_ShowCursor};
+use sdl3_sys::everything::{
+    SDL_Delay, SDL_GetTicks, SDL_HideCursor, SDL_RenderClear, SDL_RenderPresent,
+    SDL_SetRenderDrawColor, SDL_SetRenderVSync, SDL_ShowCursor,
+};
 use sdl3_sys::mouse::SDL_GetMouseState;
 use sdl3_sys::{
     events::{SDL_Event, SDL_EventType},
-    everything::SDL_Window,
+    everything::*,
     render::{SDL_GetRenderWindow, SDL_Renderer},
     video::SDL_GetWindowSize,
 };
-use std::cell::{Cell, RefCell};
+use std::any::Any;
+use std::cell::RefCell;
 use std::collections::HashSet;
+use std::ffi::CStr;
 use std::mem;
 use std::mem::MaybeUninit;
 use std::rc::Rc;
@@ -39,83 +47,130 @@ fn compute_layout(taffy: &mut TaffyTree, parent: NodeId, viewport: Point<f32>) {
 }
 
 #[derive(Default, Clone)]
-pub struct EventManager {
+pub struct EventDispatcher {
     hovered: Rc<RefCell<HashSet<ViewId>>>,
-    entered: Rc<RefCell<HashSet<ViewId>>>,
-    leaved: Rc<RefCell<HashSet<ViewId>>>,
+    focused: Rc<RefCell<Option<ViewId>>>,
     removed: Rc<RefCell<Vec<(ViewId, Scope)>>>,
+    mounted: Rc<RefCell<Vec<ViewId>>>,
+    unmounted: Rc<RefCell<Vec<ViewId>>>,
 }
 
-impl EventManager {
-    pub fn handle_event(&self, event: &SDL_Event, root: ViewId) {
-        let mut event = Event {
-            event_type: EventType::None,
-            event,
-            target: root,
-            current_target: root.into(),
-        };
+impl EventDispatcher {
+    pub fn focus(&self, target: ViewId) {
+        if let Some(focused) = self.focused.borrow().as_ref() {
+            if target == *focused {
+                return;
+            }
+        }
+        let focused = mem::take(&mut *self.focused.borrow_mut());
+        self.focused.borrow_mut().insert(target);
+        let prev = HashSet::<ViewId>::from_iter(focused.into_iter());
+        let next = HashSet::<ViewId>::from_iter(self.focused.borrow().into_iter());
+        for id in &prev - &next {
+            let mut blur_event = BlurEvent {
+                r#type: EventType::Blur,
+                event_target: EventTarget::new(id),
+            };
+            blur_event
+                .target()
+                .dispatch_event(&mut blur_event as &mut dyn Event, false);
+        }
 
-        let mut target: Option<ViewId> = None;
-        if event.is_pointer_event() {
+        for id in &next - &prev {
+            let mut focus_event = FocusEvent {
+                r#type: EventType::Focus,
+                event_target: EventTarget::new(id),
+            };
+            focus_event
+                .target()
+                .dispatch_event(&mut focus_event as &mut dyn Event, false);
+        }
+    }
+
+    pub fn handle_event(&self, event: &mut dyn Any, root: ViewId) {
+        if let Some(event) = event.downcast_mut::<MouseMotionEvent>() {
+            let mut target: Option<ViewId> = None;
             root.event_capture(event.client(), &mut target);
-        }
-
-        if let Some(target) = target {
-            event.target = target;
-        }
-
-        if event.sdl_event_type() == SDL_EventType::MOUSE_MOTION {
-            let prev = mem::take(&mut *self.hovered.borrow_mut());
-            let mut node = event.target;
-            self.hovered.borrow_mut().insert(node);
-            while let Some(parent) = node.parent() {
-                self.hovered.borrow_mut().insert(parent);
-                node = parent;
+            if let Some(target) = target {
+                event.set_target(target);
             }
-            *self.entered.borrow_mut() = &*self.hovered.borrow() - &prev;
-            *self.leaved.borrow_mut() = &prev - &*self.hovered.borrow();
 
-            event.event_type = EventType::MouseEnter;
-            for item in self.entered.take().iter() {
-                self.entered.borrow_mut().remove(&item);
-                item.dispatch_event(&event, false)
+            if event.r#type() == EventType::MouseMove {
+                let prev = mem::take(&mut *self.hovered.borrow_mut());
+                let mut node = event.target();
+                self.hovered.borrow_mut().insert(node);
+                while let Some(parent) = node.parent() {
+                    self.hovered.borrow_mut().insert(parent);
+                    node = parent;
+                }
+                let mut entered = &*self.hovered.borrow() - &prev;
+                let mut leaved = &prev - &*self.hovered.borrow();
+
+                event.r#type = EventType::MouseEnter;
+                for item in entered.iter() {
+                    item.dispatch_event(event, false)
+                }
+
+                event.r#type = EventType::MouseLeave;
+                for item in leaved.iter() {
+                    item.dispatch_event(event, false)
+                }
+
+                event.r#type = EventType::MouseMove;
+                event.target().dispatch_event(event as &mut dyn Event, true);
+            } else if event.r#type() == EventType::MouseDown {
+                event.r#type = EventType::MouseDown;
+                event.target().dispatch_event(event as &mut dyn Event, true);
+                dbg!(event.target());
+                self.focus(event.target());
             }
-            self.entered.borrow_mut().clear();
-
-            event.event_type = EventType::MouseLeave;
-            for item in self.leaved.take().iter() {
-                item.dispatch_event(&event, false)
+        } else if let Some(event) = event.downcast_mut::<TextInputEvent>() {
+            if (event.r#type() == EventType::TextInput) {
+                let id = self.focused.borrow().unwrap_or(root);
+                event.set_target(id);
+                event.r#type = EventType::TextInput;
+                event
+                    .target()
+                    .dispatch_event(event as &mut dyn Event, false);
             }
-            self.leaved.borrow_mut().clear();
-
-            event.event_type = EventType::MouseMove;
-            event.target.dispatch_event(&event, true);
-        } else if event.sdl_event_type() == SDL_EventType::MOUSE_BUTTON_DOWN {
-            event.event_type = EventType::MouseDown;
-            event.target.dispatch_event(&event, true);
+        } else if let Some(event) = event.downcast_mut::<KeyboardEvent>() {
+            if event.r#type() == EventType::KeyDown || event.r#type == EventType::KeyUp {
+                let id = self.focused.borrow().unwrap_or(root);
+                event.set_target(id);
+                event.target().dispatch_event(event as &mut dyn Event, true);
+            }
         } else {
-            event.target.dispatch_event(&event, false);
+            // event.target().dispatch_event(event, false);
         }
-
-        //
     }
 
     pub fn remove(&self, view: ViewId, scope: Scope) {
         self.removed.borrow_mut().push((view, scope));
     }
 
+    pub fn mount(&self, view: ViewId) {
+        self.mounted.borrow_mut().push(view);
+    }
+
+    pub fn unmount(&self, view: ViewId) {
+        self.unmounted.borrow_mut().push(view);
+    }
+
     pub fn perform_remove(&self) {
+        let focused = mem::take(&mut *self.focused.borrow_mut());
+        let mut focused = HashSet::<ViewId>::from_iter(focused.into_iter());
         for (id, scope) in self.removed.borrow().iter() {
             self.hovered.borrow_mut().remove(&id);
-            self.entered.borrow_mut().remove(&id);
-            self.leaved.borrow_mut().remove(&id);
+            focused.remove(id);
             let child = id.remove();
             for item in child {
                 self.hovered.borrow_mut().remove(&item);
-                self.entered.borrow_mut().remove(&item);
-                self.leaved.borrow_mut().remove(&item);
+                focused.remove(&item);
             }
             scope.dispose();
+        }
+        for item in focused.into_iter() {
+            let _ = self.focused.borrow_mut().insert(item);
         }
         self.removed.borrow_mut().clear();
     }
@@ -127,7 +182,7 @@ struct CursorElement {
     cursor: Cursor,
     image: Option<Box<dyn Drawable>>,
     target: Option<ViewId>,
-    inspect: bool,
+    pub inspect: bool,
 }
 
 impl CursorElement {
@@ -140,6 +195,10 @@ impl CursorElement {
             target: Default::default(),
             inspect: false,
         }
+    }
+
+    fn set_inspect(&mut self, inspect: bool) {
+        self.inspect = inspect;
     }
 }
 
@@ -188,8 +247,11 @@ impl Drawable for CursorElement {
                         unsafe { SDL_HideCursor() };
                         self.image = None;
                     }
-                    Cursor::System(_) => {
-                        unsafe { SDL_ShowCursor() };
+                    Cursor::System(cursor) => {
+                        unsafe {
+                            SDL_ShowCursor();
+                            SDL_SetCursor(cursor.cursor);
+                        };
                         self.image = None;
                     }
                     Cursor::Drawable(f) => {
@@ -220,7 +282,7 @@ pub struct Root {
     update_event: EventEmitter,
     renderer: *mut SDL_Renderer,
     window: *mut SDL_Window,
-    event_manager: EventManager,
+    event_manager: EventDispatcher,
     id: ViewId,
     current_cursor: Cursor,
     cursor_element: CursorElement,
@@ -241,8 +303,10 @@ impl Root {
         });
 
         let id = ViewId::new();
+        id.state().borrow_mut().mounted = true;
+
         let update_event = EventEmitter::new();
-        let event_manager: EventManager = Default::default();
+        let event_manager: EventDispatcher = Default::default();
 
         provide_context(window);
         provide_context(renderer);
@@ -269,16 +333,102 @@ impl Root {
         }
     }
 
-    pub fn dispatch_event(&self, event: &SDL_Event) {
+    pub fn dispatch_event(&mut self, event: &SDL_Event) {
         unsafe {
-            if SDL_EventType(event.r#type) == SDL_EventType::WINDOW_RESIZED.into() {
-                self.size
-                    .set(vec2(event.window.data1 as f32, event.window.data2 as f32));
+            match SDL_EventType(event.r#type) {
+                SDL_EventType::WINDOW_RESIZED => {
+                    self.size
+                        .set(vec2(event.window.data1 as f32, event.window.data2 as f32));
+                }
+                SDL_EventType::KEY_DOWN => {
+                    if (event.key.key == SDLK_D) {
+                        self.cursor_element
+                            .set_inspect(!self.cursor_element.inspect);
+                    }
+                }
+                _ => {}
             }
         }
 
-        self.event_manager.handle_event(event, self.view.id());
-        self.event_manager.perform_remove();
+        let id = self.view.id();
+
+        unsafe {
+            match SDL_EventType(event.r#type) {
+                SDL_EventType::MOUSE_MOTION => {
+                    self.event_manager.handle_event(
+                        MouseMotionEvent {
+                            r#type: EventType::MouseMove,
+                            event_target: EventTarget::new(id),
+                            motion: vec2(event.motion.x, event.motion.y),
+                        }
+                        .as_any_mut(),
+                        self.view.id(),
+                    );
+                }
+                SDL_EventType::MOUSE_BUTTON_DOWN => {
+                    self.event_manager.handle_event(
+                        MouseMotionEvent {
+                            r#type: EventType::MouseDown,
+                            event_target: EventTarget::new(id),
+                            motion: vec2(event.motion.x, event.motion.y),
+                        }
+                        .as_any_mut(),
+                        id,
+                    );
+                }
+                SDL_EventType::MOUSE_BUTTON_UP => self.event_manager.handle_event(
+                    MouseMotionEvent {
+                        r#type: EventType::MouseUp,
+                        event_target: EventTarget::new(id),
+                        motion: vec2(event.motion.x, event.motion.y),
+                    }
+                    .as_any_mut(),
+                    self.view.id(),
+                ),
+                SDL_EventType::KEY_DOWN => self.event_manager.handle_event(
+                    KeyboardEvent {
+                        r#type: EventType::KeyDown,
+                        event_target: EventTarget::new(id),
+                        key: event.key.key,
+                        r#mod: event.key.r#mod,
+                        scancode: event.key.scancode,
+                    }
+                    .as_any_mut(),
+                    self.view.id(),
+                ),
+                SDL_EventType::KEY_UP => self.event_manager.handle_event(
+                    KeyboardEvent {
+                        r#type: EventType::KeyUp,
+                        event_target: EventTarget::new(id),
+                        key: event.key.key,
+                        r#mod: event.key.r#mod,
+                        scancode: event.key.scancode,
+                    }
+                    .as_any_mut(),
+                    self.view.id(),
+                ),
+                SDL_EventType::TEXT_INPUT => self.event_manager.handle_event(
+                    TextInputEvent {
+                        r#type: EventType::TextInput,
+                        event_target: EventTarget::new(id),
+                        text: CStr::from_ptr(event.text.text)
+                            .to_str()
+                            .unwrap()
+                            .to_string(),
+                    }
+                    .as_any_mut(),
+                    self.view.id(),
+                ),
+                _ => self.event_manager.handle_event(
+                    UnhandledEvent {
+                        r#type: EventType::Unhandled,
+                        event_target: EventTarget::new(id),
+                    }
+                    .as_any_mut(),
+                    self.view.id(),
+                ),
+            }
+        };
     }
 
     pub fn update(&mut self, delta: u64) {
@@ -345,6 +495,11 @@ impl Root {
                     }
                 }
 
+                for id in mem::take(&mut *self.event_manager.unmounted.borrow_mut()) {
+                    id.unmounted();
+                }
+                self.event_manager.perform_remove();
+
                 let current = unsafe { SDL_GetTicks() };
                 self.update(current - prev);
                 prev = current;
@@ -358,6 +513,11 @@ impl Root {
                 self.paint();
 
                 SDL_RenderPresent(renderer);
+
+                for id in mem::take(&mut *self.event_manager.mounted.borrow_mut()) {
+                    id.mounted()
+                }
+
                 SDL_Delay(16);
             }
         }

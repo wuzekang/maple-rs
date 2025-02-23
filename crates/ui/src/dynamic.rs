@@ -1,21 +1,9 @@
-use crate::root::EventManager;
+use crate::root::EventDispatcher;
 use crate::{view_id::ViewId, view_tuple::ViewTuple};
 use reactive::{
     as_child_of_current_scope, create_effect, create_signal,
     use_context, ReadSignal, Scope, SignalGet, SignalUpdate,
 };
-
-pub fn create_children_effect<VT: ViewTuple, F: Fn() -> VT + 'static>(id: ViewId, f: F) {
-    create_effect(move |_| {
-        let children = f()
-            .into_vec()
-            .into_iter()
-            .map(|item| item.get())
-            .flatten()
-            .collect::<Vec<_>>();
-        id.set_children(children);
-    });
-}
 
 pub struct Dynamic {
     pub signal: ReadSignal<Vec<ViewId>>,
@@ -34,7 +22,7 @@ impl Dynamic {
 
         let (getter, setter) = create_signal(vec![]);
 
-        let event_manager: EventManager = use_context().unwrap();
+        let event_manager: EventDispatcher = use_context().unwrap();
         create_effect({
             let event_manager = event_manager.clone();
             move |prev: Option<(Vec<ViewId>, Scope)>| {

@@ -1,10 +1,12 @@
-use cosmic_text::{FontSystem, Placement, SwashCache};
+use crate::OffsetEditor;
+use cosmic_text::{Edit, Editor, FontSystem, Placement, SwashCache};
 use glam::{vec2, Vec2};
 use image::DynamicImage;
 use peniko::Color;
 use sdl3_sys::{
     blendmode::SDL_BLENDMODE_BLEND,
     events::{SDL_Event, SDL_PollEvent},
+    everything::*,
     pixels::SDL_PixelFormat,
     rect::{SDL_FRect, SDL_Rect},
     render::{
@@ -20,9 +22,10 @@ use sdl3_sys::{
     },
 };
 use std::rc::Rc;
-use std::{cell::RefCell, collections::HashMap, mem::MaybeUninit, sync::Arc};
+use std::{cell::RefCell, cmp, collections::HashMap, mem::MaybeUninit, sync::Arc};
 use taffy::prelude::length;
 use taffy::{LengthPercentage, Rect};
+use unicode_segmentation::UnicodeSegmentation;
 
 pub struct Surface {
     pub surface: *mut SDL_Surface,
@@ -212,12 +215,17 @@ impl Drawable for NineGridTexture {
     }
 }
 
+thread_local! {
+    pub ( crate ) static KEYBOARD_STATE: * const bool = unsafe{SDL_GetKeyboardState(std::ptr::null_mut() as * mut core::ffi::c_int)};
+}
+
+pub fn key_pressed(key: SDL_Scancode) -> bool {
+    KEYBOARD_STATE.with(|state| unsafe { *state.offset(key.0 as isize) })
+}
+
 pub struct PollEvent {
     event: MaybeUninit<SDL_Event>,
 }
-
-unsafe impl Send for PollEvent {}
-unsafe impl Sync for PollEvent {}
 
 impl PollEvent {
     pub fn new() -> Self {
@@ -462,15 +470,134 @@ impl Renderer {
         };
     }
 
+    pub fn set_color(&self, color: Color) {
+        unsafe {
+            SDL_SetRenderDrawColor(self.renderer, color.r, color.g, color.b, color.a);
+        }
+    }
+
+    pub fn line(&self, x1: f32, y1: f32, x2: f32, y2: f32) {
+        unsafe {
+            SDL_RenderLine(self.renderer, x1, y1, x2, y2);
+        }
+    }
+
+    pub fn fill_selection(
+        &self,
+        color: Color,
+        location: taffy::Point<f32>,
+        size: taffy::Size<f32>,
+        editor: &OffsetEditor,
+    ) {
+        let offset = editor.offset;
+        let f = |x: i32, y: i32, w: u32, h: u32| {
+            let mut x = x as f32 + offset.x;
+            let mut y = y as f32 + offset.y;
+            let mut w = w as f32;
+            let mut h = h as f32;
+            w = w.min(size.width - x);
+            h = h.min(size.height - y);
+            if w <= 0.0 || h <= 0.0 || x + w <= 0.0 || y + h <= 0.0 {
+                return;
+            }
+            if x < 0.0 {
+                w += x;
+                x = 0.0;
+            }
+            if y < 0.0 {
+                h += y;
+                y = 0.0;
+            }
+            self.fill_rect(color, vec2(location.x + x, location.y + y), vec2(w, h));
+        };
+        let selection_bounds = editor.editor.selection_bounds();
+        editor.editor.with_buffer(|buffer| {
+            for run in buffer.layout_runs() {
+                let line_i = run.line_i;
+                let line_y = run.line_y;
+                let line_top = run.line_top;
+                let line_height = run.line_height;
+
+                // Highlight selection
+                if let Some((start, end)) = selection_bounds {
+                    if line_i >= start.line && line_i <= end.line {
+                        let mut range_opt = None;
+                        for glyph in run.glyphs.iter() {
+                            // Guess x offset based on characters
+                            let cluster = &run.text[glyph.start..glyph.end];
+                            let total = cluster.grapheme_indices(true).count();
+                            let mut c_x = glyph.x;
+                            let c_w = glyph.w / total as f32;
+                            for (i, c) in cluster.grapheme_indices(true) {
+                                let c_start = glyph.start + i;
+                                let c_end = glyph.start + i + c.len();
+                                if (start.line != line_i || c_end > start.index)
+                                    && (end.line != line_i || c_start < end.index)
+                                {
+                                    range_opt = match range_opt.take() {
+                                        Some((min, max)) => Some((
+                                            cmp::min(min, c_x as i32),
+                                            cmp::max(max, (c_x + c_w) as i32),
+                                        )),
+                                        None => Some((c_x as i32, (c_x + c_w) as i32)),
+                                    };
+                                } else if let Some((min, max)) = range_opt.take() {
+                                    f(
+                                        min,
+                                        line_top as i32,
+                                        cmp::max(0, max - min) as u32,
+                                        line_height as u32,
+                                    );
+                                }
+                                c_x += c_w;
+                            }
+                        }
+
+                        if run.glyphs.is_empty() && end.line > line_i {
+                            // Highlight all of internal empty lines
+                            range_opt = Some((0, buffer.size().0.unwrap_or(0.0) as i32));
+                        }
+
+                        if let Some((mut min, mut max)) = range_opt.take() {
+                            if end.line > line_i {
+                                // Draw to end of line
+                                if run.rtl {
+                                    min = 0;
+                                } else {
+                                    max = buffer.size().0.unwrap_or(0.0) as i32;
+                                }
+                            }
+                            f(
+                                min,
+                                line_top as i32,
+                                cmp::max(0, max - min) as u32,
+                                line_height as u32,
+                            );
+                        }
+                    }
+                }
+            }
+        });
+    }
+
     pub fn fill_text(
         &self,
         color: Color,
         location: taffy::Point<f32>,
+        size: taffy::Size<f32>,
+        offset: taffy::Point<f32>,
         swash_cache: &mut SwashCache,
         font_system: &mut FontSystem,
         buffer: &cosmic_text::Buffer,
     ) {
         for run in buffer.layout_runs() {
+            // self.line(0.0, location.y + run.line_top, 1000.0, location.y + run.line_top);
+            // self.line(0.0, location.y + run.line_y, 1000.0, location.y + run.line_y);
+            let y = run.line_top + offset.y;
+            if y + run.line_height <= 0.0 || y >= size.height {
+                continue;
+            }
+
             for glyph in run.glyphs.iter() {
                 let physical_glyph = glyph.physical((0., 0.), 1.0);
                 let mut text_textures = self.text_textures.borrow_mut();
@@ -514,21 +641,38 @@ impl Renderer {
                         }
                     });
 
-                let x = physical_glyph.x + texture.placement.left;
-                let y = run.line_y as i32 + physical_glyph.y - texture.placement.top;
+                let x = (physical_glyph.x + texture.placement.left) as f32 + offset.x;
+                let y = (run.line_y as i32 + physical_glyph.y - texture.placement.top) as f32
+                    + offset.y;
+
+                if (x + texture.placement.width as f32) <= 0.0 {
+                    continue;
+                }
+                if x >= size.width {
+                    break;
+                }
+
+                let sx = (-x).max(0.0);
+                let sy = (-y).max(0.0);
+
+                let w = (texture.placement.width as f32).min(size.width - x) - sx;
+                let h = (texture.placement.height as f32).min(size.height - y) - sy;
+
+                let x = location.x + x as f32 + sx;
+                let y = location.y + y as f32 + sy;
 
                 unsafe {
                     SDL_SetTextureColorMod(texture.texture, color.r, color.g, color.b);
                     SDL_RenderTexture(
                         self.renderer,
                         texture.texture,
-                        std::ptr::null(),
                         &SDL_FRect {
-                            x: location.x + x as f32,
-                            y: location.y + y as f32,
-                            w: texture.placement.width as f32,
-                            h: texture.placement.height as f32,
+                            x: sx,
+                            y: sy,
+                            w,
+                            h,
                         },
+                        &SDL_FRect { x, y, w, h },
                     )
                 };
             }

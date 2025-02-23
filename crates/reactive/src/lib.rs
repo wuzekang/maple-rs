@@ -12,6 +12,7 @@ mod id;
 mod impls;
 mod memo;
 mod read;
+mod reference;
 mod runtime;
 mod scope;
 mod signal;
@@ -21,9 +22,12 @@ mod write;
 pub use base::{create_base_signal, BaseSignal};
 pub use context::{provide_context, use_context};
 pub use derived::{create_derived_rw_signal, DerivedRwSignal};
-pub use effect::{batch, create_effect, create_stateful_updater, create_updater, untrack, on_cleanup};
+pub use effect::{
+    batch, create_effect, create_stateful_updater, create_updater, on_cleanup, untrack,
+};
 pub use memo::{create_memo, Memo};
 pub use read::{ReadSignalValue, SignalGet, SignalRead, SignalTrack, SignalWith};
+pub use reference::{create_ref, Ref};
 pub use scope::{as_child_of_current_scope, with_scope, Scope};
 pub use signal::{create_rw_signal, create_signal, ReadSignal, RwSignal, WriteSignal};
 pub use trigger::{create_trigger, Trigger};

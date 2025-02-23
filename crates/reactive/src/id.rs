@@ -1,5 +1,6 @@
 use std::sync::atomic::AtomicU64;
 
+use crate::reference::Reference;
 use crate::{effect::observer_clean_up, runtime::RUNTIME, signal::Signal};
 
 /// An internal id which can reference a Signal/Effect/Scope.
@@ -22,7 +23,15 @@ impl Id {
     pub(crate) fn add_signal(&self, signal: Signal) {
         RUNTIME.with(|runtime| runtime.signals.borrow_mut().insert(*self, signal));
     }
-    
+
+    pub(crate) fn reference(&self) -> Option<Reference> {
+        RUNTIME.with(|runtime| runtime.references.borrow().get(self).cloned())
+    }
+
+    pub(crate) fn add_reference(&self, reference: Reference) {
+        RUNTIME.with(|runtime| runtime.references.borrow_mut().insert(*self, reference));
+    }
+
     pub(crate) fn add_cleanup(&self, f: impl Fn() + 'static) {
         RUNTIME.with(|runtime| {
             runtime
@@ -47,11 +56,12 @@ impl Id {
     /// Dispose the relevant resources that's linking to this Id, and the all the children
     /// and grandchildren.
     pub(crate) fn dispose(&self) {
-        if let Ok((children, signal, cleanup)) = RUNTIME.try_with(|runtime| {
+        if let Ok((children, signal, cleanup, _)) = RUNTIME.try_with(|runtime| {
             (
                 runtime.children.borrow_mut().remove(self),
                 runtime.signals.borrow_mut().remove(self),
                 runtime.cleanups.borrow_mut().remove(self),
+                runtime.references.borrow_mut().remove(self),
             )
         }) {
             if let Some(children) = children {

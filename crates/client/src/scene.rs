@@ -12,7 +12,7 @@ use sdl3_sys::everything::{
     SDL_SetRenderScale, SDL_Window,
 };
 use std::sync::Arc;
-use ui::event::Event;
+use ui::event::{Event, EventType, KeyboardEvent};
 use ui::reactive::{RwSignal, SignalGet, SignalUpdate};
 use ui::Drawable;
 
@@ -129,8 +129,7 @@ impl MainScene {
         self.ticks = now;
     }
 
-    pub fn event(&mut self, event: &Event) {
-        let event = event.event;
+    pub fn event(&mut self, event: &mut dyn Event) {
         let Self { state, player, .. } = self;
 
         let pressed_left = unsafe { *state.offset(SDL_Scancode::LEFT.0 as isize) };
@@ -138,40 +137,43 @@ impl MainScene {
         let pressed_up = unsafe { *state.offset(SDL_Scancode::UP.0 as isize) };
         let pressed_down = unsafe { *state.offset(SDL_Scancode::DOWN.0 as isize) };
 
-        match SDL_EventType(unsafe { event.r#type }) {
-            SDL_EventType::KEY_DOWN => match unsafe { event.key.scancode } {
-                SDL_Scancode::LEFT => {
-                    player.direction.x = -1.0;
-                }
-                SDL_Scancode::RIGHT => {
-                    player.direction.x = 1.0;
-                }
-                SDL_Scancode::UP => {
-                    player.direction.y = -1.0;
-                }
-                SDL_Scancode::DOWN => {
-                    player.direction.y = 1.0;
-                }
-                _ => {}
-            },
+        if let Some(event) = event.as_any_mut().downcast_ref::<KeyboardEvent>() {
+            match event.r#type {
+                EventType::KeyDown => match event.scancode {
+                    SDL_Scancode::LEFT => {
+                        player.direction.x = -1.0;
+                    }
+                    SDL_Scancode::RIGHT => {
+                        player.direction.x = 1.0;
+                    }
+                    SDL_Scancode::UP => {
+                        player.direction.y = -1.0;
+                    }
+                    SDL_Scancode::DOWN => {
+                        player.direction.y = 1.0;
+                    }
+                    _ => {}
+                },
 
-            SDL_EventType::KEY_UP => match unsafe { event.key.scancode } {
-                SDL_Scancode::LEFT => {
-                    player.direction.x = if pressed_right { 1.0 } else { 0.0 };
-                }
-                SDL_Scancode::RIGHT => {
-                    player.direction.x = if pressed_left { -1.0 } else { 0.0 };
-                }
-                SDL_Scancode::UP => {
-                    player.direction.y = if pressed_down { 1.0 } else { 0.0 };
-                }
-                SDL_Scancode::DOWN => {
-                    player.direction.y = if pressed_up { -1.0 } else { 0.0 };
-                }
+                EventType::KeyUp => match event.scancode {
+                    SDL_Scancode::LEFT => {
+                        player.direction.x = if pressed_right { 1.0 } else { 0.0 };
+                    }
+                    SDL_Scancode::RIGHT => {
+                        player.direction.x = if pressed_left { -1.0 } else { 0.0 };
+                    }
+                    SDL_Scancode::UP => {
+                        player.direction.y = if pressed_down { 1.0 } else { 0.0 };
+                    }
+                    SDL_Scancode::DOWN => {
+                        player.direction.y = if pressed_up { -1.0 } else { 0.0 };
+                    }
+                    _ => {}
+                },
                 _ => {}
-            },
-            _ => {}
+            }
         }
+
     }
 
     pub fn update(&mut self) {

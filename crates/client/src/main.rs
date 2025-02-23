@@ -1,15 +1,10 @@
 use glam::{vec2, Vec2Swizzles};
 use sdl3_sys::{
-    events::{SDL_Event, SDL_EventType, SDL_PollEvent},
     init::{SDL_Init, SDL_INIT_VIDEO},
-    render::{
-        SDL_CreateRenderer, SDL_RenderClear, SDL_RenderPresent, SDL_SetRenderDrawColor,
-        SDL_SetRenderVSync,
-    },
-    timer::SDL_Delay,
+    render::SDL_CreateRenderer,
     video::SDL_CreateWindow,
 };
-use std::{error::Error, mem::MaybeUninit};
+use std::error::Error;
 use ui::image::IntoDrawable;
 use ui::{
     reactive::{provide_context, SignalGet, SignalUpdate},
@@ -19,15 +14,14 @@ use ui::{
 use wz::Node;
 
 mod character;
-mod scene;
 mod map;
 mod math;
 mod npc;
+mod scene;
 mod sprite;
 mod timer;
 mod ui_view;
 mod wz;
-
 
 #[derive(Clone)]
 struct WzBase {

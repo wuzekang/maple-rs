@@ -3650,15 +3650,15 @@ dependencies = [
 
 [[package]]
 name = "sdl3-src"
-version = "3.2.0"
+version = "3.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bdb74c53278866f2287257b04fcfa2010e249d03ea82b5dc659fb6ec65a20e99"
+checksum = "652742893bbef3623ddbd049fa2eaeb7cf62f3f59ab1596727cfea3eb25fe5bb"
 
 [[package]]
 name = "sdl3-sys"
-version = "0.1.3+SDL3-preview-3.1.6"
+version = "0.4.4+SDL3-3.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c47498b18bcdb59a4f59af2923b3c5b4c921482e6e3579a2ab19a0e2c813f56"
+checksum = "14062c68e4683b8ef222bbd1abb178310dd214c66db83f8080244546601473b1"
 dependencies = [
  "cmake",
  "rpkg-config",
@@ -4325,11 +4325,13 @@ dependencies = [
  "cosmic-text",
  "glam",
  "image",
+ "log",
  "peniko",
  "reactive",
  "sdl3-sys",
  "slotmap",
  "taffy",
+ "unicode-segmentation",
 ]
 
 [[package]]

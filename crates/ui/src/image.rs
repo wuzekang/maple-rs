@@ -13,6 +13,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 use taffy::{AvailableSpace, Size};
+use crate::style::Styleable;
 
 enum ImageState {
     None,
@@ -80,20 +81,7 @@ impl Image {
         }
     }
 
-    pub fn style<F: Fn(StyleBuilder) -> StyleBuilder + 'static>(self, f: F) -> Self {
-        let id = self.id;
-        create_effect(move |_| {
-            let state = id.state();
-            let node = id.node();
-            let style = f(StyleBuilder::default());
-            id.taffy()
-                .borrow_mut()
-                .set_style(node, style.taffy_style.clone())
-                .unwrap();
-            state.borrow_mut().style = style.style.clone();
-        });
-        self
-    }
+
 }
 
 impl Element for Image {
@@ -145,3 +133,5 @@ impl Element for Image {
 }
 
 impl Interactive for Image {}
+
+impl Styleable for Image {}

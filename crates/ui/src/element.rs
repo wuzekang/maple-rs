@@ -2,16 +2,35 @@ use crate::{
     dynamic::Dynamic, fragment::Fragment, runtime::RUNTIME, sdl::Renderer, text::Text,
     view_id::ViewId,
 };
+use glam::vec2;
+use peniko::Color;
 use reactive::{create_memo, create_rw_signal, Memo, ReadSignal, SignalGet};
-use std::{cell::RefCell, rc::Rc};
+use std::rc::Rc;
 use taffy::{AvailableSpace, Size};
 
 pub trait Element {
     fn id(&self) -> ViewId;
 
-    fn paint(&self, cx: &Renderer) {
+    fn paint(&self, ctx: &Renderer) {
+        let id = self.id();
+        let layout = id.layout().unwrap();
+        let state = id.state();
+        let viewport = state.borrow().viewport;
+        let style = state.borrow().style.clone();
+
+        let location = layout.location + viewport;
+        let size = layout.size;
+
+        if style.background != Color::TRANSPARENT {
+            ctx.fill_rect(
+                style.background,
+                vec2(location.x, location.y),
+                vec2(size.width, size.height),
+            );
+        }
+
         for child in self.id().children() {
-            child.element().paint(cx);
+            child.element().paint(ctx);
         }
     }
     fn measure(
@@ -33,8 +52,7 @@ impl<T: Element + 'static> IntoElement for T {
     fn into_element(self) -> Self::V {
         let id = self.id();
         RUNTIME.with_borrow_mut(|r| {
-            r.elements
-                .insert(id.node().into(), Rc::new(self));
+            r.elements.insert(id.node().into(), Rc::new(self));
         });
         create_rw_signal(vec![id]).read_only()
     }
@@ -47,8 +65,7 @@ impl<T: Element + 'static> IntoElement for Rc<T> {
         RUNTIME.with_borrow_mut({
             let element = self.clone() as Rc<dyn Element>;
             move |r| {
-                r.elements
-                    .insert(id.node().into(), element);
+                r.elements.insert(id.node().into(), element);
             }
         });
         create_rw_signal(vec![id]).read_only()

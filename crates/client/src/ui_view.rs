@@ -5,22 +5,22 @@ use crate::wz::Node;
 use crate::{map, WzBase};
 use glam::vec2;
 use image::DynamicImage;
-use sdl3_sys::everything::SDL_Renderer;
+use sdl3_sys::everything::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
-use ui::event::{EventEmitter, Interactive};
+use ui::event::{Event, EventEmitter, EventType, Interactive, KeyboardEvent};
 use ui::peniko::Color;
 use ui::reactive::{
     create_rw_signal, on_cleanup, use_context, RwSignal, SignalGet, SignalUpdate, SignalWith,
 };
-use ui::style::Cursor;
+use ui::style::{Cursor, Styleable};
 use ui::taffy::prelude::{length, percent};
 use ui::taffy::{AlignItems, Display, FlexDirection, JustifyContent, Position, Size};
 use ui::view_tuple::ViewTuple;
 use ui::{
-    dynamic, fragment, text, view, Drawable, Image, ImageTexture, IntoElement, NineGridTexture,
-    Surface, View, ViewId,
+    dynamic, fragment, text, view, Drawable, Image, ImageTexture, Input, IntoElement,
+    NineGridTexture, Surface, View, ViewId,
 };
 
 pub fn cursor(name: &str) -> Cursor {
@@ -62,7 +62,7 @@ pub fn button(btn_node: Node) -> Image {
     .on_mouse_leave(move |_| {
         btn_state.set("normal".to_string());
     })
-    .style(|s| s.cursor(cursor("1")))
+    .style(|s| s.cursor(Cursor::system_pointer()))
 }
 
 pub fn map_scene(map_name: &str) -> impl IntoElement {
@@ -99,7 +99,7 @@ pub fn map_scene(map_name: &str) -> impl IntoElement {
     let cleanup = root.add_event_listener({
         let state = main_scene.clone();
         Box::new(move |event| {
-            state.borrow_mut().event(&event);
+            state.borrow_mut().event(event);
         })
     });
     on_cleanup(cleanup);
@@ -216,6 +216,7 @@ pub fn status_bar() -> View {
                 .left(length(4.0))
                 .bottom(length(0.0))
         }),
+        chat_box(),
         view((
             view((
                 Image::new(base_box),
@@ -236,6 +237,7 @@ pub fn status_bar() -> View {
                         .width(percent(1.0))
                         .height(percent(1.0))
                         .justify_content(JustifyContent::SpaceBetween)
+                        .align_items(AlignItems::Stretch)
                 }),
             ))
             .style(|s| {
@@ -301,7 +303,7 @@ pub fn status_bar() -> View {
                     .style(|s| {
                         s.justify_content(JustifyContent::FlexStart)
                             .align_items(AlignItems::FlexStart)
-                            .column_gap(length(2.0))
+                            .gap_column(length(2.0))
                     }),
                     text(|| "三个榔头")
                         .style(|s| s.color(Color::WHITE).font_size(12.0).line_height(15.0)),
@@ -326,6 +328,7 @@ pub fn status_bar() -> View {
                 .bottom(length(1.0))
                 .height(length(34.0))
                 .justify_content(JustifyContent::FlexStart)
+                .align_items(AlignItems::Center)
         }),
         view((
             Image::new(bar),
@@ -378,14 +381,96 @@ pub fn status_bar() -> View {
             .bottom(length(0.0))
     })
 }
+
+pub fn chat_box() -> impl IntoElement {
+    let WzBase { node: base } = use_context().unwrap();
+    let basic = base.at_path("UI/Basic.img").unwrap();
+    let open = create_rw_signal(false);
+
+    dynamic(move || {
+        if !open {
+            fragment(
+                view((
+                    (text(|| "欢迎来到冒险岛，现在开始你的旅程吧～！".to_string())
+                        .style(|s| s.font_size(11.0).line_height(11.0).color(Color::WHITE))),
+                    view((
+                        view(button(basic.get("BtMax")).on_click(move |_| open.set(true)))
+                            .style(|s| s.margin_right(length(3.0))),
+                        scroll_vertical(),
+                    ))
+                    .style(|s| s.align_items(AlignItems::Center)),
+                ))
+                .style(|s| {
+                    s.position(Position::Absolute)
+                        .justify_content(JustifyContent::SpaceBetween)
+                        .align_items(AlignItems::Center)
+                        .top(length(6.0))
+                        .left(length(0.0))
+                        .padding_left(length(8.0))
+                        .width(length(568.0))
+                        .height(length(24.0))
+                        .background([0x88, 0x88, 0x88].into())
+                }),
+            )
+        } else {
+            let input = Input::new().style(|s| {
+                s.position(Position::Absolute)
+                    .left(length(4.0))
+                    .width(length(563.0))
+                    .height(length(22.0))
+            });
+
+            input
+                .on_key_down(move |input| input.stop_propagation())
+                .on_key_up(move |input| input.stop_propagation())
+                .on_mounted(move || {
+                    input.focus();
+                });
+            fragment(
+                view((
+                    input,
+                    view(button(basic.get("BtMin")).on_click(move |_| open.set(false))).style(
+                        |s| {
+                            s.position(Position::Absolute)
+                                .align_items(AlignItems::Center)
+                                .height(percent(1.0))
+                                .right(length(18.0))
+                        },
+                    ),
+                ))
+                .style(|s| {
+                    s.position(Position::Absolute)
+                        .align_items(AlignItems::Center)
+                        .top(length(6.0))
+                        .left(length(0.0))
+                        .width(length(568.0))
+                        .height(length(24.0))
+                }),
+            )
+        }
+    })
+}
+
+pub fn scroll_vertical() -> View {
+    let WzBase { node: base } = use_context().unwrap();
+    let node = base.at_path("UI/Basic.img/VScr5/enabled").unwrap();
+    let prev: Arc<DynamicImage> = node.get("prev0").into();
+    let next: Arc<DynamicImage> = node.get("next0").into();
+    view((
+        Image::new(prev).style(|s| s.position(Position::Absolute).top(length(0.0))),
+        Image::new(next).style(|s| s.position(Position::Absolute).bottom(length(0.0))),
+    ))
+    .style(|s| s.width(length(15.0)).height(length(25.0)))
+}
 pub fn world_map_window(open: RwSignal<bool>, current_map: RwSignal<String>) -> impl IntoElement {
     let root = use_context::<ViewId>().unwrap();
     let remove = root.add_event_listener(Box::new(move |event| {
-        if unsafe { event.event.r#type } != sdl3_sys::events::SDL_EventType::KEY_DOWN.0 {
-            return;
-        }
-        if unsafe { event.event.key.scancode } == sdl3_sys::scancode::SDL_SCANCODE_W {
-            open.set(!open.get());
+        if event.r#type() == EventType::KeyDown {
+            if let Some(event) = event.as_any_mut().downcast_ref::<KeyboardEvent>() {
+                if event.key == SDLK_W {
+                    open.set(!open.get());
+                }
+            }
         }
     }));
     on_cleanup(move || {

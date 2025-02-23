@@ -1,11 +1,13 @@
 use crate::{Element, ViewId};
 use glam::{vec2, Vec2};
-use sdl3_sys::events::{SDL_Event, SDL_EventType};
+use sdl3_sys::everything::*;
 use slotmap::DefaultKey;
-use std::cell::{Cell, RefCell};
+use std::any::Any;
+use std::cell::RefCell;
 use std::cmp::PartialEq;
 use std::rc::Rc;
-use sdl3_sys::everything::{SDL_MouseMotionEvent, SDL_MouseWheelEvent};
+use reactive::use_context;
+use crate::root::EventDispatcher;
 
 #[derive(Clone)]
 pub struct EventEmitter {
@@ -34,48 +36,93 @@ impl EventEmitter {
     }
 }
 
-#[derive(Eq, PartialEq,Copy,Clone)]
-pub enum EventType {
-    MouseEnter,
-    MouseLeave,
-    MouseMove,
-    MouseWheel,
-    MouseDown,
-    MouseUp,
-    Click,
-    None,
-}
-
-pub struct Event<'a> {
-    pub event_type: EventType,
-    pub event: &'a SDL_Event,
+#[derive(Clone)]
+pub struct EventTarget {
     pub target: ViewId,
-    pub current_target: Cell<ViewId>,
+    pub current: Option<ViewId>,
+    pub propagation: bool,
 }
 
-impl Event<'_> {
+impl EventTarget {
+    pub fn new(id: ViewId) -> Self {
+        Self {
+            target: id,
+            current: Some(id),
+            propagation: true,
+        }
+    }
+}
+
+pub trait Event: Any {
+    fn r#type(&self) -> EventType;
+
+    fn event_target_mut(&mut self) -> &mut EventTarget;
+    fn event_target(&self) -> &EventTarget;
+
+    fn as_any_mut(&mut self) -> &mut dyn Any;
+
+    fn set_target(&mut self, target: ViewId) {
+        self.event_target_mut().target = target;
+    }
+
+    fn set_current_target(&mut self, current_target: ViewId) {
+        self.event_target_mut().current = Some(current_target);
+    }
+
+    fn target(&self) -> ViewId {
+        self.event_target().target
+    }
+
+    fn current_target(&self) -> Option<ViewId> {
+        self.event_target().current
+    }
+
+    fn stop_propagation(&mut self) {
+        self.event_target_mut().propagation = false;
+    }
+
+    fn propagation(&self) -> bool {
+        self.event_target().propagation
+    }
+}
+
+pub struct MouseMotionEvent {
+    pub motion: Vec2,
+    pub r#type: EventType,
+    pub event_target: EventTarget,
+}
+impl MouseMotionEvent {
+    pub fn new(id: ViewId, motion: Vec2) -> Self {
+        Self {
+            r#type: EventType::MouseMove,
+            event_target: EventTarget::new(id),
+            motion,
+        }
+    }
+
     pub fn client(&self) -> Vec2 {
         unsafe {
             Vec2 {
-                x: self.event.motion.x,
-                y: self.event.motion.y,
+                x: self.motion.x,
+                y: self.motion.y,
             }
         }
     }
 
     pub fn offset(&self) -> Vec2 {
-        let location = self.current_target.get().layout().unwrap().location;
-        let viewport = self.current_target.get().state().borrow().viewport;
+        let target = self.current_target().unwrap();
+        let location = target.layout().unwrap().location;
+        let viewport = target.state().borrow().viewport;
         self.client() - vec2(viewport.x, viewport.y) - vec2(location.x, location.y)
     }
 
     pub fn in_view_rect(&self) -> bool {
-        let id = self.target;
+        let id = self.target();
         let layout = id.layout().unwrap();
         let viewport = id.state().borrow().viewport;
 
-        let x = unsafe { self.event.button.x } - viewport.x;
-        let y = unsafe { self.event.button.y } - viewport.y;
+        let x = unsafe { self.motion.x } - viewport.x;
+        let y = unsafe { self.motion.y } - viewport.y;
 
         let left = layout.location.x;
         let top = layout.location.y;
@@ -84,31 +131,195 @@ impl Event<'_> {
 
         x >= left && x < right && y >= top && y < bottom
     }
+}
 
-    pub fn is_pointer_event(&self) -> bool {
-        match self.sdl_event_type() {
-            SDL_EventType::MOUSE_MOTION
-            | SDL_EventType::MOUSE_BUTTON_DOWN
-            | SDL_EventType::MOUSE_BUTTON_UP
-            | SDL_EventType::MOUSE_WHEEL => true,
-            _ => false,
-        }
+impl Event for MouseMotionEvent {
+    fn r#type(&self) -> EventType {
+        self.r#type
     }
 
-    pub fn sdl_event_type(&self) -> SDL_EventType {
-        SDL_EventType(unsafe { self.event.r#type })
+    fn event_target_mut(&mut self) -> &mut EventTarget {
+        &mut self.event_target
+    }
+
+    fn event_target(&self) -> &EventTarget {
+        &self.event_target
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }
 
+pub struct FocusEvent {
+    pub r#type: EventType,
+    pub event_target: EventTarget,
+}
 
+impl Event for FocusEvent {
+    fn r#type(&self) -> EventType {
+        self.r#type
+    }
+
+    fn event_target_mut(&mut self) -> &mut EventTarget {
+        &mut self.event_target
+    }
+
+    fn event_target(&self) -> &EventTarget {
+        &self.event_target
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+pub struct BlurEvent {
+    pub r#type: EventType,
+    pub event_target: EventTarget,
+}
+
+impl Event for BlurEvent {
+    fn r#type(&self) -> EventType {
+        self.r#type
+    }
+
+    fn event_target_mut(&mut self) -> &mut EventTarget {
+        &mut self.event_target
+    }
+
+    fn event_target(&self) -> &EventTarget {
+        &self.event_target
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+pub struct TextInputEvent {
+    pub r#type: EventType,
+    pub event_target: EventTarget,
+    pub text: String,
+}
+
+impl Event for TextInputEvent {
+    fn r#type(&self) -> EventType {
+        self.r#type
+    }
+
+    fn event_target_mut(&mut self) -> &mut EventTarget {
+        &mut self.event_target
+    }
+
+    fn event_target(&self) -> &EventTarget {
+        &self.event_target
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+pub struct KeyboardEvent {
+    pub r#type: EventType,
+    pub event_target: EventTarget,
+    pub key: SDL_Keycode,
+    pub r#mod: SDL_Keymod,
+    pub scancode: SDL_Scancode,
+}
+
+impl Event for KeyboardEvent {
+    fn r#type(&self) -> EventType {
+        self.r#type
+    }
+
+    fn event_target_mut(&mut self) -> &mut EventTarget {
+        &mut self.event_target
+    }
+
+    fn event_target(&self) -> &EventTarget {
+        &self.event_target
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+pub struct UnhandledEvent {
+    pub r#type: EventType,
+    pub event_target: EventTarget,
+}
+
+impl Event for UnhandledEvent {
+    fn r#type(&self) -> EventType {
+        self.r#type
+    }
+
+    fn event_target_mut(&mut self) -> &mut EventTarget {
+        &mut self.event_target
+    }
+
+    fn event_target(&self) -> &EventTarget {
+        &self.event_target
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+pub enum EventData {
+    MouseMotion(MouseMotionEvent),
+    TextInput(TextInputEvent),
+    Keyboard(KeyboardEvent),
+}
+
+#[derive(Clone, PartialEq, Eq, Copy)]
+pub enum EventType {
+    MouseEnter,
+    MouseLeave,
+    MouseMove,
+    MouseWheel,
+    MouseDown,
+    MouseUp,
+    TextInput,
+    KeyDown,
+    KeyUp,
+    Click,
+    Focus,
+    Blur,
+    Mounted,
+    Unmounted,
+    Unhandled,
+}
+
+impl EventType {
+    pub fn is_pointer_event(&self) -> bool {
+        match self {
+            Self::MouseEnter => true,
+            Self::MouseLeave => true,
+            Self::MouseMove => true,
+            Self::MouseWheel => true,
+            Self::MouseDown => true,
+            Self::MouseUp => true,
+            _ => false,
+        }
+    }
+}
 
 pub trait Interactive: Sized + Element {
-    fn on_event<F>(self, event_type: EventType, f: F) -> Self
+    fn focus(&self) {
+        let ctx: EventDispatcher = use_context().unwrap();
+        ctx.focus(self.id());
+    }
+
+    fn on_event<F>(self, r#type: EventType, f: F) -> Self
     where
-        F: (Fn(&Event) -> ()) + 'static,
+        F: (Fn(&mut dyn Event) -> ()) + 'static,
     {
         let _ = self.id().add_event_listener(Box::new(move |event| {
-            if event.event_type == event_type {
+            if r#type == event.r#type() {
                 f(event)
             }
         }));
@@ -117,38 +328,98 @@ pub trait Interactive: Sized + Element {
 
     fn on_click<F>(self, f: F) -> Self
     where
-        F: (Fn(&Event) -> ()) + 'static,
+        F: (Fn(&MouseMotionEvent) -> ()) + 'static,
     {
         self.on_event(EventType::MouseDown, move |event| {
-            f(event);
+            f(event.as_any_mut().downcast_ref().unwrap());
         })
     }
 
     fn on_mouse_move<F>(self, f: F) -> Self
     where
-        F: (Fn(&Event) -> ()) + 'static,
+        F: (Fn(&MouseMotionEvent) -> ()) + 'static,
     {
         self.on_event(EventType::MouseMove, move |event| {
-            f(event);
+            f(event.as_any_mut().downcast_ref().unwrap());
         })
     }
 
     fn on_mouse_enter<F>(self, f: F) -> Self
     where
-        F: (Fn(&Event) -> ()) + 'static,
+        F: (Fn(&MouseMotionEvent) -> ()) + 'static,
     {
-        let id = self.id();
         self.on_event(EventType::MouseEnter, move |event| {
-            f(event);
+            f(event.as_any_mut().downcast_ref().unwrap());
         })
     }
     fn on_mouse_leave<F>(self, f: F) -> Self
     where
-        F: (Fn(&Event) -> ()) + 'static,
+        F: (Fn(&MouseMotionEvent) -> ()) + 'static,
     {
-        let id = self.id();
         self.on_event(EventType::MouseLeave, move |event| {
-            f(event);
+            f(event.as_any_mut().downcast_ref().unwrap());
+        })
+    }
+
+    fn on_focus<F>(self, f: F) -> Self
+    where
+        F: (Fn(&FocusEvent) -> ()) + 'static,
+    {
+        self.on_event(EventType::Focus, move |event| {
+            f(event.as_any_mut().downcast_ref().unwrap());
+        })
+    }
+    fn on_blur<F>(self, f: F) -> Self
+    where
+        F: (Fn(&BlurEvent) -> ()) + 'static,
+    {
+        self.on_event(EventType::Blur, move |event| {
+            f(event.as_any_mut().downcast_ref().unwrap());
+        })
+    }
+
+    fn on_text_input<F>(self, f: F) -> Self
+    where
+        F: (Fn(&TextInputEvent) -> ()) + 'static,
+    {
+        self.on_event(EventType::TextInput, move |event| {
+            f(event.as_any_mut().downcast_ref().unwrap());
+        })
+    }
+
+    fn on_key_down<F>(self, f: F) -> Self
+    where
+        F: (Fn(&mut KeyboardEvent) -> ()) + 'static,
+    {
+        self.on_event(EventType::KeyDown, move |event| {
+            f(event.as_any_mut().downcast_mut().unwrap());
+        })
+    }
+
+    fn on_key_up<F>(self, f: F) -> Self
+    where
+        F: (Fn(&mut KeyboardEvent) -> ()) + 'static,
+    {
+        self.on_event(EventType::KeyUp, move |event| {
+            f(event.as_any_mut().downcast_mut().unwrap());
+        })
+    }
+
+    fn on_mounted<F>(self, f: F) -> Self
+    where
+        F: (Fn() -> ()) + 'static,
+    {
+        self.on_event(EventType::Mounted, move |event| {
+            f();
+        })
+    }
+
+    fn on_unmounted<F>(self, f: F) -> Self
+    where
+        F: (Fn() -> ()) + 'static,
+    {
+        self.on_event(EventType::Unmounted, move |event| {
+            f();
         })
     }
 }

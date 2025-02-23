@@ -1,12 +1,10 @@
 use crate::event::Interactive;
-use crate::{
-    element::Element, sdl::Renderer, style::StyleBuilder, view_id::ViewId, view_tuple::ViewTuple,
-};
-use glam::vec2;
-use peniko::Color;
-use reactive::create_effect;
+use crate::root::EventDispatcher;
+use crate::style::Styleable;
+use crate::{element::Element, view_id::ViewId, view_tuple::ViewTuple};
+use reactive::{create_effect, use_context};
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct View {
     id: ViewId,
 }
@@ -21,28 +19,10 @@ impl Element for View {
     fn id(&self) -> ViewId {
         self.id
     }
-    fn paint(&self, ctx: &Renderer) {
-        let layout = self.id.layout().unwrap();
-        let state = self.id.state();
-        let viewport = state.borrow().viewport;
-        let style = &state.borrow().style;
-        let location = layout.location + viewport;
-
-        if style.background != Color::TRANSPARENT {
-            ctx.fill_rect(
-                style.background,
-                vec2(location.x, location.y),
-                vec2(layout.size.width, layout.size.height),
-            );
-        }
-
-        for child in self.id().children() {
-            child.element().paint(ctx);
-        }
-    }
 }
 
 impl Interactive for View {}
+impl Styleable for View {}
 
 pub fn view<VT: ViewTuple>(children: VT) -> View {
     View::new(ViewId::new(), children)
@@ -51,29 +31,51 @@ pub fn view<VT: ViewTuple>(children: VT) -> View {
 impl View {
     pub fn new<VT: ViewTuple>(id: ViewId, children: VT) -> Self {
         let children = children.into_vec();
+
         create_effect(move |_| {
+            let manager: EventDispatcher = use_context().unwrap();
+            let mounted = id.state().borrow().mounted;
+            if mounted {
+                let children = id.children();
+                for child in children {
+                    unmount(child, &manager);
+                }
+            }
             let children = children
                 .iter()
                 .map(|item| item.get())
                 .flatten()
                 .collect::<Vec<_>>();
             id.set_children(children);
+            if mounted {
+                let children = id.children();
+                for child in children {
+                    mount(child, &manager);
+                }
+            }
         });
         Self { id }
     }
+}
 
-    pub fn style<F: Fn(StyleBuilder) -> StyleBuilder + 'static>(self, f: F) -> Self {
-        create_effect(move |_| {
-            let id = self.id;
-            let state = id.state();
-            let node = id.node();
-            let style = f(StyleBuilder::default());
-            id.taffy()
-                .borrow_mut()
-                .set_style(node, style.taffy_style.clone())
-                .unwrap();
-            state.borrow_mut().style = style.style.clone();
-        });
-        self
+fn mount(id: ViewId, ctx: &EventDispatcher) {
+    if id.state().borrow().mounted {
+        return;
+    }
+    ctx.mount(id);
+    id.state().borrow_mut().mounted = true;
+    for child in id.children() {
+        mount(child, ctx);
+    }
+}
+
+fn unmount(id: ViewId, ctx: &EventDispatcher) {
+    if !id.state().borrow().mounted {
+        return;
+    }
+    ctx.unmount(id);
+    id.state().borrow_mut().mounted = false;
+    for child in id.children() {
+        unmount(child, ctx);
     }
 }
