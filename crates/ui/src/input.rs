@@ -218,24 +218,12 @@ impl Input {
         element
             .on_click(|_| {})
             .on_focus(move |_| {
-                dbg!("focus");
-                let rect = element.id().rect();
                 unsafe {
-                    SDL_SetTextInputArea(
-                        use_context().unwrap(),
-                        &SDL_Rect {
-                            x: rect.x as i32,
-                            y: rect.y as i32,
-                            w: rect.width as i32,
-                            h: rect.height as i32,
-                        },
-                        0,
-                    );
+                    input_text.editor.with_mut(|editor| editor.update());
                     SDL_StartTextInput(use_context().unwrap());
                 }
             })
             .on_blur(move |_| unsafe {
-                dbg!("blur");
                 SDL_StopTextInput(use_context().unwrap());
             })
             .on_key_down(move |event| {

@@ -50,7 +50,7 @@ fn compute_layout(taffy: &mut TaffyTree, parent: NodeId, viewport: Point<f32>) {
 pub struct EventDispatcher {
     hovered: Rc<RefCell<HashSet<ViewId>>>,
     focused: Rc<RefCell<Option<ViewId>>>,
-    removed: Rc<RefCell<Vec<(ViewId, Scope)>>>,
+    disposed: Rc<RefCell<Vec<Scope>>>,
     mounted: Rc<RefCell<Vec<ViewId>>>,
     unmounted: Rc<RefCell<Vec<ViewId>>>,
 }
@@ -63,7 +63,7 @@ impl EventDispatcher {
             }
         }
         let focused = mem::take(&mut *self.focused.borrow_mut());
-        self.focused.borrow_mut().insert(target);
+        let _ = self.focused.borrow_mut().insert(target);
         let prev = HashSet::<ViewId>::from_iter(focused.into_iter());
         let next = HashSet::<ViewId>::from_iter(self.focused.borrow().into_iter());
         for id in &prev - &next {
@@ -121,7 +121,6 @@ impl EventDispatcher {
             } else if event.r#type() == EventType::MouseDown {
                 event.r#type = EventType::MouseDown;
                 event.target().dispatch_event(event as &mut dyn Event, true);
-                dbg!(event.target());
                 self.focus(event.target());
             }
         } else if let Some(event) = event.downcast_mut::<TextInputEvent>() {
@@ -144,8 +143,8 @@ impl EventDispatcher {
         }
     }
 
-    pub fn remove(&self, view: ViewId, scope: Scope) {
-        self.removed.borrow_mut().push((view, scope));
+    pub fn dispose(&self, scope: Scope) {
+        self.disposed.borrow_mut().push(scope);
     }
 
     pub fn mount(&self, view: ViewId) {
@@ -159,20 +158,27 @@ impl EventDispatcher {
     pub fn perform_remove(&self) {
         let focused = mem::take(&mut *self.focused.borrow_mut());
         let mut focused = HashSet::<ViewId>::from_iter(focused.into_iter());
-        for (id, scope) in self.removed.borrow().iter() {
+        for id in self.unmounted.borrow().iter() {
             self.hovered.borrow_mut().remove(&id);
             focused.remove(id);
-            let child = id.remove();
-            for item in child {
-                self.hovered.borrow_mut().remove(&item);
-                focused.remove(&item);
-            }
-            scope.dispose();
         }
         for item in focused.into_iter() {
             let _ = self.focused.borrow_mut().insert(item);
         }
-        self.removed.borrow_mut().clear();
+
+        for id in self.unmounted.borrow().iter() {
+            id.unmounted();
+        }
+
+        for scope in self.disposed.borrow().iter() {
+            scope.dispose();
+        }
+
+        for id in self.unmounted.borrow().iter() {
+            id.remove();
+        }
+
+        self.unmounted.borrow_mut().clear();
     }
 }
 
@@ -495,17 +501,14 @@ impl Root {
                     }
                 }
 
-                for id in mem::take(&mut *self.event_manager.unmounted.borrow_mut()) {
-                    id.unmounted();
-                }
                 self.event_manager.perform_remove();
+
+                self.compute_style();
+                self.compute_layout();
 
                 let current = unsafe { SDL_GetTicks() };
                 self.update(current - prev);
                 prev = current;
-
-                self.compute_style();
-                self.compute_layout();
 
                 SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
                 SDL_RenderClear(renderer);

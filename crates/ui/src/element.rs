@@ -4,7 +4,7 @@ use crate::{
 };
 use glam::vec2;
 use peniko::Color;
-use reactive::{create_memo, create_rw_signal, Memo, ReadSignal, SignalGet};
+use reactive::{Scope, SignalGet, SignalWith};
 use std::rc::Rc;
 use taffy::{AvailableSpace, Size};
 
@@ -42,25 +42,44 @@ pub trait Element {
     }
 }
 
+#[derive(Clone)]
+pub enum Node {
+    Static(ViewId),
+    Fragment(Vec<Node>),
+    Dynamic(Rc<dyn SignalGet<(Node, Scope)>>),
+}
+
+impl Default for Node {
+    fn default() -> Self {
+        Self::Fragment(Vec::new())
+    }
+}
+
+impl PartialEq for Node {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Static(id1), Self::Static(id2)) => id1 == id2,
+            _ => false,
+        }
+    }
+}
+
 pub trait IntoElement: Sized {
-    type V: SignalGet<Vec<ViewId>> + 'static;
-    fn into_element(self) -> Self::V;
+    fn into_element(self) -> Node;
 }
 
 impl<T: Element + 'static> IntoElement for T {
-    type V = ReadSignal<Vec<ViewId>>;
-    fn into_element(self) -> Self::V {
+    fn into_element(self) -> Node {
         let id = self.id();
         RUNTIME.with_borrow_mut(|r| {
             r.elements.insert(id.node().into(), Rc::new(self));
         });
-        create_rw_signal(vec![id]).read_only()
+        Node::Static(id)
     }
 }
 
 impl<T: Element + 'static> IntoElement for Rc<T> {
-    type V = ReadSignal<Vec<ViewId>>;
-    fn into_element(self) -> Self::V {
+    fn into_element(self) -> Node {
         let id = self.id();
         RUNTIME.with_borrow_mut({
             let element = self.clone() as Rc<dyn Element>;
@@ -68,64 +87,33 @@ impl<T: Element + 'static> IntoElement for Rc<T> {
                 r.elements.insert(id.node().into(), element);
             }
         });
-        create_rw_signal(vec![id]).read_only()
+        Node::Static(id)
     }
 }
 impl IntoElement for Fragment {
-    type V = Memo<Vec<ViewId>>;
-    fn into_element(self) -> Self::V {
-        create_memo(move |_| {
-            self.children
-                .iter()
-                .map(|item| item.get())
-                .flatten()
-                .collect::<Vec<_>>()
-        })
+    fn into_element(self) -> Node {
+        self.children
     }
 }
 
 impl IntoElement for Dynamic {
-    type V = ReadSignal<Vec<ViewId>>;
-    fn into_element(self) -> Self::V {
-        self.signal
-    }
-}
-
-impl<T: IntoElement + Clone + 'static> IntoElement for ReadSignal<T> {
-    type V = Memo<Vec<ViewId>>;
-
-    fn into_element(self) -> Self::V {
-        create_memo(move |_| self.get().clone().into_element().get())
-    }
-}
-
-impl<T: IntoElement + Clone + 'static> IntoElement for Memo<T> {
-    type V = Memo<Vec<ViewId>>;
-    fn into_element(self) -> Self::V {
-        create_memo(move |_| self.get().clone().into_element().get())
+    fn into_element(self) -> Node {
+        Node::Dynamic(Rc::new(self.signal))
     }
 }
 
 impl<T: IntoElement + 'static> IntoElement for Vec<T> {
-    type V = Memo<Vec<ViewId>>;
-    fn into_element(self) -> Self::V {
-        let elements = self
-            .into_iter()
-            .map(|item| item.into_element())
-            .collect::<Vec<_>>();
-        create_memo(move |_| {
-            elements
-                .iter()
-                .map(|item| item.get())
-                .flatten()
-                .collect::<Vec<_>>()
-        })
+    fn into_element(self) -> Node {
+        Node::Fragment(
+            self.into_iter()
+                .map(|item| item.into_element())
+                .collect::<Vec<_>>(),
+        )
     }
 }
 
 impl IntoElement for i32 {
-    type V = ReadSignal<Vec<ViewId>>;
-    fn into_element(self) -> Self::V {
+    fn into_element(self) -> Node {
         Text::new(move || self).into_element()
     }
 }

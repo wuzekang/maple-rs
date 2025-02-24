@@ -1,8 +1,8 @@
-use crate::{view_id::ViewId, view_tuple::ViewTuple};
+use crate::{element::Node, view_id::ViewId, view_tuple::ViewTuple};
 use reactive::SignalGet;
 
 pub struct Fragment {
-    pub children: Vec<Box<(dyn SignalGet<Vec<ViewId>> + 'static)>>,
+    pub children: Node,
 }
 
 impl Fragment {

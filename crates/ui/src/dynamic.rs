@@ -1,40 +1,23 @@
-use crate::root::EventDispatcher;
-use crate::{view_id::ViewId, view_tuple::ViewTuple};
+use crate::element::Node;
+use crate::view_tuple::ViewTuple;
 use reactive::{
-    as_child_of_current_scope, create_effect, create_signal,
-    use_context, ReadSignal, Scope, SignalGet, SignalUpdate,
+    as_child_of_current_scope, create_effect, create_signal, ReadSignal, Scope, SignalUpdate,
 };
 
 pub struct Dynamic {
-    pub signal: ReadSignal<Vec<ViewId>>,
+    pub signal: ReadSignal<(Node, Scope)>,
 }
 
 impl Dynamic {
     pub fn new<VT: ViewTuple, F: Fn() -> VT + 'static>(view_fn: F) -> Self {
-        let view_fn = Box::new(as_child_of_current_scope(move |_: ()| {
-            view_fn()
-                .into_vec()
-                .into_iter()
-                .map(|item| item.get())
-                .flatten()
-                .collect::<Vec<_>>()
-        }));
+        let view_fn = Box::new(as_child_of_current_scope(move |_: ()| view_fn().into_vec()));
 
-        let (getter, setter) = create_signal(vec![]);
+        let (getter, setter) =
+            create_signal((Node::Fragment(vec![]), Scope::current().create_child()));
 
-        let event_manager: EventDispatcher = use_context().unwrap();
         create_effect({
-            let event_manager = event_manager.clone();
-            move |prev: Option<(Vec<ViewId>, Scope)>| {
-                if let Some((vec, scope)) = prev {
-                    for item in vec {
-                        event_manager.remove(item, scope)
-                    }
-                }
-
-                let (vec, scope) = view_fn(());
-                setter.set(vec.clone());
-                (vec, scope)
+            move |_| {
+                setter.set(view_fn(()));
             }
         });
 

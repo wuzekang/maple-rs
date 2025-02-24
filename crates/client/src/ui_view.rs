@@ -152,9 +152,11 @@ pub fn bracket_wrap(children: impl ViewTuple) -> View {
     let node = base.at_path("UI/StatusBar.img/number").unwrap();
     let left: Arc<DynamicImage> = node.get("Lbracket").into();
     let right: Arc<DynamicImage> = node.get("Rbracket").into();
-    view(fragment(
-        ((Image::new(left), fragment(children), Image::new(right))),
-    ))
+    view(fragment((
+        Image::new(left),
+        fragment(children),
+        Image::new(right),
+    )))
     .style(|s| {
         s.justify_content(JustifyContent::FlexStart)
             .align_items(AlignItems::Center)

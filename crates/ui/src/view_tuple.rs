@@ -1,27 +1,26 @@
-use crate::{element::IntoElement, view_id::ViewId};
-use reactive::SignalGet;
+use crate::element::{IntoElement, Node};
 
 pub trait ViewTuple {
-    fn into_vec(self) -> Vec<Box<dyn SignalGet<Vec<ViewId>> + 'static>>;
+    fn into_vec(self) -> Node;
 }
 
-impl ViewTuple for Vec<Box<dyn SignalGet<Vec<ViewId>> + 'static>> {
-    fn into_vec(self) -> Vec<Box<dyn SignalGet<Vec<ViewId>> + 'static>> {
+impl ViewTuple for Node {
+    fn into_vec(self) -> Node {
         self
     }
 }
 
 impl<VW: IntoElement> ViewTuple for VW {
-    fn into_vec(self) -> Vec<Box<dyn SignalGet<Vec<ViewId>> + 'static>> {
-        vec![Box::new(self.into_element())]
+    fn into_vec(self) -> Node {
+        self.into_element()
     }
 }
 
 macro_rules! impl_view_tuple {
     ( $( $t:ident),* ; $( $s:tt ),* ) => {
         impl< $( $t: IntoElement, )* > ViewTuple for ( $( $t, )* ) {
-            fn into_vec(self)  -> Vec<Box<dyn SignalGet<Vec<ViewId>> + 'static>>  {
-                vec![$( Box::new(self.$s.into_element()), )*]
+            fn into_vec(self)  -> Node  {
+                Node::Fragment(vec![$( self.$s.into_element(), )*])
             }
         }
     }
