@@ -6,7 +6,6 @@ use crate::sprite::SpriteRenderer;
 use crate::wz;
 use glam::{vec2, Vec2};
 use hecs::World;
-use sdl3_sys::events::SDL_EventType;
 use sdl3_sys::everything::{
     SDL_GetKeyboardState, SDL_GetTicks, SDL_GetWindowPixelDensity, SDL_Renderer, SDL_Scancode,
     SDL_SetRenderScale, SDL_Window,
@@ -37,8 +36,6 @@ pub struct MainScene {
     window: *mut SDL_Window,
     renderer: *mut SDL_Renderer,
     size: Vec2,
-    ticks: u64,
-    delta: f32,
     camera: Camera,
     camera_signal: RwSignal<Camera>,
     player: Player,
@@ -109,8 +106,6 @@ impl MainScene {
             size,
             window,
             renderer,
-            ticks,
-            delta: 0.0,
             camera: Camera {
                 speed: Vec2::ONE * 40.0,
                 ..Default::default()
@@ -121,12 +116,6 @@ impl MainScene {
             map,
             camera_signal,
         }
-    }
-
-    pub fn tick(&mut self) {
-        let now = unsafe { SDL_GetTicks() };
-        self.delta = (now - self.ticks) as f32;
-        self.ticks = now;
     }
 
     pub fn event(&mut self, event: &mut dyn Event) {
@@ -173,12 +162,9 @@ impl MainScene {
                 _ => {}
             }
         }
-
     }
 
-    pub fn update(&mut self) {
-        self.tick();
-
+    pub fn update(&mut self, delta: f32) {
         player_move(self);
 
         {
@@ -187,7 +173,6 @@ impl MainScene {
                 camera_signal,
                 map,
                 size,
-                delta,
                 ..
             } = self;
             if camera.position != camera_signal.get().position {
@@ -197,16 +182,38 @@ impl MainScene {
             let camera_position = camera.position;
 
             for item in &mut map.backgrounds {
-                update_back(*delta, camera_position, *size, item);
+                update_back(delta, camera_position, *size, item);
             }
         }
+
+        let Self { map, player, .. } = self;
+
+        for layer in &map.layers {
+            for item in &layer.objects {
+                item.timer.tick(delta);
+            }
+        }
+
+        map.portal_timer.tick(delta);
+
+        for item in &map.life {
+            if item.r#type == "n" {
+                let npc = map.npc.get(&item.id).unwrap();
+                if npc.actions.len() == 0 {
+                    continue;
+                }
+                let action = npc.actions.get("stand").unwrap();
+                action.timer.tick(delta);
+            }
+        }
+
+        player.avatar.tick(delta);
     }
 }
 
 impl Drawable for MainScene {
     fn draw(&self, renderer: &ui::Renderer) {
         let Self {
-            delta,
             size,
             camera,
             map,
@@ -223,23 +230,16 @@ impl Drawable for MainScene {
             }
         }
 
-        let delta = *delta;
+        for layer in &map.layers {
+            for item in &layer.objects {
+                let sprite = &item.sprites[item.timer.index.get()];
+                sprite_renderer.draw_flip(sprite, item.position - camera_position, item.flip);
+            }
 
-        {
-            for layer in &map.layers {
-                for item in &layer.objects {
-                    item.timer.tick(delta);
-                    let sprite = &item.sprites[item.timer.index.get()];
-                    sprite_renderer.draw_flip(sprite, item.position - camera_position, item.flip);
-                }
-
-                for item in &layer.tiles {
-                    sprite_renderer.draw(&item.tile, item.position - camera_position);
-                }
+            for item in &layer.tiles {
+                sprite_renderer.draw(&item.tile, item.position - camera_position);
             }
         }
-
-        map.portal_timer.tick(delta);
 
         let sprite = &map.helper.pv[map.portal_timer.index.get()];
         for item in map.portals.iter() {
@@ -249,30 +249,24 @@ impl Drawable for MainScene {
             sprite_renderer.draw(&sprite, item.position - camera_position);
         }
 
-        {
-            for item in &map.life {
-                if item.r#type == "n" {
-                    let npc = map.npc.get(&item.id).unwrap();
-                    if npc.actions.len() == 0 {
-                        continue;
-                    }
-                    let action = npc.actions.get("stand").unwrap();
-                    action.timer.tick(delta);
-                    let sprite = &action.frames[action.timer.index.get()];
-                    sprite_renderer.draw_flip(
-                        sprite,
-                        vec2(item.x as f32, item.cy as f32) - camera_position,
-                        item.f == 1,
-                    );
+        for item in &map.life {
+            if item.r#type == "n" {
+                let npc = map.npc.get(&item.id).unwrap();
+                if npc.actions.len() == 0 {
+                    continue;
                 }
+                let action = npc.actions.get("stand").unwrap();
+                let sprite = &action.frames[action.timer.index.get()];
+                sprite_renderer.draw_flip(
+                    sprite,
+                    vec2(item.x as f32, item.cy as f32) - camera_position,
+                    item.f == 1,
+                );
             }
         }
 
-        {
-            player.avatar.tick(delta);
-            for sprite in player.avatar.frame() {
-                sprite_renderer.draw_flip(&sprite, player.position - camera.position, player.flip)
-            }
+        for sprite in player.avatar.frame() {
+            sprite_renderer.draw_flip(&sprite, player.position - camera.position, player.flip)
         }
     }
 

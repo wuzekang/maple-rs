@@ -9,18 +9,17 @@ use sdl3_sys::everything::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
-use ui::event::{Event, EventEmitter, EventType, Interactive, KeyboardEvent};
+use ui::animation::use_raf;
+use ui::event::{use_event, use_key, Event, Interactive};
 use ui::peniko::Color;
-use ui::reactive::{
-    create_rw_signal, on_cleanup, use_context, RwSignal, SignalGet, SignalUpdate, SignalWith,
-};
+use ui::reactive::{create_rw_signal, use_context, RwSignal, SignalGet, SignalUpdate, SignalWith};
 use ui::style::{Cursor, Styleable};
 use ui::taffy::prelude::{length, percent};
 use ui::taffy::{AlignItems, Display, FlexDirection, JustifyContent, Position, Size};
 use ui::view_tuple::ViewTuple;
 use ui::{
     dynamic, fragment, text, view, Drawable, Image, ImageTexture, Input, IntoElement,
-    NineGridTexture, Surface, View, ViewId,
+    NineGridTexture, Surface, View,
 };
 
 pub fn cursor(name: &str) -> Cursor {
@@ -95,25 +94,16 @@ pub fn map_scene(map_name: &str) -> impl IntoElement {
     let main_scene = MainScene::new(window, renderer, size, map_name, camera_signal);
     let main_scene = Rc::new(RefCell::new(main_scene));
 
-    let root: ViewId = use_context().unwrap();
-    let cleanup = root.add_event_listener({
-        let state = main_scene.clone();
-        Box::new(move |event| {
-            state.borrow_mut().event(event);
-        })
+    let state = main_scene.clone();
+    use_event(None, move |event| {
+        state.borrow_mut().event(event);
     });
-    on_cleanup(cleanup);
 
-    let update_event: EventEmitter = use_context().unwrap();
-    let key = update_event.on({
+    use_raf({
         let state = main_scene.clone();
-        move || {
-            state.borrow_mut().update();
+        move |delta| {
+            state.borrow_mut().update(delta);
         }
-    });
-
-    on_cleanup(move || {
-        update_event.off(key);
     });
 
     view((
@@ -391,6 +381,10 @@ pub fn chat_box() -> impl IntoElement {
 
     dynamic(move || {
         if !open {
+            use_key(13, move || {
+                open.set(true);
+            });
+
             fragment(
                 view((
                     (text(|| "欢迎来到冒险岛，现在开始你的旅程吧～！".to_string())
@@ -423,11 +417,17 @@ pub fn chat_box() -> impl IntoElement {
             });
 
             input
-                .on_key_down(move |input| input.stop_propagation())
-                .on_key_up(move |input| input.stop_propagation())
-                .on_mounted(move || {
+                .on_attach(move || {
                     input.focus();
-                });
+                })
+                .on_key_down(move |event| {
+                    if event.key == 13 {
+                        open.set(false);
+                    }
+                    event.stop_propagation()
+                })
+                .on_key_up(move |event| event.stop_propagation());
+
             fragment(
                 view((
                     input,
@@ -465,19 +465,7 @@ pub fn scroll_vertical() -> View {
     .style(|s| s.width(length(15.0)).height(length(25.0)))
 }
 pub fn world_map_window(open: RwSignal<bool>, current_map: RwSignal<String>) -> impl IntoElement {
-    let root = use_context::<ViewId>().unwrap();
-    let remove = root.add_event_listener(Box::new(move |event| {
-        if event.r#type() == EventType::KeyDown {
-            if let Some(event) = event.as_any_mut().downcast_ref::<KeyboardEvent>() {
-                if event.key == SDLK_W {
-                    open.set(!open.get());
-                }
-            }
-        }
-    }));
-    on_cleanup(move || {
-        remove();
-    });
+    use_key(SDLK_W, move || open.set(!open.get()));
 
     dynamic(move || {
         if !open.get() {

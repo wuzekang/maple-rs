@@ -1,6 +1,7 @@
 use reactive::{SignalGet, SignalUpdate};
 use taffy::prelude::TaffyMaxContent;
 
+pub mod animation;
 pub mod dynamic;
 pub mod element;
 pub mod event;

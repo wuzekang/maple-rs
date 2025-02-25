@@ -1,40 +1,11 @@
+use crate::root::EventDispatcher;
 use crate::{Element, ViewId};
 use glam::{vec2, Vec2};
+use reactive::{on_cleanup, use_context};
 use sdl3_sys::everything::*;
-use slotmap::DefaultKey;
 use std::any::Any;
-use std::cell::RefCell;
 use std::cmp::PartialEq;
-use std::rc::Rc;
-use reactive::use_context;
-use crate::root::EventDispatcher;
-
-#[derive(Clone)]
-pub struct EventEmitter {
-    listeners: Rc<RefCell<slotmap::SlotMap<DefaultKey, Box<dyn Fn()>>>>,
-}
-
-impl EventEmitter {
-    pub fn new() -> Self {
-        Self {
-            listeners: Default::default(),
-        }
-    }
-
-    pub fn emit(&self) {
-        for (_, f) in self.listeners.borrow().iter() {
-            f();
-        }
-    }
-
-    pub fn on(&self, f: impl Fn() + 'static) -> DefaultKey {
-        self.listeners.borrow_mut().insert(Box::new(f))
-    }
-
-    pub fn off(&self, key: DefaultKey) {
-        self.listeners.borrow_mut().remove(key);
-    }
-}
+use std::fmt::Debug;
 
 #[derive(Clone)]
 pub struct EventTarget {
@@ -229,6 +200,16 @@ pub struct KeyboardEvent {
     pub scancode: SDL_Scancode,
 }
 
+impl Debug for KeyboardEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KeyboardEvent")
+            .field("type", &self.r#type)
+            .field("key", &self.key)
+            .field("mod", &self.r#mod)
+            .finish()
+    }
+}
+
 impl Event for KeyboardEvent {
     fn r#type(&self) -> EventType {
         self.r#type
@@ -275,7 +256,7 @@ pub enum EventData {
     Keyboard(KeyboardEvent),
 }
 
-#[derive(Clone, PartialEq, Eq, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub enum EventType {
     MouseEnter,
     MouseLeave,
@@ -289,8 +270,8 @@ pub enum EventType {
     Click,
     Focus,
     Blur,
-    Mounted,
-    Unmounted,
+    Attach,
+    Detach,
     Unhandled,
 }
 
@@ -405,21 +386,60 @@ pub trait Interactive: Sized + Element {
         })
     }
 
-    fn on_mounted<F>(self, f: F) -> Self
+    fn on_attach<F>(self, f: F) -> Self
     where
         F: (Fn() -> ()) + 'static,
     {
-        self.on_event(EventType::Mounted, move |event| {
+        self.on_event(EventType::Attach, move |event| {
             f();
         })
     }
 
-    fn on_unmounted<F>(self, f: F) -> Self
+    fn on_detach<F>(self, f: F) -> Self
     where
         F: (Fn() -> ()) + 'static,
     {
-        self.on_event(EventType::Unmounted, move |event| {
+        self.on_event(EventType::Detach, move |event| {
             f();
         })
     }
+}
+
+pub fn use_event<F>(r#type: Option<EventType>, f: F)
+where
+    F: (Fn(&mut dyn Event) -> ()) + 'static,
+{
+    let root: ViewId = use_context().unwrap();
+    on_cleanup(root.add_event_listener(Box::new(move |event| {
+        if r#type.map(|item| item == event.r#type()).unwrap_or(true) {
+            f(event)
+        }
+    })))
+}
+
+pub fn use_keyboard_event<F>(r#type: EventType, f: F)
+where
+    F: (Fn(&mut KeyboardEvent) -> ()) + 'static,
+{
+    use_event(Some(r#type), move |event| {
+        f(event.as_any_mut().downcast_mut().unwrap());
+    })
+}
+
+pub fn use_key_down_event<F>(f: F)
+where
+    F: (Fn(&mut KeyboardEvent) -> ()) + 'static,
+{
+    use_keyboard_event(EventType::KeyDown, f)
+}
+
+pub fn use_key<F>(key: SDL_Keycode, f: F)
+where
+    F: (Fn() -> ()) + 'static,
+{
+    use_key_down_event(move |event| {
+        if event.key == key {
+            f()
+        }
+    })
 }

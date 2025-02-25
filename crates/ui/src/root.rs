@@ -1,17 +1,20 @@
+use crate::animation::use_raf;
 use crate::element::{Element, IntoElement};
 use crate::event::{
-    BlurEvent, Event, EventEmitter, EventTarget, EventType, FocusEvent, KeyboardEvent,
-    MouseMotionEvent, TextInputEvent, UnhandledEvent,
+    BlurEvent, Event, EventTarget, EventType, FocusEvent, KeyboardEvent, MouseMotionEvent,
+    TextInputEvent, UnhandledEvent,
 };
 use crate::runtime::RUNTIME;
 use crate::sdl::{PollEvent, Renderer};
-use crate::style::{Cursor, StyleComputeContext, Styleable};
+use crate::style::{Cursor, PointerEvents, StyleComputeContext, Styleable};
 use crate::view::View;
 use crate::view_id::ViewId;
-use crate::{Bounds, Drawable};
+use crate::{fragment, text, view, Bounds, Drawable};
 use glam::{vec2, Vec2};
 use peniko::Color;
-use reactive::{provide_context, RwSignal, Scope, SignalGet, SignalUpdate};
+use reactive::{
+    create_rw_signal, provide_context, RwSignal, Scope, SignalGet, SignalUpdate,
+};
 use sdl3_sys::everything::{
     SDL_Delay, SDL_GetTicks, SDL_HideCursor, SDL_RenderClear, SDL_RenderPresent,
     SDL_SetRenderDrawColor, SDL_SetRenderVSync, SDL_ShowCursor,
@@ -32,7 +35,7 @@ use std::mem::MaybeUninit;
 use std::rc::Rc;
 use taffy::{
     prelude::{length, TaffyMaxContent},
-    NodeId, Point, Size, TaffyTree,
+    AlignItems, JustifyContent, NodeId, Point, Position, Size, TaffyTree,
 };
 
 fn compute_layout(taffy: &mut TaffyTree, parent: NodeId, viewport: Point<f32>) {
@@ -44,6 +47,35 @@ fn compute_layout(taffy: &mut TaffyTree, parent: NodeId, viewport: Point<f32>) {
         let viewport = viewport + location;
         compute_layout(taffy, child, viewport);
     }
+}
+
+pub fn debug_view() -> View {
+    let content = create_rw_signal("".to_string());
+    use_raf(move |_| {
+        let node_count = RUNTIME
+            .with_borrow(|r| r.taffy.borrow().total_node_count())
+            .to_string();
+        let value = format!("Taffy Node: {}", node_count);
+        if content != value {
+            content.set(value);
+        }
+    });
+    view((text(move || content.get()))).style(|s| {
+        s.position(Position::Absolute)
+            .right(length(0.0))
+            .top(length(0.0))
+            .padding_top(length(8.0))
+            .padding_right(length(16.0))
+            .padding_bottom(length(8.0))
+            .padding_left(length(16.0))
+            .background(Color::BLACK.multiply_alpha(0.5))
+            .color(Color::WHITE)
+            .font_size(14.0)
+            .line_height(16.0)
+            .justify_content(JustifyContent::Center)
+            .align_items(AlignItems::Center)
+            .pointer_events(PointerEvents::None)
+    })
 }
 
 #[derive(Default, Clone)]
@@ -167,16 +199,16 @@ impl EventDispatcher {
         }
 
         for id in self.unmounted.borrow().iter() {
-            id.unmounted();
+            id.detach();
         }
 
         for scope in self.disposed.borrow().iter() {
             scope.dispose();
         }
 
-        for id in self.unmounted.borrow().iter() {
-            id.remove();
-        }
+        // for id in self.unmounted.borrow().iter() {
+        //     id.remove();
+        // }
 
         self.unmounted.borrow_mut().clear();
     }
@@ -285,7 +317,6 @@ pub struct Root {
     view: View,
     size: RwSignal<Vec2>,
     painter: Renderer,
-    update_event: EventEmitter,
     renderer: *mut SDL_Renderer,
     window: *mut SDL_Window,
     event_manager: EventDispatcher,
@@ -311,18 +342,16 @@ impl Root {
         let id = ViewId::new();
         id.state().borrow_mut().mounted = true;
 
-        let update_event = EventEmitter::new();
         let event_manager: EventDispatcher = Default::default();
 
         provide_context(window);
         provide_context(renderer);
-        provide_context(update_event.clone());
         provide_context(id);
         provide_context(event_manager.clone());
 
         let cursor_element = CursorElement::new(id);
 
-        let view = View::new(id, f())
+        let view = View::new(id, fragment((f(), debug_view())))
             .style(move |s| s.width(length(size.get().x)).height(length(size.get().y)));
 
         Self {
@@ -330,7 +359,6 @@ impl Root {
             view,
             size,
             painter: Renderer::new(renderer),
-            update_event,
             renderer,
             window,
             event_manager,
@@ -437,11 +465,6 @@ impl Root {
         };
     }
 
-    pub fn update(&mut self, delta: u64) {
-        self.update_event.emit();
-        self.cursor_element.update(delta);
-    }
-
     // TODO: need to optimize performance
     pub fn compute_style(&self) {
         let mut ctx = StyleComputeContext::new();
@@ -503,12 +526,18 @@ impl Root {
 
                 self.event_manager.perform_remove();
 
+                let current = unsafe { SDL_GetTicks() };
+                let delta = current - prev;
+                prev = current;
+                let vec = RUNTIME.with_borrow_mut(|s| s.animation_frame_callbacks.clone());
+                for callback in vec.borrow().values() {
+                    callback(delta as f32)
+                }
+
                 self.compute_style();
                 self.compute_layout();
 
-                let current = unsafe { SDL_GetTicks() };
-                self.update(current - prev);
-                prev = current;
+                self.cursor_element.update(delta);
 
                 SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
                 SDL_RenderClear(renderer);
@@ -518,9 +547,8 @@ impl Root {
                 SDL_RenderPresent(renderer);
 
                 for id in mem::take(&mut *self.event_manager.mounted.borrow_mut()) {
-                    id.mounted()
+                    id.attach()
                 }
-
                 SDL_Delay(16);
             }
         }

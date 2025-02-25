@@ -1,12 +1,12 @@
-use std::marker::PhantomData;
-
 use crate::{
+    create_rw_signal,
     effect::create_effect,
     read::{SignalRead, SignalTrack},
     scope::Scope,
     signal::{create_signal, ReadSignal},
-    SignalGet, SignalUpdate, SignalWith,
+    RwSignal, SignalGet, SignalUpdate, SignalWith,
 };
+use std::marker::PhantomData;
 
 /// Memo computes the value from the closure on creation, and stores the value.
 ///
@@ -63,6 +63,34 @@ where
         };
         if is_different {
             setter.set(new_value);
+        }
+    });
+
+    Memo {
+        getter,
+        ty: PhantomData,
+    }
+}
+
+pub fn create_computed<T>(f: impl Fn(Option<&T>) -> T + 'static) -> Memo<T>
+where
+    T: 'static,
+{
+    let signal: RwSignal<Option<T>> = create_rw_signal(None);
+
+    create_effect({
+        move |_| {
+            let value = Some(f(signal.read_untracked().borrow().as_ref()));
+            signal.set(value);
+        }
+    });
+
+    let (getter, setter) =
+        create_signal(signal.read_untracked().value.borrow_mut().take().unwrap());
+
+    create_effect(move |_| {
+        if let Some(value) = signal.read().value.borrow_mut().take() {
+            setter.set(value);
         }
     });
 

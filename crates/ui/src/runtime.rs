@@ -14,6 +14,7 @@ pub struct Runtime {
     pub swash_cache: SwashCache,
     pub states: SecondaryMap<DefaultKey, Rc<RefCell<ViewState>>>,
     pub elements: SecondaryMap<DefaultKey, Rc<dyn Element>>,
+    pub animation_frame_callbacks: Rc<RefCell<SlotMap<DefaultKey, Box<dyn Fn(f32) + 'static>>>>,
 }
 
 impl Default for Runtime {
@@ -26,6 +27,7 @@ impl Default for Runtime {
             swash_cache: SwashCache::new(),
             states: Default::default(),
             elements: Default::default(),
+            animation_frame_callbacks: Default::default(),
         }
     }
 }

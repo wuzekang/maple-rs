@@ -114,6 +114,7 @@ impl StyleProperty {
     pub(crate) fn inherited(&self) -> bool {
         match self {
             Self::TextWrap(_) => false,
+            Self::Background(_) => false,
             _ => true,
         }
     }
@@ -831,7 +832,7 @@ pub struct DrawableCursor(pub Rc<dyn Fn() -> Box<dyn Drawable>>);
 
 impl PartialEq for DrawableCursor {
     fn eq(&self, other: &Self) -> bool {
-        Rc::as_ptr(&self.0) == Rc::as_ptr(&other.0)
+        std::ptr::addr_eq(Rc::as_ptr(&self.0), Rc::as_ptr(&other.0))
     }
 }
 

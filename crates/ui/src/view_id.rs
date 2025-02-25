@@ -5,6 +5,7 @@ use crate::style::{
 };
 use crate::{element::Element, runtime::RUNTIME, view_state::ViewState};
 use glam::Vec2;
+use reactive::on_cleanup;
 use std::cmp::PartialEq;
 use std::collections::HashMap;
 use std::{cell::RefCell, rc::Rc};
@@ -46,6 +47,11 @@ impl ViewId {
                 .or_insert_with(|| Rc::new(RefCell::new(ViewState::new())))
                 .clone()
         });
+
+        on_cleanup(move || {
+            RUNTIME.with_borrow(|s| s.taffy.borrow_mut().remove(id).unwrap());
+        });
+
         Self(id)
     }
 
@@ -71,17 +77,10 @@ impl ViewId {
 
     pub fn set_children(&self, elements: Vec<ViewId>) {
         let children = elements.into_iter().map(|item| item.0).collect::<Vec<_>>();
-        self.taffy().borrow_mut().set_children(self.0, &children);
-    }
-
-    pub fn remove(&self) -> Vec<ViewId> {
-        let mut vec = Vec::new();
-        for child in self.children() {
-            vec.append(&mut child.remove());
-        }
-        self.taffy().borrow_mut().remove(self.0);
-        vec.push(*self);
-        vec
+        self.taffy()
+            .borrow_mut()
+            .set_children(self.0, &children)
+            .unwrap();
     }
 
     pub fn taffy(&self) -> Rc<RefCell<TaffyTree>> {
@@ -201,8 +200,6 @@ impl ViewId {
             value.assign_to(&mut style);
         }
 
-
-
         state.borrow_mut().style = style;
 
         for (key, value) in style_props {
@@ -234,20 +231,20 @@ impl ViewId {
         }
     }
 
-    pub(crate) fn mounted(&self) {
+    pub(crate) fn attach(&self) {
         self.dispatch_event(
             &mut FocusEvent {
-                r#type: EventType::Mounted,
+                r#type: EventType::Attach,
                 event_target: EventTarget::new(*self),
             } as &mut dyn Event,
             false,
         );
     }
 
-    pub(crate) fn unmounted(&self) {
+    pub(crate) fn detach(&self) {
         self.dispatch_event(
             &mut FocusEvent {
-                r#type: EventType::Unmounted,
+                r#type: EventType::Detach,
                 event_target: EventTarget::new(*self),
             } as &mut dyn Event,
             false,

@@ -4,7 +4,7 @@ use crate::{
 };
 use glam::vec2;
 use peniko::Color;
-use reactive::{Scope, SignalGet, SignalWith};
+use reactive::{Scope, SignalGet};
 use std::rc::Rc;
 use taffy::{AvailableSpace, Size};
 
@@ -52,15 +52,6 @@ pub enum Node {
 impl Default for Node {
     fn default() -> Self {
         Self::Fragment(Vec::new())
-    }
-}
-
-impl PartialEq for Node {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Static(id1), Self::Static(id2)) => id1 == id2,
-            _ => false,
-        }
     }
 }
 

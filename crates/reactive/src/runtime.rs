@@ -10,8 +10,8 @@ use smallvec::SmallVec;
 use crate::{
     effect::{run_effect, EffectTrait},
     id::Id,
+    reference::Reference,
     signal::Signal,
-    reference::Reference
 };
 
 thread_local! {
