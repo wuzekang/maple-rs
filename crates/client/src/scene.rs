@@ -5,11 +5,7 @@ use crate::math;
 use crate::sprite::SpriteRenderer;
 use crate::wz;
 use glam::{vec2, Vec2};
-use hecs::World;
-use sdl3_sys::everything::{
-    SDL_GetKeyboardState, SDL_GetTicks, SDL_GetWindowPixelDensity, SDL_Renderer, SDL_Scancode,
-    SDL_SetRenderScale, SDL_Window,
-};
+use sdl3_sys::everything::{SDL_GetKeyboardState, SDL_Renderer, SDL_Scancode, SDL_Window};
 use std::sync::Arc;
 use ui::event::{Event, EventType, KeyboardEvent};
 use ui::reactive::{RwSignal, SignalGet, SignalUpdate};
@@ -23,7 +19,7 @@ pub struct Camera {
 }
 
 #[derive(Default)]
-struct Player {
+pub struct Player {
     avatar: Character,
     position: Vec2,
     direction: Vec2,
@@ -39,29 +35,14 @@ pub struct MainScene {
     camera: Camera,
     camera_signal: RwSignal<Camera>,
     player: Player,
-    world: World,
     state: *const bool,
     map: map::Map,
 }
 
 impl MainScene {
-    pub fn new(
-        window: *mut SDL_Window,
-        renderer: *mut SDL_Renderer,
-        size: Vec2,
-        map_name: &str,
-        camera_signal: RwSignal<Camera>,
-    ) -> Self {
-        let dpr = unsafe { SDL_GetWindowPixelDensity(window) };
-
-        unsafe {
-            SDL_SetRenderScale(renderer, dpr, dpr);
-        }
-
-        let ticks = unsafe { SDL_GetTicks() };
-
+    pub fn resource(map_name: &str) -> (Player, map::Map) {
         let base = wz::resolve_base().unwrap();
-        let mut map = map::Map::new(&base, map_name).unwrap();
+        let mut map = map::Map::new(base.clone(), map_name.to_string()).unwrap();
         let position = map.portals.iter().fold(None, |acc: Option<Vec2>, item| {
             if item.pn != "sp" {
                 return acc;
@@ -77,8 +58,6 @@ impl MainScene {
             }
         });
         let z_map: Arc<ZMap> = Arc::new(base.at_path("zmap.img").unwrap().into());
-
-        let mut world = World::new();
 
         let player = Player {
             avatar: Character::new(
@@ -102,6 +81,17 @@ impl MainScene {
             ..Default::default()
         };
 
+        (player, map)
+    }
+
+    pub fn new(
+        window: *mut SDL_Window,
+        renderer: *mut SDL_Renderer,
+        size: Vec2,
+        camera_signal: RwSignal<Camera>,
+        player: Player,
+        map: map::Map,
+    ) -> Self {
         Self {
             size,
             window,
@@ -110,7 +100,6 @@ impl MainScene {
                 speed: Vec2::ONE * 40.0,
                 ..Default::default()
             },
-            world,
             player,
             state: unsafe { SDL_GetKeyboardState(std::ptr::null_mut() as *mut core::ffi::c_int) },
             map,
@@ -188,8 +177,8 @@ impl MainScene {
 
         let Self { map, player, .. } = self;
 
-        for layer in &map.layers {
-            for item in &layer.objects {
+        for layer in &mut map.layers {
+            for item in &mut layer.objects {
                 item.timer.tick(delta);
             }
         }
@@ -198,11 +187,11 @@ impl MainScene {
 
         for item in &map.life {
             if item.r#type == "n" {
-                let npc = map.npc.get(&item.id).unwrap();
+                let npc = map.npc.get_mut(&item.id).unwrap();
                 if npc.actions.len() == 0 {
                     continue;
                 }
-                let action = npc.actions.get("stand").unwrap();
+                let action = npc.actions.get_mut("stand").unwrap();
                 action.timer.tick(delta);
             }
         }
@@ -232,7 +221,7 @@ impl Drawable for MainScene {
 
         for layer in &map.layers {
             for item in &layer.objects {
-                let sprite = &item.sprites[item.timer.index.get()];
+                let sprite = &item.sprites[item.timer.index];
                 sprite_renderer.draw_flip(sprite, item.position - camera_position, item.flip);
             }
 
@@ -241,7 +230,7 @@ impl Drawable for MainScene {
             }
         }
 
-        let sprite = &map.helper.pv[map.portal_timer.index.get()];
+        let sprite = &map.helper.pv[map.portal_timer.index];
         for item in map.portals.iter() {
             if item.pn == "sp" {
                 continue;
@@ -256,7 +245,7 @@ impl Drawable for MainScene {
                     continue;
                 }
                 let action = npc.actions.get("stand").unwrap();
-                let sprite = &action.frames[action.timer.index.get()];
+                let sprite = &action.frames[action.timer.index];
                 sprite_renderer.draw_flip(
                     sprite,
                     vec2(item.x as f32, item.cy as f32) - camera_position,
@@ -341,7 +330,7 @@ fn update_back(delta: f32, camera_position: Vec2, size: Vec2, item: &mut map::Ma
         }
     }
 
-    match &item.sprite {
+    match &mut item.sprite {
         map::BackgroundSprite::SpriteAnimation(animation) => {
             animation.tick(delta);
         }

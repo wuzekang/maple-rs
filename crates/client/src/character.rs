@@ -162,7 +162,7 @@ impl Character {
         self.slots.insert(part.info.slot.clone(), part);
     }
 
-    pub fn tick(&self, delta: f32) -> bool {
+    pub fn tick(&mut self, delta: f32) -> bool {
         self.timer.tick(delta)
     }
 
@@ -186,7 +186,7 @@ impl Character {
     pub fn frame(&self) -> Vec<Sprite> {
         let action = &self.action;
         let emotion = &self.emotion;
-        let index = self.timer.index.get();
+        let index = self.timer.index;
 
         let body = &self.slots["Bd"].variant[action][index].parts["body"].map;
         let head = &self.slots["Hd"].variant[action][index].parts["head"].map;

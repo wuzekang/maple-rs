@@ -28,7 +28,8 @@ struct WzBase {
     pub node: Node,
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
     unsafe {
         SDL_Init(SDL_INIT_VIDEO);
     }

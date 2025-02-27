@@ -1,42 +1,41 @@
-use std::cell::Cell;
 
 #[derive(Clone, Debug, Default)]
 pub struct Timer {
-    elapsed: Cell<f32>,
+    elapsed: f32,
     intervals: Vec<f32>,
     total: f32,
-    pub index: Cell<usize>,
+    pub index: usize,
 }
 
 impl Timer {
     pub fn new(intervals: Vec<f32>) -> Self {
         Self {
             total: intervals.iter().sum(),
-            elapsed: 0.0.into(),
+            elapsed: 0.0,
             intervals,
-            index: 0.into(),
+            index: 0,
         }
     }
 
-    pub fn tick(&self, delta: f32) -> bool {
+    pub fn tick(&mut self, delta: f32) -> bool {
         if self.intervals.is_empty() || self.total == 0.0 {
             return false;
         }
-        let prev = self.index.get();
-        self.elapsed.set((self.elapsed.get() + delta) % self.total);
+        let prev = self.index;
+        self.elapsed = ((self.elapsed + delta) % self.total);
 
-        while self.elapsed.get() >= self.intervals[self.index.get()] {
-            self.elapsed.set(self.elapsed.get() - self.intervals[self.index.get()]);
-            self.index.set((self.index.get() + 1) % self.intervals.len())
+        while self.elapsed >= self.intervals[self.index] {
+            self.elapsed = (self.elapsed - self.intervals[self.index]);
+            self.index = ((self.index + 1) % self.intervals.len())
         }
 
-        self.index.get() != prev
+        self.index != prev
     }
 
     pub fn progress(&self) -> f32 {
-        if self.intervals.is_empty() || self.intervals[self.index.get()] == 0.0 {
+        if self.intervals.is_empty() || self.intervals[self.index] == 0.0 {
             return 0.0;
         }
-        self.elapsed.get() / self.intervals[self.index.get()]
+        self.elapsed / self.intervals[self.index]
     }
 }

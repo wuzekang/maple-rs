@@ -2,7 +2,7 @@ use crate::map::world_map::WorldMap;
 use crate::scene::{Camera, MainScene};
 use crate::sprite::{Sprite, SpriteAnimation, SpriteAnimationDrawable};
 use crate::wz::Node;
-use crate::{map, WzBase};
+use crate::WzBase;
 use glam::vec2;
 use image::DynamicImage;
 use sdl3_sys::everything::*;
@@ -18,7 +18,7 @@ use ui::taffy::prelude::{length, percent};
 use ui::taffy::{AlignItems, Display, FlexDirection, JustifyContent, Position, Size};
 use ui::view_tuple::ViewTuple;
 use ui::{
-    dynamic, fragment, text, view, Drawable, Image, ImageTexture, Input, IntoElement,
+    dynamic, fragment, lazy, text, view, Drawable, Image, ImageTexture, Input, IntoElement,
     NineGridTexture, Surface, View,
 };
 
@@ -33,10 +33,10 @@ pub fn cursor(name: &str) -> Cursor {
 
 pub fn ui_view() -> impl IntoElement {
     let open = RwSignal::new(true);
-    let current_map = RwSignal::new("002000000".to_string());
+    let current_map = RwSignal::new("910000000".to_string());
 
     view((
-        dynamic(move || map_scene(&current_map.get())),
+        map_scene(current_map),
         status_bar(),
         world_map_window(open, current_map),
     ))
@@ -64,60 +64,74 @@ pub fn button(btn_node: Node) -> Image {
     .style(|s| s.cursor(Cursor::system_pointer()))
 }
 
-pub fn map_scene(map_name: &str) -> impl IntoElement {
-    let WzBase { node: base } = use_context().unwrap();
-    let map::Map { layers, .. } = map::Map::new(&base, map_name).unwrap();
-    let window = use_context().unwrap();
-    let renderer = use_context().unwrap();
-    let camera_signal = create_rw_signal(Camera::default());
-    let size = vec2(800.0, 600.0);
-
-    let mut texts = vec![];
-    for layer in &layers {
-        for item in &layer.objects {
-            for sprite in &item.sprites {
-                let path = sprite.path.clone();
-                let position = item.position;
-                texts.push(text({ move || path.clone() }).style(move |s| {
-                    s.position(Position::Absolute)
-                        .left(length(position.x))
-                        .top(length(position.y))
-                        .font_size(12.0)
-                        .line_height(14.0)
-                        .background(Color::WHITE)
-                        .color(Color::RED)
-                }));
+pub fn map_scene(map_name: RwSignal<String>) -> impl IntoElement {
+    lazy(
+        {
+            move || {
+                let map_name = map_name.get();
+                async move { Some(MainScene::resource(&map_name)) }
             }
-        }
-    }
+        },
+        move |map| match map {
+            None => fragment(()),
+            Some((player, map)) => {
+                let camera_signal = create_rw_signal(Camera::default());
 
-    let main_scene = MainScene::new(window, renderer, size, map_name, camera_signal);
-    let main_scene = Rc::new(RefCell::new(main_scene));
+                let window = use_context().unwrap();
+                let renderer = use_context().unwrap();
+                let size = vec2(800.0, 600.0);
 
-    let state = main_scene.clone();
-    use_event(None, move |event| {
-        state.borrow_mut().event(event);
-    });
+                let mut texts = vec![];
+                for layer in &map.layers {
+                    for item in &layer.objects {
+                        for sprite in &item.sprites {
+                            let path = sprite.path.clone();
+                            let position = item.position;
+                            texts.push(text({ move || path.clone() }).style(move |s| {
+                                s.position(Position::Absolute)
+                                    .left(length(position.x))
+                                    .top(length(position.y))
+                                    .font_size(12.0)
+                                    .line_height(14.0)
+                                    .background(Color::WHITE)
+                                    .color(Color::RED)
+                            }));
+                        }
+                    }
+                }
 
-    use_raf({
-        let state = main_scene.clone();
-        move |delta| {
-            state.borrow_mut().update(delta);
-        }
-    });
+                let main_scene = MainScene::new(window, renderer, size, camera_signal, player, map);
+                let main_scene = Rc::new(RefCell::new(main_scene));
 
-    view((
-        Image::new(main_scene.clone() as Rc<RefCell<dyn Drawable>>),
-        if false { fragment(texts) } else { fragment(()) },
-    ))
-    .style(move |s| {
-        let camera = camera_signal.get();
-        s.position(Position::Absolute)
-            .width(percent(1.0))
-            .height(percent(1.0))
-            .left(length(-camera.position.x))
-            .top(length(-camera.position.y))
-    })
+                let state = main_scene.clone();
+                use_event(None, move |event| {
+                    state.borrow_mut().event(event);
+                });
+
+                use_raf({
+                    let state = main_scene.clone();
+                    move |delta| {
+                        state.borrow_mut().update(delta);
+                    }
+                });
+
+                fragment(
+                    view((
+                        Image::new(main_scene.clone() as Rc<RefCell<dyn Drawable>>),
+                        if false { fragment(texts) } else { fragment(()) },
+                    ))
+                    .style(move |s| {
+                        let camera = camera_signal.get();
+                        s.position(Position::Absolute)
+                            .width(percent(1.0))
+                            .height(percent(1.0))
+                            .left(length(-camera.position.x))
+                            .top(length(-camera.position.y))
+                    }),
+                )
+            }
+        },
+    )
 }
 
 pub fn level_no<F>(value: F) -> View

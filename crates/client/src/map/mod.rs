@@ -248,7 +248,7 @@ pub struct Map {
 }
 
 impl Map {
-    pub fn new(root: &Node, name: &str) -> Result<Self, Error> {
+    pub fn new(root: Node, name: String) -> Result<Self, Error> {
         let map_img = root
             .at_path(&format!("Map/Map/Map{}/{name}.img", &name[0..1]))
             .unwrap();

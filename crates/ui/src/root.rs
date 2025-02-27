@@ -4,6 +4,7 @@ use crate::event::{
     BlurEvent, Event, EventTarget, EventType, FocusEvent, KeyboardEvent, MouseMotionEvent,
     TextInputEvent, UnhandledEvent,
 };
+use crate::resource::Resource;
 use crate::runtime::RUNTIME;
 use crate::sdl::{PollEvent, Renderer};
 use crate::style::{Cursor, PointerEvents, StyleComputeContext, Styleable};
@@ -506,14 +507,22 @@ impl Root {
 
     pub fn launch(&mut self) {
         let renderer = self.renderer;
+        let window = self.window;
         let mut events = PollEvent::new();
 
         unsafe {
             SDL_SetRenderVSync(renderer, 1);
+            let dpr = unsafe { SDL_GetWindowPixelDensity(window) };
+
+            unsafe {
+                SDL_SetRenderScale(renderer, dpr, dpr);
+            }
 
             let mut exited = false;
             let mut prev = unsafe { SDL_GetTicks() };
             while !exited {
+                Resource::try_recv();
+
                 for event in &mut events {
                     self.dispatch_event(event);
                     match SDL_EventType(event.r#type) {

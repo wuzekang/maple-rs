@@ -3,7 +3,6 @@ use crate::wz::Node;
 use glam::{vec2, Vec2};
 use image::DynamicImage;
 use sdl3_sys::surface::SDL_FlipMode;
-use std::cell::Cell;
 use std::sync::Arc;
 use ui::{Bounds, Drawable, Renderer};
 
@@ -26,7 +25,7 @@ impl<'a> SpriteRenderer<'a> {
             &texture,
             position,
             sprite.origin,
-            sprite.alpha.get(),
+            sprite.alpha,
             None,
             if flip {
                 SDL_FlipMode::HORIZONTAL
@@ -45,7 +44,7 @@ pub struct Sprite {
     pub origin: Vec2,
     pub a0: i32,
     pub a1: i32,
-    pub alpha: Cell<i32>,
+    pub alpha: i32,
     pub z: i32,
     pub delay: i32,
 }
@@ -67,18 +66,16 @@ impl From<Node> for SpriteAnimation {
 }
 
 impl SpriteAnimation {
-    pub fn tick(&self, delta: f32) -> &Sprite {
+    pub fn tick(&mut self, delta: f32) -> &Sprite {
         self.timer.tick(delta);
-        let sprite = &self.frames[self.timer.index.get()];
+        let sprite = &mut self.frames[self.timer.index];
         let p = self.timer.progress();
-        sprite
-            .alpha
-            .set(((1.0 - p) * sprite.a0 as f32 + p * sprite.a1 as f32) as i32);
+        sprite.alpha = (((1.0 - p) * sprite.a0 as f32 + p * sprite.a1 as f32) as i32);
         sprite
     }
 
     pub fn current_frame(&self) -> &Sprite {
-        &self.frames[self.timer.index.get()]
+        &self.frames[self.timer.index]
     }
 }
 
