@@ -1,4 +1,4 @@
-use crate::event::{Event, EventTarget, EventType, FocusEvent};
+use crate::event::Event;
 use crate::style::{
     PointerEvents, Style, StyleComputeContext, StyleProperty, StylePropertyKey, TaffyStyleProperty,
     TaffyStylePropertyKey,
@@ -101,7 +101,7 @@ impl ViewId {
 
     pub fn add_event_listener(
         &self,
-        listener: Box<dyn (Fn(&mut dyn Event) -> ()) + 'static>,
+        listener: Box<dyn (Fn(&mut Event) -> ()) + 'static>,
     ) -> Box<dyn Fn()> {
         let key = self
             .state()
@@ -116,18 +116,19 @@ impl ViewId {
         })
     }
 
-    pub fn event_capture(&self, location: Vec2, target: &mut Option<ViewId>) {
+    pub fn event_capture(&self, location: Vec2, target: &mut ViewId) {
         if self.rect().contains(location)
             && self.state().borrow().style.pointer_events != PointerEvents::None
         {
-            *target = Some(*self);
+            *target = *self;
         }
         for child in self.children() {
             child.event_capture(location, target);
         }
     }
 
-    pub fn dispatch_event(&self, event: &mut dyn Event, bubble: bool) {
+    pub fn dispatch_event(&self, event: &mut Event, bubble: bool) {
+        event.set_current_target(*self);
         let state = self.state();
         let listeners = state.borrow().listeners.clone();
         for (_, listener) in listeners {
@@ -135,7 +136,6 @@ impl ViewId {
         }
         if bubble && event.propagation() {
             if let Some(parent) = self.parent() {
-                event.set_current_target(parent);
                 parent.dispatch_event(event, bubble);
             }
         }
@@ -229,25 +229,5 @@ impl ViewId {
             width: size.width,
             height: size.height,
         }
-    }
-
-    pub(crate) fn attach(&self) {
-        self.dispatch_event(
-            &mut FocusEvent {
-                r#type: EventType::Attach,
-                event_target: EventTarget::new(*self),
-            } as &mut dyn Event,
-            false,
-        );
-    }
-
-    pub(crate) fn detach(&self) {
-        self.dispatch_event(
-            &mut FocusEvent {
-                r#type: EventType::Detach,
-                event_target: EventTarget::new(*self),
-            } as &mut dyn Event,
-            false,
-        );
     }
 }

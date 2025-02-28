@@ -792,9 +792,9 @@ impl StyleBuilder {
         self
     }
 
-    pub fn cursor(mut self, value: Cursor) -> Self {
+    pub fn cursor(mut self, value: impl Into<Cursor>) -> Self {
         self.style_props
-            .push((StylePropertyKey::Cursor, StyleProperty::Cursor(value)));
+            .push((StylePropertyKey::Cursor, StyleProperty::Cursor(value.into())));
         self
     }
 

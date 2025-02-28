@@ -53,6 +53,7 @@ pub struct Sprite {
 pub struct SpriteAnimation {
     pub frames: Vec<Sprite>,
     pub timer: Timer,
+    pub bounds: Bounds,
 }
 
 impl From<Node> for SpriteAnimation {
@@ -61,6 +62,7 @@ impl From<Node> for SpriteAnimation {
         Self {
             timer: Timer::new(frames.iter().map(|frame| frame.delay as f32).collect()),
             frames,
+            bounds: Bounds::default(),
         }
     }
 }
@@ -79,24 +81,10 @@ impl SpriteAnimation {
     }
 }
 
-pub struct SpriteAnimationDrawable {
-    sprite: SpriteAnimation,
-    bounds: Bounds,
-}
-
-impl SpriteAnimationDrawable {
-    pub fn new(sprite: SpriteAnimation) -> Self {
-        Self {
-            sprite,
-            bounds: Bounds::default(),
-        }
-    }
-}
-
-impl Drawable for SpriteAnimationDrawable {
+impl Drawable for SpriteAnimation {
     fn draw(&self, renderer: &Renderer) {
         let sprite_renderer = &SpriteRenderer::new(renderer);
-        let frame = self.sprite.current_frame();
+        let frame = self.current_frame();
         sprite_renderer.draw(frame, self.bounds.position);
     }
 
@@ -109,7 +97,7 @@ impl Drawable for SpriteAnimationDrawable {
     }
 
     fn update(&mut self, delta: u64) {
-        self.sprite.tick(delta as f32);
+        self.tick(delta as f32);
     }
 }
 

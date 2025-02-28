@@ -5,11 +5,11 @@ use crate::math;
 use crate::sprite::SpriteRenderer;
 use crate::wz;
 use glam::{vec2, Vec2};
-use sdl3_sys::everything::{SDL_GetKeyboardState, SDL_Renderer, SDL_Scancode, SDL_Window};
+use sdl3_sys::everything::{SDL_Renderer, SDL_Scancode, SDL_Window};
 use std::sync::Arc;
-use ui::event::{Event, EventType, KeyboardEvent};
+use ui::event::Event;
 use ui::reactive::{RwSignal, SignalGet, SignalUpdate};
-use ui::Drawable;
+use ui::{input, Drawable};
 
 #[derive(Default, Clone)]
 pub struct Camera {
@@ -35,7 +35,6 @@ pub struct MainScene {
     camera: Camera,
     camera_signal: RwSignal<Camera>,
     player: Player,
-    state: *const bool,
     map: map::Map,
 }
 
@@ -101,53 +100,49 @@ impl MainScene {
                 ..Default::default()
             },
             player,
-            state: unsafe { SDL_GetKeyboardState(std::ptr::null_mut() as *mut core::ffi::c_int) },
             map,
             camera_signal,
         }
     }
 
-    pub fn event(&mut self, event: &mut dyn Event) {
-        let Self { state, player, .. } = self;
+    pub fn event(&mut self, event: &mut Event) {
+        let Self { player, .. } = self;
 
-        let pressed_left = unsafe { *state.offset(SDL_Scancode::LEFT.0 as isize) };
-        let pressed_right = unsafe { *state.offset(SDL_Scancode::RIGHT.0 as isize) };
-        let pressed_up = unsafe { *state.offset(SDL_Scancode::UP.0 as isize) };
-        let pressed_down = unsafe { *state.offset(SDL_Scancode::DOWN.0 as isize) };
+        let pressed_left = input::key_pressed(SDL_Scancode::LEFT);
+        let pressed_right = input::key_pressed(SDL_Scancode::RIGHT);
+        let pressed_up = input::key_pressed(SDL_Scancode::UP);
+        let pressed_down = input::key_pressed(SDL_Scancode::DOWN);
 
-        if let Some(event) = event.as_any_mut().downcast_ref::<KeyboardEvent>() {
-            match event.r#type {
-                EventType::KeyDown => match event.scancode {
-                    SDL_Scancode::LEFT => {
-                        player.direction.x = -1.0;
-                    }
-                    SDL_Scancode::RIGHT => {
-                        player.direction.x = 1.0;
-                    }
-                    SDL_Scancode::UP => {
-                        player.direction.y = -1.0;
-                    }
-                    SDL_Scancode::DOWN => {
-                        player.direction.y = 1.0;
-                    }
-                    _ => {}
-                },
-
-                EventType::KeyUp => match event.scancode {
-                    SDL_Scancode::LEFT => {
-                        player.direction.x = if pressed_right { 1.0 } else { 0.0 };
-                    }
-                    SDL_Scancode::RIGHT => {
-                        player.direction.x = if pressed_left { -1.0 } else { 0.0 };
-                    }
-                    SDL_Scancode::UP => {
-                        player.direction.y = if pressed_down { 1.0 } else { 0.0 };
-                    }
-                    SDL_Scancode::DOWN => {
-                        player.direction.y = if pressed_up { -1.0 } else { 0.0 };
-                    }
-                    _ => {}
-                },
+        if let Some(event) = event.is_key_down() {
+            match event.scancode {
+                SDL_Scancode::LEFT => {
+                    player.direction.x = -1.0;
+                }
+                SDL_Scancode::RIGHT => {
+                    player.direction.x = 1.0;
+                }
+                SDL_Scancode::UP => {
+                    player.direction.y = -1.0;
+                }
+                SDL_Scancode::DOWN => {
+                    player.direction.y = 1.0;
+                }
+                _ => {}
+            }
+        } else if let Some(event) = event.is_key_up() {
+            match event.scancode {
+                SDL_Scancode::LEFT => {
+                    player.direction.x = if pressed_right { 1.0 } else { 0.0 };
+                }
+                SDL_Scancode::RIGHT => {
+                    player.direction.x = if pressed_left { -1.0 } else { 0.0 };
+                }
+                SDL_Scancode::UP => {
+                    player.direction.y = if pressed_down { 1.0 } else { 0.0 };
+                }
+                SDL_Scancode::DOWN => {
+                    player.direction.y = if pressed_up { -1.0 } else { 0.0 };
+                }
                 _ => {}
             }
         }

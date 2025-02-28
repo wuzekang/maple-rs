@@ -5,7 +5,7 @@ use sdl3_sys::{
     video::SDL_CreateWindow,
 };
 use std::error::Error;
-use ui::image::IntoDrawable;
+use ui::widget::image::IntoDrawable;
 use ui::{
     reactive::{provide_context, SignalGet, SignalUpdate},
     taffy::prelude::*,

@@ -215,40 +215,6 @@ impl Drawable for NineGridTexture {
     }
 }
 
-thread_local! {
-    pub ( crate ) static KEYBOARD_STATE: * const bool = unsafe{SDL_GetKeyboardState(std::ptr::null_mut() as * mut core::ffi::c_int)};
-}
-
-pub fn key_pressed(key: SDL_Scancode) -> bool {
-    KEYBOARD_STATE.with(|state| unsafe { *state.offset(key.0 as isize) })
-}
-
-pub struct PollEvent {
-    event: MaybeUninit<SDL_Event>,
-}
-
-impl PollEvent {
-    pub fn new() -> Self {
-        Self {
-            event: MaybeUninit::uninit(),
-        }
-    }
-}
-
-impl<'a> Iterator for &'a mut PollEvent {
-    type Item = &'a SDL_Event;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        unsafe {
-            if SDL_PollEvent(self.event.as_mut_ptr()) {
-                Some(&*self.event.as_ptr())
-            } else {
-                None
-            }
-        }
-    }
-}
-
 struct TextTexture {
     pub placement: Placement,
     pub texture: *mut SDL_Texture,

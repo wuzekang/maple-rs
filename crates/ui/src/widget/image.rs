@@ -1,9 +1,9 @@
 use crate::event::Interactive;
 use crate::sdl::{Bounds, Drawable};
+use crate::style::Styleable;
 use crate::{
     element::Element,
     sdl::{ImageTexture, Renderer},
-    style::StyleBuilder,
     view_id::ViewId,
 };
 use glam::{vec2, Vec2};
@@ -13,7 +13,6 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 use taffy::{AvailableSpace, Size};
-use crate::style::Styleable;
 
 enum ImageState {
     None,
@@ -80,8 +79,6 @@ impl Image {
             drawable,
         }
     }
-
-
 }
 
 impl Element for Image {

@@ -1,4 +1,4 @@
-use crate::event::{Event, EventType};
+use crate::event::{Event};
 use crate::style::{Style, StyleBuilder};
 use slotmap::{DefaultKey, SlotMap};
 use std::rc::Rc;
@@ -8,7 +8,7 @@ pub struct ViewState {
     pub style: Style,
     pub styles: Vec<Option<StyleBuilder>>,
     pub viewport: Point<f32>,
-    pub listeners: SlotMap<DefaultKey, Rc<Box<dyn Fn(&mut dyn Event)>>>,
+    pub listeners: SlotMap<DefaultKey, Rc<Box<dyn Fn(&mut Event)>>>,
     pub mounted: bool,
 }
 

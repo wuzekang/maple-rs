@@ -1,6 +1,6 @@
 use crate::{
-    dynamic::Dynamic, fragment::Fragment, runtime::RUNTIME, sdl::Renderer, text::Text,
-    view_id::ViewId,
+    runtime::RUNTIME, sdl::Renderer, view_id::ViewId, widget::dynamic::Dynamic,
+    widget::fragment::Fragment, widget::text::Text,
 };
 use glam::vec2;
 use peniko::Color;

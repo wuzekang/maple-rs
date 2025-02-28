@@ -2,7 +2,6 @@ use crate::resource::Resource;
 use crate::{element::Element, view_state::ViewState};
 use cosmic_text::{fontdb::Source, FontSystem, SwashCache};
 use slotmap::{DefaultKey, SecondaryMap, SlotMap};
-use std::any::Any;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::{cell::RefCell, rc::Rc};
 use taffy::TaffyTree;

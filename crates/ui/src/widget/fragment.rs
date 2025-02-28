@@ -1,5 +1,4 @@
-use crate::{element::Node, view_id::ViewId, view_tuple::ViewTuple};
-use reactive::SignalGet;
+use crate::{element::Node, view_tuple::ViewTuple};
 
 pub struct Fragment {
     pub children: Node,
