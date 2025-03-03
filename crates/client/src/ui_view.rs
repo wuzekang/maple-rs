@@ -1,6 +1,6 @@
 use crate::map::world_map::WorldMap;
-use crate::scene::{Camera, MainScene};
-use crate::sprite::{Sprite, SpriteAnimation};
+use crate::scene::MainScene;
+use crate::sprite::{ASpriteAnimation, Sprite, SpriteAnimation};
 use crate::wz::Node;
 use crate::WzBase;
 use glam::{vec2, Vec2};
@@ -9,17 +9,17 @@ use sdl3_sys::everything::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
-use ui::animation::use_raf;
 use ui::event::{use_event, use_key, Interactive};
 use ui::peniko::Color;
 use ui::reactive::{create_rw_signal, use_context, RwSignal, SignalGet, SignalUpdate, SignalWith};
+use ui::style::dimension::{length, percent};
 use ui::style::{Cursor, Styleable};
-use ui::taffy::prelude::{length, percent};
-use ui::taffy::{AlignItems, Display, FlexDirection, JustifyContent, Position, Size};
+use ui::taffy::{AlignItems, Display, FlexDirection, JustifyContent, Position};
 use ui::view_tuple::ViewTuple;
+use ui::widget::debug::debug;
 use ui::{
-    dynamic, fragment, input, lazy, text, view, Bounds, Drawable, Image, ImageTexture, IntoElement,
-    NineGridTexture, Renderer, Surface, TextInput, View,
+    dynamic, fragment, input, lazy, text, view, Bounds, Drawable, Element, Image, ImageTexture,
+    IntoElement, NineGridTexture, Renderer, Surface, TextInput, View,
 };
 
 enum CursorState {
@@ -138,7 +138,7 @@ impl Drawable for DefaultCursor {
         self.clicking_image.set_bounds(bounds);
     }
 
-    fn update(&mut self, delta: u64) {
+    fn update(&mut self, delta: f32) {
         self.clicking = input::mouse_button_pressed(SDL_BUTTON_LMASK);
         if self.clicking {
             self.clicking_image.update(delta);
@@ -149,20 +149,125 @@ impl Drawable for DefaultCursor {
 }
 
 pub fn ui_view() -> impl IntoElement {
+    let logo_visible = RwSignal::new(true);
     let open = RwSignal::new(true);
     let current_map = RwSignal::new("910000000".to_string());
 
-    view((
-        map_scene(current_map),
-        status_bar(),
-        world_map_window(open, current_map),
+    fragment((
+        view(dynamic(move || {
+            if logo_visible.get() {
+                fragment(logo(logo_visible))
+            } else {
+                fragment((
+                    map_scene(current_map),
+                    status_bar(),
+                    world_map_window(open, current_map),
+                ))
+            }
+        }))
+        .style(move |s| {
+            s.cursor(CursorState::Idle)
+                .position(Position::Absolute)
+                .width(percent(1.0))
+                .height(percent(1.0))
+        }),
+        debug(),
     ))
-    .style(move |s| {
-        s.cursor(CursorState::Idle)
-            .position(Position::Absolute)
-            .width(percent(1.0))
-            .height(percent(1.0))
-    })
+}
+
+struct SequenceAnimation {
+    index: usize,
+    animations: Vec<ASpriteAnimation>,
+    complete: bool,
+    bounds: Bounds,
+    listeners: Vec<Box<dyn Fn()>>,
+}
+
+impl SequenceAnimation {
+    fn new(animations: Vec<ASpriteAnimation>) -> Self {
+        Self {
+            index: 0,
+            animations,
+            complete: false,
+            bounds: Bounds::default(),
+            listeners: Vec::new(),
+        }
+    }
+
+    fn on_complete(&mut self, f: impl Fn() + 'static) {
+        self.listeners.push(Box::new(f));
+    }
+}
+
+impl Drawable for SequenceAnimation {
+    fn draw(&self, painter: &Renderer) {
+        let animation = &self.animations[self.index];
+        animation.draw(painter);
+    }
+
+    fn size(&self) -> Vec2 {
+        self.animations[self.index].size()
+    }
+
+    fn set_bounds(&mut self, bounds: Bounds) {
+        self.bounds = bounds;
+    }
+
+    fn update(&mut self, delta: f32) {
+        if self.complete {
+            return;
+        }
+        if self.animations.is_empty() {
+            return;
+        }
+        let animation = &mut self.animations[self.index];
+        animation.update(delta);
+        if animation.complete {
+            self.index += 1;
+        }
+        if self.index >= self.animations.len() {
+            self.complete = true;
+            self.index = self.animations.len() - 1;
+            for f in self.listeners.iter() {
+                f();
+            }
+        }
+        self.animations[self.index].set_bounds(self.bounds.clone());
+    }
+}
+
+pub fn logo(visible: RwSignal<bool>) -> impl IntoElement {
+    lazy(
+        move || {
+            let WzBase { node: base } = use_context().unwrap();
+            async move {
+                let nexon: ASpriteAnimation = base.at_path("UI/Logo.img/Nexon").unwrap().into();
+                let wizet: ASpriteAnimation = base.at_path("UI/Logo.img/Wizet").unwrap().into();
+                Some((nexon, wizet))
+            }
+        },
+        move |resource| {
+            let content = if let Some((nexon, wizet)) = resource {
+                let mut animation = SequenceAnimation::new(vec![nexon, wizet]);
+                animation.on_complete(move || {
+                    visible.set(false);
+                });
+                fragment(Image::new(animation).on_click(|_| {}))
+            } else {
+                fragment(view(()).style(|s| s.background(Color::RED).width(20).height(20)))
+            };
+
+            view(content)
+                .style(|s| {
+                    s.absolute()
+                        .size_full()
+                        .justify_center()
+                        .items_center()
+                        .bg_white()
+                })
+                .on_click(move |_| visible.set(false))
+        },
+    )
 }
 
 pub fn button(btn_node: Node) -> Image {
@@ -192,60 +297,14 @@ pub fn map_scene(map_name: RwSignal<String>) -> impl IntoElement {
         move |map| match map {
             None => fragment(()),
             Some((player, map)) => {
-                let camera_signal = create_rw_signal(Camera::default());
-
-                let window = use_context().unwrap();
-                let renderer = use_context().unwrap();
-                let size = vec2(800.0, 600.0);
-
-                let mut texts = vec![];
-                for layer in &map.layers {
-                    for item in &layer.objects {
-                        for sprite in &item.sprites {
-                            let path = sprite.path.clone();
-                            let position = item.position;
-                            texts.push(text({ move || path.clone() }).style(move |s| {
-                                s.position(Position::Absolute)
-                                    .left(length(position.x))
-                                    .top(length(position.y))
-                                    .font_size(12.0)
-                                    .line_height(14.0)
-                                    .background(Color::WHITE)
-                                    .color(Color::RED)
-                            }));
-                        }
-                    }
-                }
-
-                let main_scene = MainScene::new(window, renderer, size, camera_signal, player, map);
-                let main_scene = Rc::new(RefCell::new(main_scene));
-
-                let state = main_scene.clone();
-                use_event(move |event| {
-                    state.borrow_mut().event(event);
-                });
-
-                use_raf({
-                    let state = main_scene.clone();
-                    move |delta| {
-                        state.borrow_mut().update(delta);
+                let main_scene = Rc::new(RefCell::new(MainScene::new(player, map)));
+                use_event({
+                    let main_scene = main_scene.clone();
+                    move |event| {
+                        main_scene.borrow_mut().event(event);
                     }
                 });
-
-                fragment(
-                    view((
-                        Image::new(main_scene.clone() as Rc<RefCell<dyn Drawable>>),
-                        if false { fragment(texts) } else { fragment(()) },
-                    ))
-                    .style(move |s| {
-                        let camera = camera_signal.get();
-                        s.position(Position::Absolute)
-                            .width(percent(1.0))
-                            .height(percent(1.0))
-                            .left(length(-camera.position.x))
-                            .top(length(-camera.position.y))
-                    }),
-                )
+                fragment(main_scene)
             }
         },
     )
@@ -261,10 +320,8 @@ where
     view((Image::new(images[1].clone()), Image::new(images[8].clone()))).style(|s| {
         s.justify_content(JustifyContent::FlexStart)
             .align_items(AlignItems::FlexStart)
-            .gap(Size {
-                width: length(1.0),
-                height: length(0.0),
-            })
+            .gap_row(1.0)
+            .gap_column(1.0)
     })
 }
 
@@ -281,10 +338,8 @@ pub fn bracket_wrap(children: impl ViewTuple) -> View {
     .style(|s| {
         s.justify_content(JustifyContent::FlexStart)
             .align_items(AlignItems::Center)
-            .gap(Size {
-                width: length(1.0),
-                height: length(0.0),
-            })
+            .gap_row(1.0)
+            .gap_column(1.0)
     })
 }
 
@@ -355,19 +410,19 @@ pub fn status_bar() -> View {
                             .align_items(AlignItems::Center)
                     }),
                 ))
-                .style(|s| {
-                    s.position(Position::Absolute)
-                        .width(percent(1.0))
-                        .height(percent(1.0))
-                        .justify_content(JustifyContent::SpaceBetween)
-                        .align_items(AlignItems::Stretch)
-                }),
+                    .style(|s| {
+                        s.position(Position::Absolute)
+                            .width(percent(1.0))
+                            .height(percent(1.0))
+                            .justify_content(JustifyContent::SpaceBetween)
+                            .align_items(AlignItems::Stretch)
+                    }),
             ))
-            .style(|s| {
-                s.margin_right(length(3.0))
-                    .justify_content(JustifyContent::FlexStart)
-                    .align_items(AlignItems::FlexStart)
-            }),
+                .style(|s| {
+                    s.margin_right(length(3.0))
+                        .justify_content(JustifyContent::FlexStart)
+                        .align_items(AlignItems::FlexStart)
+                }),
             view((
                 button(img.get("EquipKey")),
                 button(img.get("InvenKey")),
@@ -376,22 +431,19 @@ pub fn status_bar() -> View {
                 button(img.get("KeySet")),
                 button(img.get("QuickSlot")),
             ))
-            .style(|s| {
-                s.justify_content(JustifyContent::FlexStart)
-                    .align_items(AlignItems::FlexStart)
-                    .gap(Size {
-                        width: length(2.0),
-                        height: length(0.0),
-                    })
-            }),
+                .style(|s| {
+                    s.justify_content(JustifyContent::FlexStart)
+                        .align_items(AlignItems::FlexStart)
+                        .gap_column(2.0)
+                }),
         ))
-        .style(|s| {
-            s.position(Position::Absolute)
-                .justify_content(JustifyContent::FlexEnd)
-                .align_items(AlignItems::FlexStart)
-                .top(length(8.0))
-                .right(length(4.0))
-        }),
+            .style(|s| {
+                s.position(Position::Absolute)
+                    .justify_content(JustifyContent::FlexEnd)
+                    .align_items(AlignItems::FlexStart)
+                    .top(length(8.0))
+                    .right(length(4.0))
+            }),
         view(
             //
             (view((
@@ -408,11 +460,11 @@ pub fn status_bar() -> View {
                             .align_items(AlignItems::Center)
                     }),
                 )
-                .style(|s| {
-                    s.margin_left(length(3.0))
-                        .width(length(74.0))
-                        .height(length(30.0))
-                }),
+                    .style(|s| {
+                        s.margin_left(length(3.0))
+                            .width(length(74.0))
+                            .height(length(30.0))
+                    }),
                 // job name
                 view((
                     view((
@@ -423,36 +475,36 @@ pub fn status_bar() -> View {
                                 .style(|s| s.color(Color::WHITE).font_size(12.0).line_height(15.0)),
                         ),
                     ))
-                    .style(|s| {
-                        s.justify_content(JustifyContent::FlexStart)
-                            .align_items(AlignItems::FlexStart)
-                            .gap_column(length(2.0))
-                    }),
+                        .style(|s| {
+                            s.justify_content(JustifyContent::FlexStart)
+                                .align_items(AlignItems::FlexStart)
+                                .gap_column(length(2.0))
+                        }),
                     text(|| "三个榔头")
                         .style(|s| s.color(Color::WHITE).font_size(12.0).line_height(15.0)),
                 ))
-                .style(|s| {
-                    s.margin_left(length(8.0))
-                        .flex_grow(1.0)
-                        .height(length(30.0))
-                        .flex_direction(FlexDirection::Column)
-                }),
+                    .style(|s| {
+                        s.margin_left(length(8.0))
+                            .flex_grow(1.0)
+                            .height(length(30.0))
+                            .flex_direction(FlexDirection::Column)
+                    }),
             ))
+                 .style(|s| {
+                     s.width(length(208.0))
+                         .justify_content(JustifyContent::FlexStart)
+                         .align_items(AlignItems::Center)
+                 }),),
+        )
             .style(|s| {
-                s.width(length(208.0))
+                s.position(Position::Absolute)
+                    .left(length(2.0))
+                    .right(length(4.0))
+                    .bottom(length(1.0))
+                    .height(length(34.0))
                     .justify_content(JustifyContent::FlexStart)
                     .align_items(AlignItems::Center)
-            }),),
-        )
-        .style(|s| {
-            s.position(Position::Absolute)
-                .left(length(2.0))
-                .right(length(4.0))
-                .bottom(length(1.0))
-                .height(length(34.0))
-                .justify_content(JustifyContent::FlexStart)
-                .align_items(AlignItems::Center)
-        }),
+            }),
         view((
             Image::new(bar),
             Image::new(graduation).style(|s| s.position(Position::Absolute).bottom(length(0.0))),
@@ -475,32 +527,33 @@ pub fn status_bar() -> View {
                     .left(length(248.0))
             }),
         ))
-        .style(|s| {
-            s.position(Position::Absolute)
-                .display(Display::Block)
-                .left(length(218.0))
-                .bottom(length(1.0))
-        }),
+            .style(|s| {
+                s.position(Position::Absolute)
+                    .display(Display::Block)
+                    .left(length(218.0))
+                    .bottom(length(1.0))
+            }),
         view((
             button(img.get("BtShop")),
             button(img.get("BtNPT")),
             button(img.get("BtMenu")),
             button(img.get("BtShort")),
         ))
-        .style(|s| {
-            s.position(Position::Absolute)
-                .justify_content(JustifyContent::SpaceBetween)
-                .right(length(4.0))
-                .bottom(length(1.0))
-                .width(length(224.0))
-                .height(length(34.0))
-        }),
+            .style(|s| {
+                s.position(Position::Absolute)
+                    .justify_content(JustifyContent::SpaceBetween)
+                    .right(length(4.0))
+                    .bottom(length(1.0))
+                    .width(length(224.0))
+                    .height(length(34.0))
+            }),
     ))
     .style(|s| {
         s.position(Position::Absolute)
             .display(Display::Block)
             .left(length(0.0))
             .right(length(0.0))
+            .width(percent(1.0))
             .bottom(length(0.0))
     })
 }
@@ -540,28 +593,30 @@ pub fn chat_box() -> impl IntoElement {
                 }),
             )
         } else {
-            let input = TextInput::new().style(|s| {
-                s.position(Position::Absolute)
-                    .left(length(4.0))
-                    .width(length(563.0))
-                    .height(length(22.0))
-            });
-
-            input
-                .on_attach(move || {
-                    input.focus();
-                })
-                .on_key_down(move |event| {
-                    if event.key == 13 {
-                        open.set(false);
-                    }
-                    event.propagation = false;
-                })
-                .on_key_up(move |event| event.propagation = false);
+            let mut input_ref = None;
 
             fragment(
                 view((
-                    input,
+                    TextInput::new()
+                        ._ref(&mut input_ref)
+                        .style(|s| {
+                            s.position(Position::Absolute)
+                                .left(length(4.0))
+                                .width(length(563.0))
+                                .height(length(22.0))
+                        })
+                        .on_attach(move || {
+                            input_ref.as_ref().unwrap().with(|input| {
+                                input.focus();
+                            });
+                        })
+                        .on_key_down(move |event| {
+                            if event.key == 13 {
+                                open.set(false);
+                            }
+                            event.propagation = false;
+                        })
+                        .on_key_up(move |event| event.propagation = false),
                     view(button(basic.get("BtMin")).on_click(move |_| open.set(false))).style(
                         |s| {
                             s.position(Position::Absolute)
@@ -791,8 +846,8 @@ pub fn world_map_window(open: RwSignal<bool>, current_map: RwSignal<String>) -> 
                     s.position(Position::Absolute)
                         .width(percent(1.0))
                         .margin_top(length(5.0))
-                        .padding_right(padding.right.into())
-                        .padding_left(padding.left.into())
+                        .padding_right(padding.right)
+                        .padding_left(padding.left)
                         .height(length(14.0))
                         .flex_direction(FlexDirection::Row)
                         .justify_content(JustifyContent::SpaceBetween)

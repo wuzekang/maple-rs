@@ -57,11 +57,12 @@ pub struct Foothold {
     pub z_mass: i32,
 }
 
+#[derive(Debug)]
 pub struct MapInfo {
-    vr_top: Option<i32>,
-    vr_bottom: Option<i32>,
-    vr_left: Option<i32>,
-    vr_right: Option<i32>,
+    pub vr_top: Option<i32>,
+    pub vr_bottom: Option<i32>,
+    pub vr_left: Option<i32>,
+    pub vr_right: Option<i32>,
 }
 
 impl From<Node> for MapInfo {
@@ -349,6 +350,15 @@ impl Map {
             }
         }
 
+        let mut lt = Vec2::INFINITY;
+        let mut rb = Vec2::NEG_INFINITY;
+        for (_, item) in &footholds {
+            lt = lt.min(item.start).min(item.end);
+            rb = rb.max(item.start).max(item.end);
+        }
+        lt.y -= 320.0;
+        rb.y += 160.0;
+
         let helper: MapHelper = root.at_path("Map/MapHelper.img")?.into();
         let life: Vec<MapLife> = map_img.get("life").into();
         let npc: HashMap<String, Npc> = life
@@ -364,6 +374,12 @@ impl Map {
             })
             .collect();
 
+        let mut info: MapInfo = map_img.get("info").into();
+        info.vr_left = info.vr_left.or_else(|| Some(lt.x as i32));
+        info.vr_top = info.vr_top.or_else(|| Some(lt.y as i32));
+        info.vr_right = info.vr_right.or_else(|| Some(rb.x as i32));
+        info.vr_bottom = info.vr_bottom.or_else(|| Some(rb.y as i32));
+
         Ok(Self {
             life,
             npc,
@@ -371,7 +387,7 @@ impl Map {
             layers,
             footholds,
             portals: map_img.get("portal").into(),
-            info: map_img.get("info").into(),
+            info,
             portal_timer: Timer::new((1..helper.pv.len()).into_iter().map(|_| 100.0).collect()),
             helper,
         })

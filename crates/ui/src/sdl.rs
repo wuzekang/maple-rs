@@ -1,11 +1,10 @@
 use crate::OffsetEditor;
-use cosmic_text::{Edit, Editor, FontSystem, Placement, SwashCache};
+use cosmic_text::{Edit, FontSystem, Placement, SwashCache};
 use glam::{vec2, Vec2};
 use image::DynamicImage;
 use peniko::Color;
 use sdl3_sys::{
     blendmode::SDL_BLENDMODE_BLEND,
-    events::{SDL_Event, SDL_PollEvent},
     everything::*,
     pixels::SDL_PixelFormat,
     rect::{SDL_FRect, SDL_Rect},
@@ -22,7 +21,7 @@ use sdl3_sys::{
     },
 };
 use std::rc::Rc;
-use std::{cell::RefCell, cmp, collections::HashMap, mem::MaybeUninit, sync::Arc};
+use std::{cell::RefCell, cmp, collections::HashMap, sync::Arc};
 use taffy::prelude::length;
 use taffy::{LengthPercentage, Rect};
 use unicode_segmentation::UnicodeSegmentation;
@@ -238,7 +237,7 @@ pub trait Drawable {
     fn draw(&self, painter: &Renderer);
     fn size(&self) -> Vec2;
     fn set_bounds(&mut self, bounds: Bounds) {}
-    fn update(&mut self, delta: u64) {}
+    fn update(&mut self, delta: f32) {}
 }
 
 impl ImageTexture {
@@ -362,6 +361,13 @@ impl Texture {
     pub fn ptr(&self) -> *mut SDL_Texture {
         self.texture
     }
+
+    pub fn scale_mode_nearest(self) -> Self {
+        unsafe {
+            SDL_SetTextureScaleMode(self.ptr(), SDL_ScaleMode::NEAREST);
+        }
+        self
+    }
 }
 impl Drop for Texture {
     fn drop(&mut self) {
@@ -372,14 +378,29 @@ impl Drop for Texture {
 }
 
 pub struct Renderer {
-    renderer: *mut SDL_Renderer,
+    dpr: f32,
+    scale: f32,
+    pub renderer: *mut SDL_Renderer,
     text_textures: RefCell<HashMap<cosmic_text::CacheKey, TextTexture>>,
     textures: RefCell<HashMap<*const DynamicImage, Arc<Texture>>>,
 }
 
 impl Renderer {
-    pub fn new(renderer: *mut SDL_Renderer) -> Self {
+    pub fn new(renderer: *mut SDL_Renderer, dpr: f32, size: Vec2) -> Self {
+        // unsafe {
+        //     SDL_SetRenderLogicalPresentation(
+        //         renderer,
+        //         size.x as i32,
+        //         size.y as i32,
+        //         SDL_LOGICAL_PRESENTATION_STRETCH,
+        //     )
+        // };
+
+        unsafe { SDL_SetRenderScale(renderer, dpr, dpr) };
+
         Self {
+            dpr,
+            scale: dpr,
             renderer,
             text_textures: Default::default(),
             textures: Default::default(),
@@ -398,7 +419,12 @@ impl Renderer {
             SDL_RenderTextureRotated(
                 self.renderer,
                 texture.ptr(),
-                std::ptr::null(),
+                &SDL_FRect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: texture.size.x,
+                    h: texture.size.y,
+                },
                 &SDL_FRect {
                     x: if flip == SDL_FlipMode::HORIZONTAL {
                         position.x - (size.x - origin.x)
@@ -448,12 +474,22 @@ impl Renderer {
         }
     }
 
+    pub fn lines(&self, points: &[Vec2]) {
+        let count = points.len() as i32;
+        let points = points
+            .iter()
+            .map(|p| SDL_FPoint { x: p.x, y: p.y })
+            .collect::<Vec<_>>();
+        unsafe { SDL_RenderLines(self.renderer, points.as_ptr(), count) };
+    }
+
     pub fn fill_selection(
         &self,
         color: Color,
         location: taffy::Point<f32>,
         size: taffy::Size<f32>,
         editor: &OffsetEditor,
+        dpr: f32,
     ) {
         let offset = editor.offset;
         let f = |x: i32, y: i32, w: u32, h: u32| {
@@ -461,8 +497,8 @@ impl Renderer {
             let mut y = y as f32 + offset.y;
             let mut w = w as f32;
             let mut h = h as f32;
-            w = w.min(size.width - x);
-            h = h.min(size.height - y);
+            w = w.min(size.width * dpr - x);
+            h = h.min(size.height * dpr - y);
             if w <= 0.0 || h <= 0.0 || x + w <= 0.0 || y + h <= 0.0 {
                 return;
             }
@@ -474,7 +510,11 @@ impl Renderer {
                 h += y;
                 y = 0.0;
             }
-            self.fill_rect(color, vec2(location.x + x, location.y + y), vec2(w, h));
+            self.fill_rect(
+                color,
+                vec2(location.x + x / dpr, location.y + y / dpr),
+                vec2(w, h) / dpr,
+            );
         };
         let selection_bounds = editor.editor.selection_bounds();
         editor.editor.with_buffer(|buffer| {
@@ -546,12 +586,24 @@ impl Renderer {
         });
     }
 
+    pub fn with_target(&self, texture: &Texture, f: impl FnOnce(&Self)) {
+        unsafe { SDL_SetRenderTarget(self.renderer, texture.ptr()) };
+        f(self);
+        unsafe { SDL_SetRenderTarget(self.renderer, std::ptr::null_mut()) };
+    }
+
+    pub fn scale(&self, scale: f32) -> &Self {
+        let scale = scale * self.dpr;
+        unsafe { SDL_SetRenderScale(self.renderer, scale, scale) };
+        self
+    }
+
     pub fn fill_text(
         &self,
         color: Color,
-        location: taffy::Point<f32>,
-        size: taffy::Size<f32>,
-        offset: taffy::Point<f32>,
+        location: Vec2,
+        size: Vec2,
+        offset: Vec2,
         swash_cache: &mut SwashCache,
         font_system: &mut FontSystem,
         buffer: &cosmic_text::Buffer,
@@ -560,7 +612,7 @@ impl Renderer {
             // self.line(0.0, location.y + run.line_top, 1000.0, location.y + run.line_top);
             // self.line(0.0, location.y + run.line_y, 1000.0, location.y + run.line_y);
             let y = run.line_top + offset.y;
-            if y + run.line_height <= 0.0 || y >= size.height {
+            if y + run.line_height <= 0.0 || y >= size.y {
                 continue;
             }
 
@@ -597,8 +649,9 @@ impl Renderer {
                                 data.as_ptr() as *const core::ffi::c_void,
                                 image.placement.width as i32 * 4,
                             );
-                            SDL_SetTextureScaleMode(texture, SDL_ScaleMode::NEAREST);
-                            SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+                            // SDL_SetTextureScaleMode(texture, SDL_ScaleMode::NEAREST);
+                            // SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+                            SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_NONE);
                         };
 
                         TextTexture {
@@ -614,15 +667,15 @@ impl Renderer {
                 if (x + texture.placement.width as f32) <= 0.0 {
                     continue;
                 }
-                if x >= size.width {
+                if x >= size.x {
                     break;
                 }
 
                 let sx = (-x).max(0.0);
                 let sy = (-y).max(0.0);
 
-                let w = (texture.placement.width as f32).min(size.width - x) - sx;
-                let h = (texture.placement.height as f32).min(size.height - y) - sy;
+                let w = (texture.placement.width as f32).min(size.x - x) - sx;
+                let h = (texture.placement.height as f32).min(size.x - y) - sy;
 
                 let x = location.x + x as f32 + sx;
                 let y = location.y + y as f32 + sy;
@@ -632,12 +685,7 @@ impl Renderer {
                     SDL_RenderTexture(
                         self.renderer,
                         texture.texture,
-                        &SDL_FRect {
-                            x: sx,
-                            y: sy,
-                            w,
-                            h,
-                        },
+                        &SDL_FRect { x: sx, y: sy, w, h },
                         &SDL_FRect { x, y, w, h },
                     )
                 };
@@ -667,5 +715,15 @@ impl Renderer {
             SDL_SetTextureAlphaMod(texture.texture, alpha as u8);
             self.render_texture_rotated(texture, flip, position, size, origin);
         }
+    }
+
+    pub fn create_texture(&self, size: Vec2) -> Texture {
+        Texture::new(
+            self.renderer,
+            SDL_PixelFormat::ABGR8888,
+            SDL_TextureAccess::TARGET,
+            (size.x) as u32,
+            (size.y) as u32,
+        )
     }
 }

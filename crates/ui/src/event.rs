@@ -1,13 +1,17 @@
 use crate::root::EventDispatcher;
+use crate::runtime::RUNTIME;
 use crate::{Element, ViewId};
 use glam::{vec2, Vec2};
 use reactive::{on_cleanup, use_context};
 use sdl3_sys::everything::*;
+use std::any::Any;
+use std::cell::RefCell;
 use std::cmp::PartialEq;
 use std::ffi::CStr;
 use std::fmt::Debug;
+use std::marker::PhantomData;
 use std::mem::MaybeUninit;
-
+use std::rc::Rc;
 
 #[derive(Copy, Clone)]
 pub struct EventIterator {
@@ -153,6 +157,7 @@ pub enum FocusEventType {
 }
 pub struct FocusEvent {
     pub r#type: FocusEventType,
+    pub target: ViewId,
 }
 
 #[derive(PartialEq, Eq)]
@@ -306,6 +311,7 @@ impl Event {
             _ => None,
         }
     }
+    
     pub fn is_blur(&mut self) -> Option<&mut FocusEvent> {
         match self {
             Event::Focus(event) => {
@@ -345,10 +351,37 @@ impl Event {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct ElementRef<T: Element> {
+    id: ViewId,
+    _marker: PhantomData<T>,
+}
+
+impl<T: Element + Sized> ElementRef<T> {
+    pub fn with(&self, f: impl FnOnce(&T)) {
+        let id = self.id;
+        let element = RUNTIME.with_borrow(move |r| {
+            r.elements.get(id.0.into()).unwrap().clone() as Rc<RefCell<dyn Any>>
+        });
+        f(element.borrow().downcast_ref::<T>().unwrap());
+    }
+}
+
 pub trait Interactive: Sized + Element {
+    fn _ref(self, r: &mut Option<ElementRef<Self>>) -> Self {
+        *r = Some(ElementRef::<Self> {
+            id: self.id(),
+            _marker: Default::default(),
+        });
+        self
+    }
+
     fn focus(&self) {
         let ctx: EventDispatcher = use_context().unwrap();
-        ctx.focus(self.id());
+        ctx.queue(Event::Focus(FocusEvent {
+            r#type: FocusEventType::Focus,
+            target: self.id(),
+        }));
     }
 
     fn on_event<F>(self, f: F) -> Self

@@ -1,10 +1,26 @@
 
+
+#[derive(Clone, Copy, Default, Debug)]
+pub enum Repeat {
+
+    /// Finite number of repetitions
+    Finite(u16),
+
+    /// Looping
+    #[default]
+    Infinite,
+}
+
+
 #[derive(Clone, Debug, Default)]
 pub struct Timer {
-    elapsed: f32,
-    intervals: Vec<f32>,
-    total: f32,
     pub index: usize,
+    pub repeat: Repeat,
+    pub elapsed: f32,
+    pub intervals: Vec<f32>,
+    pub total: f32,
+    pub repeat_count: u16,
+    pub complete: bool,
 }
 
 impl Timer {
@@ -14,6 +30,9 @@ impl Timer {
             elapsed: 0.0,
             intervals,
             index: 0,
+            repeat: Repeat::Infinite,
+            repeat_count: 0,
+            complete: false,
         }
     }
 
@@ -21,15 +40,43 @@ impl Timer {
         if self.intervals.is_empty() || self.total == 0.0 {
             return false;
         }
+        match self.repeat {
+            Repeat::Finite(count) => {
+                if self.repeat_count >= count {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+
         let prev = self.index;
-        self.elapsed = ((self.elapsed + delta) % self.total);
+        self.elapsed += delta;
+        if self.elapsed >= self.total {
+            self.repeat_count += (self.elapsed / self.total).trunc() as u16;
+            self.elapsed %= self.total
+        }
 
         while self.elapsed >= self.intervals[self.index] {
             self.elapsed = (self.elapsed - self.intervals[self.index]);
-            self.index = ((self.index + 1) % self.intervals.len())
+            self.index += 1;
+            if self.index >= self.intervals.len() {
+                self.repeat_count += 1;
+                self.index = 0;
+            }
         }
 
-        self.index != prev
+        match self.repeat {
+            Repeat::Finite(count) => {
+                if self.repeat_count >= count {
+                    self.index = self.intervals.len() - 1;
+                    self.elapsed  = self.intervals[self.index];
+                    return false;
+                }
+            }
+            _ => {}
+        }
+
+        true
     }
 
     pub fn progress(&self) -> f32 {

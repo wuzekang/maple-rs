@@ -7,6 +7,7 @@ use taffy::Point;
 pub struct ViewState {
     pub style: Style,
     pub styles: Vec<Option<StyleBuilder>>,
+    pub style_dirty: bool,
     pub viewport: Point<f32>,
     pub listeners: SlotMap<DefaultKey, Rc<Box<dyn Fn(&mut Event)>>>,
     pub mounted: bool,
@@ -18,6 +19,7 @@ impl ViewState {
             viewport: Point::ZERO,
             style: Default::default(),
             styles: Default::default(),
+            style_dirty: false,
             listeners: Default::default(),
             mounted: false,
         }

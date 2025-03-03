@@ -1,5 +1,8 @@
+pub mod dimension;
+
 use crate::{Drawable, Element};
 use cosmic_text::Wrap;
+use glam::Vec2;
 use peniko::Color;
 use reactive::create_effect;
 use sdl3_sys::everything::{SDL_CreateSystemCursor, SDL_Cursor, SDL_SystemCursor};
@@ -51,6 +54,7 @@ pub struct Style {
     pub text_wrap: TextWrap,
     pub cursor: Cursor,
     pub pointer_events: PointerEvents,
+    pub translate: Vec2,
 }
 
 impl Style {
@@ -71,6 +75,7 @@ pub enum StyleProperty {
     TextWrap(TextWrap),
     Cursor(Cursor),
     PointerEvents(PointerEvents),
+    Translate(Vec2),
 }
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -82,6 +87,7 @@ pub enum StylePropertyKey {
     TextWrap,
     Cursor,
     PointerEvents,
+    Translate,
 }
 
 impl StyleProperty {
@@ -107,6 +113,9 @@ impl StyleProperty {
             }
             Self::PointerEvents(value) => {
                 style.pointer_events = value.clone();
+            }
+            Self::Translate(value) => {
+                style.translate = value.clone();
             }
         }
     }
@@ -462,28 +471,32 @@ impl StyleBuilder {
         ));
         self
     }
-    pub fn top(mut self, value: LengthPercentageAuto) -> Self {
-        self.taffy_style_props
-            .push((TaffyStylePropertyKey::Top, TaffyStyleProperty::Top(value)));
+    pub fn top(mut self, value: impl Into<dimension::LengthPercentageAuto>) -> Self {
+        self.taffy_style_props.push((
+            TaffyStylePropertyKey::Top,
+            TaffyStyleProperty::Top(value.into().into()),
+        ));
         self
     }
-    pub fn right(mut self, value: LengthPercentageAuto) -> Self {
+    pub fn right(mut self, value: impl Into<dimension::LengthPercentageAuto>) -> Self {
         self.taffy_style_props.push((
             TaffyStylePropertyKey::Right,
-            TaffyStyleProperty::Right(value),
+            TaffyStyleProperty::Right(value.into().into()),
         ));
         self
     }
-    pub fn bottom(mut self, value: LengthPercentageAuto) -> Self {
+    pub fn bottom(mut self, value: impl Into<dimension::LengthPercentageAuto>) -> Self {
         self.taffy_style_props.push((
             TaffyStylePropertyKey::Bottom,
-            TaffyStyleProperty::Bottom(value),
+            TaffyStyleProperty::Bottom(value.into().into()),
         ));
         self
     }
-    pub fn left(mut self, value: LengthPercentageAuto) -> Self {
-        self.taffy_style_props
-            .push((TaffyStylePropertyKey::Left, TaffyStyleProperty::Left(value)));
+    pub fn left(mut self, value: impl Into<dimension::LengthPercentageAuto>) -> Self {
+        self.taffy_style_props.push((
+            TaffyStylePropertyKey::Left,
+            TaffyStyleProperty::Left(value.into().into()),
+        ));
         self
     }
     pub fn size(mut self, value: Size<Dimension>) -> Self {
@@ -491,17 +504,17 @@ impl StyleBuilder {
             .push((TaffyStylePropertyKey::Size, TaffyStyleProperty::Size(value)));
         self
     }
-    pub fn width(mut self, value: Dimension) -> Self {
+    pub fn width(mut self, value: impl Into<dimension::Dimension>) -> Self {
         self.taffy_style_props.push((
             TaffyStylePropertyKey::Width,
-            TaffyStyleProperty::Width(value),
+            TaffyStyleProperty::Width(value.into().into()),
         ));
         self
     }
-    pub fn height(mut self, value: Dimension) -> Self {
+    pub fn height(mut self, value: impl Into<dimension::Dimension>) -> Self {
         self.taffy_style_props.push((
             TaffyStylePropertyKey::Height,
-            TaffyStyleProperty::Height(value),
+            TaffyStyleProperty::Height(value.into().into()),
         ));
         self
     }
@@ -512,17 +525,17 @@ impl StyleBuilder {
         ));
         self
     }
-    pub fn min_width(mut self, value: Dimension) -> Self {
+    pub fn min_width(mut self, value: impl Into<dimension::Dimension>) -> Self {
         self.taffy_style_props.push((
             TaffyStylePropertyKey::MinWidth,
-            TaffyStyleProperty::MinWidth(value),
+            TaffyStyleProperty::MinWidth(value.into().into()),
         ));
         self
     }
-    pub fn min_height(mut self, value: Dimension) -> Self {
+    pub fn min_height(mut self, value: impl Into<dimension::Dimension>) -> Self {
         self.taffy_style_props.push((
             TaffyStylePropertyKey::MinHeight,
-            TaffyStyleProperty::MinHeight(value),
+            TaffyStyleProperty::MinHeight(value.into().into()),
         ));
         self
     }
@@ -561,31 +574,31 @@ impl StyleBuilder {
         ));
         self
     }
-    pub fn margin_top(mut self, value: LengthPercentageAuto) -> Self {
+    pub fn margin_top(mut self, value: impl Into<dimension::LengthPercentageAuto>) -> Self {
         self.taffy_style_props.push((
             TaffyStylePropertyKey::MarginTop,
-            TaffyStyleProperty::MarginTop(value),
+            TaffyStyleProperty::MarginTop(value.into().into()),
         ));
         self
     }
-    pub fn margin_right(mut self, value: LengthPercentageAuto) -> Self {
+    pub fn margin_right(mut self, value: impl Into<dimension::LengthPercentageAuto>) -> Self {
         self.taffy_style_props.push((
             TaffyStylePropertyKey::MarginRight,
-            TaffyStyleProperty::MarginRight(value),
+            TaffyStyleProperty::MarginRight(value.into().into()),
         ));
         self
     }
-    pub fn margin_bottom(mut self, value: LengthPercentageAuto) -> Self {
+    pub fn margin_bottom(mut self, value: impl Into<dimension::LengthPercentageAuto>) -> Self {
         self.taffy_style_props.push((
             TaffyStylePropertyKey::MarginBottom,
-            TaffyStyleProperty::MarginBottom(value),
+            TaffyStyleProperty::MarginBottom(value.into().into()),
         ));
         self
     }
-    pub fn margin_left(mut self, value: LengthPercentageAuto) -> Self {
+    pub fn margin_left(mut self, value: impl Into<dimension::LengthPercentageAuto>) -> Self {
         self.taffy_style_props.push((
             TaffyStylePropertyKey::MarginLeft,
-            TaffyStyleProperty::MarginLeft(value),
+            TaffyStyleProperty::MarginLeft(value.into().into()),
         ));
         self
     }
@@ -596,31 +609,31 @@ impl StyleBuilder {
         ));
         self
     }
-    pub fn padding_top(mut self, value: LengthPercentage) -> Self {
+    pub fn padding_top(mut self, value: impl Into<dimension::LengthPercentage>) -> Self {
         self.taffy_style_props.push((
             TaffyStylePropertyKey::PaddingTop,
-            TaffyStyleProperty::PaddingTop(value),
+            TaffyStyleProperty::PaddingTop(value.into().into()),
         ));
         self
     }
-    pub fn padding_right(mut self, value: LengthPercentage) -> Self {
+    pub fn padding_right(mut self, value: impl Into<dimension::LengthPercentage>) -> Self {
         self.taffy_style_props.push((
             TaffyStylePropertyKey::PaddingRight,
-            TaffyStyleProperty::PaddingRight(value),
+            TaffyStyleProperty::PaddingRight(value.into().into()),
         ));
         self
     }
-    pub fn padding_bottom(mut self, value: LengthPercentage) -> Self {
+    pub fn padding_bottom(mut self, value: impl Into<dimension::LengthPercentage>) -> Self {
         self.taffy_style_props.push((
             TaffyStylePropertyKey::PaddingBottom,
-            TaffyStyleProperty::PaddingBottom(value),
+            TaffyStyleProperty::PaddingBottom(value.into().into()),
         ));
         self
     }
-    pub fn padding_left(mut self, value: LengthPercentage) -> Self {
+    pub fn padding_left(mut self, value: impl Into<dimension::LengthPercentage>) -> Self {
         self.taffy_style_props.push((
             TaffyStylePropertyKey::PaddingLeft,
-            TaffyStyleProperty::PaddingLeft(value),
+            TaffyStyleProperty::PaddingLeft(value.into().into()),
         ));
         self
     }
@@ -631,31 +644,31 @@ impl StyleBuilder {
         ));
         self
     }
-    pub fn border_top(mut self, value: LengthPercentage) -> Self {
+    pub fn border_top(mut self, value: impl Into<dimension::LengthPercentage>) -> Self {
         self.taffy_style_props.push((
             TaffyStylePropertyKey::BorderTop,
-            TaffyStyleProperty::BorderTop(value),
+            TaffyStyleProperty::BorderTop(value.into().into()),
         ));
         self
     }
-    pub fn border_right(mut self, value: LengthPercentage) -> Self {
+    pub fn border_right(mut self, value: impl Into<dimension::LengthPercentage>) -> Self {
         self.taffy_style_props.push((
             TaffyStylePropertyKey::BorderRight,
-            TaffyStyleProperty::BorderRight(value),
+            TaffyStyleProperty::BorderRight(value.into().into()),
         ));
         self
     }
-    pub fn border_bottom(mut self, value: LengthPercentage) -> Self {
+    pub fn border_bottom(mut self, value: impl Into<dimension::LengthPercentage>) -> Self {
         self.taffy_style_props.push((
             TaffyStylePropertyKey::BorderBottom,
-            TaffyStyleProperty::BorderBottom(value),
+            TaffyStyleProperty::BorderBottom(value.into().into()),
         ));
         self
     }
-    pub fn border_left(mut self, value: LengthPercentage) -> Self {
+    pub fn border_left(mut self, value: impl Into<dimension::LengthPercentage>) -> Self {
         self.taffy_style_props.push((
             TaffyStylePropertyKey::BorderLeft,
-            TaffyStyleProperty::BorderLeft(value),
+            TaffyStyleProperty::BorderLeft(value.into().into()),
         ));
         self
     }
@@ -706,17 +719,17 @@ impl StyleBuilder {
             .push((TaffyStylePropertyKey::Gap, TaffyStyleProperty::Gap(value)));
         self
     }
-    pub fn gap_row(mut self, value: LengthPercentage) -> Self {
+    pub fn gap_row(mut self, value: impl Into<dimension::LengthPercentage>) -> Self {
         self.taffy_style_props.push((
             TaffyStylePropertyKey::GapRow,
-            TaffyStyleProperty::GapRow(value),
+            TaffyStyleProperty::GapRow(value.into().into()),
         ));
         self
     }
-    pub fn gap_column(mut self, value: LengthPercentage) -> Self {
+    pub fn gap_column(mut self, value: impl Into<dimension::LengthPercentage>) -> Self {
         self.taffy_style_props.push((
             TaffyStylePropertyKey::GapColumn,
-            TaffyStyleProperty::GapColumn(value),
+            TaffyStyleProperty::GapColumn(value.into().into()),
         ));
         self
     }
@@ -793,8 +806,10 @@ impl StyleBuilder {
     }
 
     pub fn cursor(mut self, value: impl Into<Cursor>) -> Self {
-        self.style_props
-            .push((StylePropertyKey::Cursor, StyleProperty::Cursor(value.into())));
+        self.style_props.push((
+            StylePropertyKey::Cursor,
+            StyleProperty::Cursor(value.into()),
+        ));
         self
     }
 
@@ -804,6 +819,102 @@ impl StyleBuilder {
             StyleProperty::PointerEvents(value),
         ));
         self
+    }
+
+    pub fn translate(mut self, value: Vec2) -> Self {
+        self.style_props
+            .push((StylePropertyKey::Translate, StyleProperty::Translate(value)));
+        self
+    }
+
+    #[inline]
+    pub fn w_full(mut self) -> Self {
+        self.width(dimension::percent(1.0))
+    }
+
+    #[inline]
+    pub fn h_full(mut self) -> Self {
+        self.height(dimension::percent(1.0))
+    }
+
+    #[inline]
+    pub fn absolute(mut self) -> Self {
+        self.position(Position::Absolute)
+    }
+
+    #[inline]
+    pub fn size_full(mut self) -> Self {
+        self.w_full().h_full()
+    }
+
+    #[inline]
+    pub fn flex_row(mut self) -> Self {
+        self.flex_direction(FlexDirection::Row)
+    }
+
+    #[inline]
+    pub fn flex_col(mut self) -> Self {
+        self.flex_direction(FlexDirection::Column)
+    }
+
+    #[inline]
+    pub fn flex_row_reverse(mut self) -> Self {
+        self.flex_direction(FlexDirection::RowReverse)
+    }
+
+    #[inline]
+    pub fn flex_col_reverse(mut self) -> Self {
+        self.flex_direction(FlexDirection::ColumnReverse)
+    }
+
+    #[inline]
+    pub fn justify_start(mut self) -> Self {
+        self.justify_content(JustifyContent::Start)
+    }
+
+    #[inline]
+    pub fn justify_end(mut self) -> Self {
+        self.justify_content(JustifyContent::End)
+    }
+
+    #[inline]
+    pub fn justify_center(mut self) -> Self {
+        self.justify_content(JustifyContent::Center)
+    }
+
+    #[inline]
+    pub fn items_start(mut self) -> Self {
+        self.align_items(AlignItems::Start)
+    }
+
+    #[inline]
+    pub fn items_end(mut self) -> Self {
+        self.align_items(AlignItems::End)
+    }
+
+    #[inline]
+    pub fn items_center(mut self) -> Self {
+        self.align_items(AlignItems::Center)
+    }
+
+    #[inline]
+    pub fn bg_white(mut self) -> Self {
+        self.background(Color::WHITE)
+    }
+
+    #[inline]
+    pub fn bg_black(mut self) -> Self {
+        self.background(Color::BLACK)
+    }
+
+    #[inline]
+    pub fn pointer_events_none(mut self) -> Self {
+        self.pointer_events(PointerEvents::None)
+    }
+
+    #[inline]
+    pub fn pointer_events_auto(mut self) -> Self {
+        self.pointer_events(PointerEvents::Auto)
     }
 }
 
@@ -923,7 +1034,9 @@ pub trait Styleable: Sized + Element {
         state.borrow_mut().styles.push(None);
 
         create_effect(move |_| {
-            id.state().borrow_mut().styles[index] = Some(f(StyleBuilder::default()));
+            let state = id.state();
+            state.borrow_mut().styles[index] = Some(f(StyleBuilder::default()));
+            state.borrow_mut().style_dirty = true;
         });
         self
     }

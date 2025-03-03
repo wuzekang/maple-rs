@@ -201,7 +201,7 @@ impl Signal {
         self.with_untracked(f)
     }
 
-    pub(crate) fn update_value<U, T: 'static>(&self, f: impl FnOnce(&mut T) -> U) -> U {
+     pub(crate) fn update_value<U, T: 'static>(&self, f: impl FnOnce(&mut T) -> U) -> U {
         let result = self
             .value
             .downcast_ref::<RefCell<T>>()

@@ -1,3 +1,4 @@
+use crate::animation::use_raf;
 use crate::event::Interactive;
 use crate::sdl::{Bounds, Drawable};
 use crate::style::Styleable;
@@ -58,10 +59,14 @@ pub struct Image {
 impl Image {
     pub fn new(drawable: impl IntoDrawable) -> Self {
         let id = ViewId::new();
-        Self {
-            id,
-            drawable: Rc::new(RefCell::new(Some(drawable.into_drawable()))),
-        }
+        let drawable = Rc::new(RefCell::new(Some(drawable.into_drawable())));
+        use_raf({
+            let drawable = drawable.clone();
+            move |delta| {
+                drawable.borrow_mut().as_mut().unwrap().update(delta);
+            }
+        });
+        Self { id, drawable }
     }
 
     pub fn dynamic<T, D>(f: T) -> Self

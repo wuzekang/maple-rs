@@ -2,6 +2,7 @@ use crate::resource::Resource;
 use crate::{element::Element, view_state::ViewState};
 use cosmic_text::{fontdb::Source, FontSystem, SwashCache};
 use slotmap::{DefaultKey, SecondaryMap, SlotMap};
+use std::collections::HashMap;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::{cell::RefCell, rc::Rc};
 use taffy::TaffyTree;
@@ -15,8 +16,8 @@ pub struct Runtime {
     pub font_system: FontSystem,
     pub swash_cache: SwashCache,
     pub states: SecondaryMap<DefaultKey, Rc<RefCell<ViewState>>>,
-    pub elements: SecondaryMap<DefaultKey, Rc<dyn Element>>,
-    pub animation_frame_callbacks: Rc<RefCell<SlotMap<DefaultKey, Box<dyn Fn(f32) + 'static>>>>,
+    pub elements: SecondaryMap<DefaultKey, Rc<RefCell<dyn Element + 'static>>>,
+    pub animation_frame_callbacks: Rc<RefCell<HashMap<u64, Box<dyn Fn(f32) + 'static>>>>,
     pub sender: Sender<Resource>,
     pub receiver: Receiver<Resource>,
     pub resources: RefCell<SlotMap<DefaultKey, Rc<dyn Fn(Resource)>>>,

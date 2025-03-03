@@ -938,6 +938,7 @@ dependencies = [
  "hecs",
  "image",
  "indexmap",
+ "log",
  "sdl3-sys",
  "slotmap",
  "thiserror",

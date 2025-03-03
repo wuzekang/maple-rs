@@ -5,11 +5,17 @@ use crate::math;
 use crate::sprite::SpriteRenderer;
 use crate::wz;
 use glam::{vec2, Vec2};
+use sdl3_sys::everything::{SDL_GetWindowSize, SDLK_T};
 use sdl3_sys::everything::{SDL_Renderer, SDL_Scancode, SDL_Window};
 use std::sync::Arc;
-use ui::event::Event;
-use ui::reactive::{RwSignal, SignalGet, SignalUpdate};
-use ui::{input, Drawable};
+use ui::element::Node;
+use ui::event::{use_key, Event};
+use ui::peniko::Color;
+use ui::reactive::{create_rw_signal, use_context, RwSignal, SignalGet, SignalUpdate};
+use ui::style::dimension::length;
+use ui::style::Styleable;
+use ui::taffy::Position;
+use ui::{dynamic, fragment, input, view, Drawable, Element, IntoElement, Renderer, ViewId};
 
 #[derive(Default, Clone)]
 pub struct Camera {
@@ -29,6 +35,7 @@ pub struct Player {
 }
 
 pub struct MainScene {
+    id: ViewId,
     window: *mut SDL_Window,
     renderer: *mut SDL_Renderer,
     size: Vec2,
@@ -76,22 +83,70 @@ impl MainScene {
             ),
             position: position.unwrap_or_default(),
             direction: Vec2::ZERO,
-            speed: Vec2::ONE * 40.0,
+            speed: Vec2::ONE * 500.0,
             ..Default::default()
         };
 
         (player, map)
     }
 
-    pub fn new(
-        window: *mut SDL_Window,
-        renderer: *mut SDL_Renderer,
-        size: Vec2,
-        camera_signal: RwSignal<Camera>,
-        player: Player,
-        map: map::Map,
-    ) -> Self {
+    pub fn new(player: Player, map: map::Map) -> Self {
+        let text_visible = create_rw_signal(false);
+        use_key(SDLK_T, move || {
+            text_visible.set(!text_visible.get());
+        });
+        let camera_signal = create_rw_signal(Camera::default());
+
+        let window = use_context().unwrap();
+        let renderer = use_context().unwrap();
+
+        let size = unsafe {
+            let mut x = 0;
+            let mut y = 0;
+            SDL_GetWindowSize(window, &mut x, &mut y);
+            vec2(x as f32, y as f32)
+        };
+
+        let mut texts = vec![];
+        for layer in &map.layers {
+            for item in &layer.objects {
+                for sprite in &item.sprites {
+                    let path = sprite.path.clone();
+                    let position = item.position;
+                    texts.push(ui::text({ move || path.clone() }).style(move |s| {
+                        let camera_position = camera_signal.get().position;
+                        // let camera_position = Vec2::ZERO;
+                        s.position(Position::Absolute)
+                            .left(length(position.x - camera_position.x))
+                            .top(length(position.y - camera_position.y))
+                            .font_size(12.0)
+                            .line_height(14.0)
+                            .background(Color::WHITE)
+                            .color(Color::RED)
+                    }));
+                }
+            }
+        }
+
+        let texts = fragment(texts).into_element();
+
+        let id = view(dynamic({
+            move || {
+                if text_visible.get() {
+                    texts.clone()
+                } else {
+                    Node::Fragment(vec![])
+                }
+            }
+        }))
+        .style(move |s| {
+            let camera = camera_signal.get();
+            s.absolute().w_full().h_full().left(0).top(0)
+        })
+        .id();
+
         Self {
+            id,
             size,
             window,
             renderer,
@@ -104,8 +159,65 @@ impl MainScene {
             camera_signal,
         }
     }
+}
 
-    pub fn event(&mut self, event: &mut Event) {
+impl Element for MainScene {
+    fn id(&self) -> ViewId {
+        self.id
+    }
+
+    fn update(&mut self, delta: f32) {
+        player_move(self, delta);
+
+        {
+            let Self {
+                camera,
+                camera_signal,
+                map,
+                size,
+                ..
+            } = self;
+            if camera.position != camera_signal.get().position {
+                camera_signal.set(camera.clone());
+            }
+
+            let camera_position = camera.position;
+
+            let scale = if true {
+                1.0
+            } else {
+                (size.x / 800.0).max(size.y / 600.0)
+            };
+            for item in &mut map.backgrounds {
+                update_back(delta, camera_position, *size, item, scale);
+            }
+        }
+
+        let Self { map, player, .. } = self;
+
+        for layer in &mut map.layers {
+            for item in &mut layer.objects {
+                item.timer.tick(delta);
+            }
+        }
+
+        map.portal_timer.tick(delta);
+
+        for item in &map.life {
+            if item.r#type == "n" {
+                let npc = map.npc.get_mut(&item.id).unwrap();
+                if npc.actions.len() == 0 {
+                    continue;
+                }
+                let action = npc.actions.get_mut("stand").unwrap();
+                action.timer.tick(delta);
+            }
+        }
+
+        player.avatar.tick(delta);
+    }
+
+    fn event(&mut self, event: &mut Event) {
         let Self { player, .. } = self;
 
         let pressed_left = input::key_pressed(SDL_Scancode::LEFT);
@@ -148,55 +260,7 @@ impl MainScene {
         }
     }
 
-    pub fn update(&mut self, delta: f32) {
-        player_move(self);
-
-        {
-            let Self {
-                camera,
-                camera_signal,
-                map,
-                size,
-                ..
-            } = self;
-            if camera.position != camera_signal.get().position {
-                camera_signal.set(camera.clone());
-            }
-
-            let camera_position = camera.position;
-
-            for item in &mut map.backgrounds {
-                update_back(delta, camera_position, *size, item);
-            }
-        }
-
-        let Self { map, player, .. } = self;
-
-        for layer in &mut map.layers {
-            for item in &mut layer.objects {
-                item.timer.tick(delta);
-            }
-        }
-
-        map.portal_timer.tick(delta);
-
-        for item in &map.life {
-            if item.r#type == "n" {
-                let npc = map.npc.get_mut(&item.id).unwrap();
-                if npc.actions.len() == 0 {
-                    continue;
-                }
-                let action = npc.actions.get_mut("stand").unwrap();
-                action.timer.tick(delta);
-            }
-        }
-
-        player.avatar.tick(delta);
-    }
-}
-
-impl Drawable for MainScene {
-    fn draw(&self, renderer: &ui::Renderer) {
+    fn paint(&self, renderer: &Renderer) {
         let Self {
             size,
             camera,
@@ -205,14 +269,23 @@ impl Drawable for MainScene {
             ..
         } = self;
 
+        let world_size = *size;
+
         let sprite_renderer = &SpriteRenderer::new(renderer);
         let camera_position = camera.position;
 
+        let scale = if true {
+            1.0
+        } else {
+            (size.x / 800.0).max(size.y / 600.0)
+        };
+        renderer.scale(scale);
         for item in &map.backgrounds {
             if !item.front {
-                draw_back(camera_position, *size, sprite_renderer, item);
+                draw_back(camera_position, *size, sprite_renderer, item, scale);
             }
         }
+        renderer.scale(1.0);
 
         for layer in &map.layers {
             for item in &layer.objects {
@@ -228,6 +301,9 @@ impl Drawable for MainScene {
         let sprite = &map.helper.pv[map.portal_timer.index];
         for item in map.portals.iter() {
             if item.pn == "sp" {
+                continue;
+            }
+            if (item.pt != 7) {
                 continue;
             }
             sprite_renderer.draw(&sprite, item.position - camera_position);
@@ -252,14 +328,41 @@ impl Drawable for MainScene {
         for sprite in player.avatar.frame() {
             sprite_renderer.draw_flip(&sprite, player.position - camera.position, player.flip)
         }
-    }
 
-    fn size(&self) -> Vec2 {
-        self.size
+        let t = map.info.vr_top.unwrap() as f32 - camera.position.y;
+        let b = map.info.vr_bottom.unwrap() as f32 - camera.position.y;
+        let l = map.info.vr_left.unwrap() as f32 - camera.position.x;
+        let r = map.info.vr_right.unwrap() as f32 - camera.position.x;
+        let vr_size = vec2(r - l, b - t);
+        // renderer.set_color(Color::RED);
+        // renderer.lines(&[vec2(l, t), vec2(r, t), vec2(r, b), vec2(l, b), vec2(l, t)]);
+
+        for child in self.id.children() {
+            child.element().borrow().paint(renderer);
+        }
+
+        if world_size.x > vr_size.x {
+            let len = (world_size.x - vr_size.x) / 2.0;
+            renderer.fill_rect(Color::BLACK, Vec2::ZERO, vec2(len, world_size.y));
+            renderer.fill_rect(
+                Color::BLACK,
+                vec2(world_size.x - len, 0.0),
+                vec2(len, world_size.y),
+            );
+        }
+        if world_size.y > vr_size.y {
+            let len = (world_size.y - vr_size.y) / 2.0;
+            renderer.fill_rect(Color::BLACK, Vec2::ZERO, vec2(world_size.x, len));
+            renderer.fill_rect(
+                Color::BLACK,
+                vec2(0.0, world_size.y - len),
+                vec2(world_size.x, len),
+            );
+        }
     }
 }
 
-fn player_move(context: &mut MainScene) {
+fn player_move(context: &mut MainScene, delta: f32) {
     let MainScene {
         player,
         size,
@@ -277,7 +380,7 @@ fn player_move(context: &mut MainScene) {
     if player.foothold == 0 {
         player.avatar.set_action("jump");
         let prev = player.position;
-        player.position += vec2(0.0, 0.5);
+        player.position += vec2(0.0, 200.0) * delta / 1000.0;
         for (i, fh) in map.footholds.iter() {
             if let Some(p) = math::intersect(&fh.start, &fh.end, &prev, &player.position) {
                 player.position = p;
@@ -301,23 +404,50 @@ fn player_move(context: &mut MainScene) {
 
         let direction = player.direction;
         let speed = player.speed;
-        player.position += direction * speed;
+        player.position += direction * speed * delta / 1000.0;
     }
 
-    camera.position = player.position - world_size / 2.0;
+    let vr_left = map.info.vr_left.unwrap() as f32;
+    let vr_right = map.info.vr_right.unwrap() as f32;
+    let vr_top = map.info.vr_top.unwrap() as f32;
+    let vr_bottom = map.info.vr_bottom.unwrap() as f32;
+    let vr_size = vec2(vr_right - vr_left, vr_bottom - vr_top);
+
+    if vr_size.x < world_size.x {
+        camera.position.x = vr_left - (world_size.x - vr_size.x) / 2.0;
+    } else {
+        camera.position.x = (player.position.x - world_size.x / 2.0)
+            .max(vr_left)
+            .min(vr_right - world_size.x);
+    }
+    if vr_size.y < world_size.y {
+        camera.position.y = vr_top - (world_size.y - vr_size.y) / 2.0;
+    } else {
+        camera.position.y = (player.position.y - world_size.y + 240.0)
+            .max(vr_top)
+            .min(vr_bottom - world_size.y);
+    }
 }
 
-fn update_back(delta: f32, camera_position: Vec2, size: Vec2, item: &mut map::MapBackground) {
+fn update_back(
+    delta: f32,
+    camera_position: Vec2,
+    size: Vec2,
+    item: &mut map::MapBackground,
+    scale: f32,
+) {
+    let camera_position = camera_position / scale;
+    let size = size / scale;
     let offset = camera_position + size / 2.0;
 
     match item.r#type {
         4 | 6 => {
-            item.offset_x += item.rx as f32 * 5.0 * delta / 1000.0;
+            item.offset_x += item.rx as f32 * 5.0 * delta / 1000.0 / scale;
             item.offset_y = item.y + offset.y * (item.ry + 100) as f32 / 100.0;
         }
         5 | 7 => {
             item.offset_x = item.x + offset.x * (item.rx + 100) as f32 / 100.0;
-            item.offset_y += item.ry as f32 * 5.0 * delta / 1000.0;
+            item.offset_y += item.ry as f32 * 5.0 * delta / 1000.0 / scale;
         }
         _ => {
             item.offset_x = item.x + offset.x * (item.rx + 100) as f32 / 100.0;
@@ -338,7 +468,11 @@ fn draw_back(
     size: Vec2,
     sprite_renderer: &SpriteRenderer,
     item: &map::MapBackground,
+    scale: f32,
 ) {
+    let camera_position = camera_position / scale;
+    let size = size / scale;
+
     let sprite = item.sprite.current_frame();
     let w = sprite.image.width() as f32;
     let h = sprite.image.height() as f32;

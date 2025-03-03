@@ -24,35 +24,35 @@ use font_kit::{
 };
 
 fn load_system_font(ctx: &Context) {
-    let mut fonts = FontDefinitions::empty();
+    // let mut fonts = FontDefinitions::empty();
 
-    const FONT_NAME: &'static str = "PingFang SC";
+    // const FONT_NAME: &'static str = "PingFang SC";
 
-    let handle = SystemSource::new()
-        .select_best_match(
-            &[FamilyName::Title(FONT_NAME.to_string())],
-            &Properties::new(),
-        )
-        .unwrap();
+    // let handle = SystemSource::new()
+    //     .select_best_match(
+    //         &[FamilyName::Title(FONT_NAME.to_string())],
+    //         &Properties::new(),
+    //     )
+    //     .unwrap();
 
-    let buf: Vec<u8> = match handle {
-        Handle::Memory { bytes, .. } => bytes.to_vec(),
-        Handle::Path { path, .. } => read(path).unwrap(),
-    };
+    // let buf: Vec<u8> = match handle {
+    //     Handle::Memory { bytes, .. } => bytes.to_vec(),
+    //     Handle::Path { path, .. } => read(path).unwrap(),
+    // };
 
-    fonts
-        .font_data
-        .insert(FONT_NAME.to_owned(), FontData::from_owned(buf));
+    // fonts
+    //     .font_data
+    //     .insert(FONT_NAME.to_owned(), FontData::from_owned(buf));
 
-    if let Some(vec) = fonts.families.get_mut(&FontFamily::Proportional) {
-        vec.push(FONT_NAME.to_owned());
-    }
+    // if let Some(vec) = fonts.families.get_mut(&FontFamily::Proportional) {
+    //     vec.push(FONT_NAME.to_owned());
+    // }
 
-    if let Some(vec) = fonts.families.get_mut(&FontFamily::Monospace) {
-        vec.push(FONT_NAME.to_owned());
-    }
+    // if let Some(vec) = fonts.families.get_mut(&FontFamily::Monospace) {
+    //     vec.push(FONT_NAME.to_owned());
+    // }
 
-    ctx.set_fonts(fonts);
+    // ctx.set_fonts(fonts);
 }
 
 fn walk_node_and_to_json(node_arc: &WzNodeArc, json: &mut Map<String, Value>) {

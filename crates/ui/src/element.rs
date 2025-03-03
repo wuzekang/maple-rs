@@ -1,3 +1,4 @@
+use crate::event::Event;
 use crate::{
     runtime::RUNTIME, sdl::Renderer, view_id::ViewId, widget::dynamic::Dynamic,
     widget::fragment::Fragment, widget::text::Text,
@@ -5,11 +6,17 @@ use crate::{
 use glam::vec2;
 use peniko::Color;
 use reactive::{Scope, SignalGet};
+use std::any::Any;
+use std::cell::RefCell;
 use std::rc::Rc;
 use taffy::{AvailableSpace, Size};
 
-pub trait Element {
+pub trait Element: Any {
     fn id(&self) -> ViewId;
+
+    fn update(&mut self, delta: f32) {}
+
+    fn event(&mut self, event: &mut Event) {}
 
     fn paint(&self, ctx: &Renderer) {
         let id = self.id();
@@ -30,9 +37,10 @@ pub trait Element {
         }
 
         for child in self.id().children() {
-            child.element().paint(ctx);
+            child.element().borrow().paint(ctx);
         }
     }
+
     fn measure(
         &self,
         known_dimensions: Size<Option<f32>>,
@@ -62,22 +70,15 @@ pub trait IntoElement: Sized {
 impl<T: Element + 'static> IntoElement for T {
     fn into_element(self) -> Node {
         let id = self.id();
-        RUNTIME.with_borrow_mut(|r| {
-            r.elements.insert(id.node().into(), Rc::new(self));
-        });
+        id.set_element(Rc::new(RefCell::new(self)));
         Node::Static(id)
     }
 }
 
-impl<T: Element + 'static> IntoElement for Rc<T> {
+impl<T: Element + 'static> IntoElement for Rc<RefCell<T>> {
     fn into_element(self) -> Node {
-        let id = self.id();
-        RUNTIME.with_borrow_mut({
-            let element = self.clone() as Rc<dyn Element>;
-            move |r| {
-                r.elements.insert(id.node().into(), element);
-            }
-        });
+        let id = self.borrow().id();
+        id.set_element(self.clone() as Rc<RefCell<dyn Element>>);
         Node::Static(id)
     }
 }
@@ -106,5 +107,16 @@ impl<T: IntoElement + 'static> IntoElement for Vec<T> {
 impl IntoElement for i32 {
     fn into_element(self) -> Node {
         Text::new(move || self).into_element()
+    }
+}
+
+impl IntoElement for &str {
+    fn into_element(self) -> Node {
+        let content = Rc::new(self.to_string());
+        Text::new({
+            let content = content.clone();
+            move || content.clone()
+        })
+        .into_element()
     }
 }

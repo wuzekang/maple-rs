@@ -11,7 +11,7 @@ pub struct Dynamic {
 }
 
 impl Dynamic {
-    pub fn new<VT: ViewTuple, F: Fn() -> VT + 'static>(view_fn: F) -> Self {
+     pub fn new<VT: ViewTuple, F: Fn() -> VT + 'static>(view_fn: F) -> Self {
         let view_fn = Box::new(as_child_of_current_scope(move |_: ()| view_fn().into_vec()));
 
         let (getter, setter) =

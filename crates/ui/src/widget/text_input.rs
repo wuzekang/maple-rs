@@ -1,20 +1,20 @@
+use crate::style::dimension::percent;
 use crate::style::{Cursor, PointerEvents, Styleable, TextWrap};
-use crate::widget::text::text_measure;
+use crate::widget::text::{fill_text, text_measure};
 use crate::{
-    element::Element, runtime::RUNTIME, sdl::Renderer, view, view_id::ViewId, Interactive,
+    element::Element, runtime::RUNTIME, sdl::Renderer, view, view_id::ViewId, Interactive, Texture,
 };
 use cosmic_text::{Action, Buffer, Edit, Editor, Motion, Selection};
-use glam::vec2;
+use glam::{vec2, Vec2};
 use peniko::Color;
 use reactive::{create_ref, use_context, Ref, SignalUpdate};
 use sdl3_sys::everything::*;
 use std::fmt::Display;
-use taffy::prelude::{length, percent};
-use taffy::{AlignItems, AvailableSpace, JustifyContent, Size};
+use taffy::{AlignItems, AvailableSpace, JustifyContent, Point, Size};
 
 pub struct OffsetEditor {
     pub id: ViewId,
-    pub offset: taffy::Point<f32>,
+    pub offset: Vec2,
     pub editor: Editor<'static>,
 }
 
@@ -58,16 +58,18 @@ impl OffsetEditor {
             (width, height)
         });
 
+        let dpr = 2.0f32;
         if let Some((x, y)) = self.editor.cursor_position() {
             let x = x as f32;
             let y = y as f32;
             let rect = self.id.rect();
-            let rect_width = (rect.width - 1.0).max(0.0);
+            let rect_width = ((rect.width - 1.0) * dpr).max(0.0);
+            let rect_height = rect.height * dpr;
             if self.offset.x + x > rect_width {
                 self.offset.x = rect_width - x;
             }
-            if self.offset.y + y > rect.height {
-                self.offset.y = rect.height - y;
+            if self.offset.y + y > rect_height {
+                self.offset.y = rect_height - y;
             }
             if self.offset.x + x < 0.0 {
                 self.offset.x = -x;
@@ -78,16 +80,16 @@ impl OffsetEditor {
             if width + self.offset.x < rect_width {
                 self.offset.x = (rect_width - width).min(0.0);
             }
-            if height + self.offset.x < rect.height {
-                self.offset.y = (rect.height - height).min(0.0);
+            if height + self.offset.x < rect_height {
+                self.offset.y = (rect_height - height).min(0.0);
             }
 
             unsafe {
                 SDL_SetTextInputArea(
                     use_context().unwrap(),
                     &SDL_Rect {
-                        x: (rect.x + x + self.offset.x) as i32,
-                        y: (rect.y + y + self.offset.y) as i32,
+                        x: (rect.x + (x + self.offset.x) / dpr) as i32,
+                        y: (rect.y + (y + self.offset.y) / dpr) as i32,
                         w: 1,
                         h: rect.height as i32,
                     },
@@ -102,6 +104,7 @@ impl OffsetEditor {
 struct TextView {
     id: ViewId,
     editor: Ref<OffsetEditor>,
+    cache: Ref<(Option<Texture>, Option<Texture>)>,
 }
 
 impl TextView {
@@ -110,19 +113,22 @@ impl TextView {
         Self {
             id,
             editor: create_ref(OffsetEditor::new(id)),
+            cache: create_ref((None, None)),
         }
     }
 
     fn action(&self, action: Action) {
         self.editor.with_mut(|editor| {
             editor.action(action);
-        })
+        });
+        self.cache.with_mut(|(a, _)| *a = None);
     }
 
     fn insert_string(&self, data: &str) {
         self.editor.with_mut(|editor| {
             editor.insert_string(data);
-        })
+        });
+        self.cache.with_mut(|(a, _)| *a = None);
     }
 }
 
@@ -148,36 +154,36 @@ impl Element for TextView {
             );
         }
 
+        let dpr = 2.0f32;
+
         self.editor.with_mut(|editor| {
             let offset = editor.offset;
 
             let line_height = editor.editor.with_buffer_mut(|buffer| {
-                RUNTIME.with_borrow_mut(|s| {
-                    ctx.fill_text(
-                        style.color,
-                        location,
-                        size,
-                        offset,
-                        &mut s.swash_cache,
-                        &mut s.font_system,
-                        buffer,
-                    )
-                });
-
+                fill_text(
+                    ctx,
+                    buffer,
+                    self.cache,
+                    style,
+                    vec2(location.x, location.y),
+                    vec2(size.width, size.height),
+                    offset,
+                );
                 buffer.metrics().line_height
-            });
+            }) / dpr;
 
-            ctx.fill_selection(Color::BLUE.multiply_alpha(0.5), location, size, editor);
+            ctx.fill_selection(Color::BLUE.multiply_alpha(0.5), location, size, editor, dpr);
 
             if let Some((x, y)) = editor.editor.cursor_position() {
-                let p = location + offset;
+                let x = x as f32 / dpr;
+                let y = y as f32 / dpr;
+                let p = location
+                    + Point {
+                        x: offset.x / dpr,
+                        y: offset.y / dpr,
+                    };
                 ctx.set_color(Color::BLACK);
-                ctx.line(
-                    p.x + x as f32,
-                    p.y + y as f32,
-                    p.x + x as f32,
-                    p.y + y as f32 + line_height,
-                )
+                ctx.line(p.x + x, p.y + y, p.x + x, p.y + y + line_height)
             }
         });
     }
@@ -196,7 +202,7 @@ impl Element for TextView {
 }
 impl Styleable for TextView {}
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct TextInput {
     id: ViewId,
 }
@@ -217,11 +223,9 @@ impl TextInput {
 
         element
             .on_click(|_| {})
-            .on_focus(move |_| {
-                unsafe {
-                    text_view.editor.with_mut(|editor| editor.update());
-                    SDL_StartTextInput(use_context().unwrap());
-                }
+            .on_focus(move |_| unsafe {
+                text_view.editor.with_mut(|editor| editor.update());
+                SDL_StartTextInput(use_context().unwrap());
             })
             .on_blur(move |_| unsafe {
                 SDL_StopTextInput(use_context().unwrap());
@@ -262,8 +266,8 @@ impl TextInput {
                 s.cursor(Cursor::system_text())
                     .align_items(AlignItems::Center)
                     .justify_content(JustifyContent::Stretch)
-                    .padding_left(length(4.0))
-                    .padding_right(length(4.0))
+                    .padding_left(4)
+                    .padding_right(4)
             });
 
         Self { id: element.id() }

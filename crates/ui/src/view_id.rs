@@ -91,8 +91,12 @@ impl ViewId {
         RUNTIME.with_borrow_mut(|s| s.states.get(self.0.into()).unwrap().clone())
     }
 
-    pub fn element(&self) -> Rc<dyn Element> {
-        RUNTIME.with_borrow(|s| s.elements.get(self.0.into()).cloned().unwrap())
+    pub fn element(&self) -> Rc<RefCell<dyn Element>> {
+        RUNTIME.with_borrow(|s| s.elements.get(self.0.into()).unwrap().clone())
+    }
+
+    pub fn set_element(&self, element: Rc<RefCell<dyn Element>>) {
+        RUNTIME.with_borrow_mut(|s| s.elements.insert(self.0.into(), element));
     }
 
     pub fn layout(&self) -> Option<taffy::Layout> {
@@ -129,15 +133,26 @@ impl ViewId {
 
     pub fn dispatch_event(&self, event: &mut Event, bubble: bool) {
         event.set_current_target(*self);
+        let element = self.element();
+        element.borrow_mut().event(event);
+
         let state = self.state();
         let listeners = state.borrow().listeners.clone();
         for (_, listener) in listeners {
             listener(event);
         }
+
         if bubble && event.propagation() {
             if let Some(parent) = self.parent() {
                 parent.dispatch_event(event, bubble);
             }
+        }
+    }
+
+    pub fn update(&self, delta: f32) {
+        self.element().borrow_mut().update(delta);
+        for child in self.children() {
+            child.update(delta);
         }
     }
 
