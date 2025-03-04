@@ -2,10 +2,12 @@ use crate::animation::use_raf;
 use crate::event::Interactive;
 use crate::sdl::{Bounds, Drawable};
 use crate::style::Styleable;
+use crate::view_tuple::ViewTuple;
 use crate::{
     element::Element,
     sdl::{ImageTexture, Renderer},
     view_id::ViewId,
+    View,
 };
 use glam::{vec2, Vec2};
 use image::DynamicImage;
@@ -39,7 +41,7 @@ impl IntoDrawable for Arc<DynamicImage> {
 }
 
 impl Drawable for Rc<RefCell<dyn Drawable>> {
-    fn draw(&self, painter: &Renderer) {
+    fn draw(&self, painter: &mut Renderer) {
         self.borrow().draw(painter);
     }
 
@@ -69,6 +71,11 @@ impl Image {
         Self { id, drawable }
     }
 
+    pub fn children<VT: ViewTuple>(self, children: VT) -> Self {
+        View::new(self.id, children);
+        self
+    }
+
     pub fn dynamic<T, D>(f: T) -> Self
     where
         T: Fn() -> D + 'static,
@@ -78,6 +85,12 @@ impl Image {
         create_effect({
             let drawable = drawable.clone();
             move |_| *drawable.borrow_mut() = Some(f().into_drawable())
+        });
+        use_raf({
+            let drawable = drawable.clone();
+            move |delta| {
+                drawable.borrow_mut().as_mut().unwrap().update(delta);
+            }
         });
         Self {
             id: ViewId::new(),
@@ -91,17 +104,16 @@ impl Element for Image {
         self.id
     }
 
-    fn paint(&self, cx: &Renderer) {
+    fn paint(&self, cx: &mut Renderer) {
         if let Some(drawable) = self.drawable.borrow_mut().as_mut() {
             let id = self.id();
-            let layout = id.layout().unwrap();
-            let state = id.state();
-            let viewport = state.borrow().viewport;
-            let location = layout.location + viewport;
+            let layout = id.layout();
             let size = layout.size;
-            let position = vec2(location.x, location.y);
             let size = vec2(size.width, size.height);
-            drawable.set_bounds(Bounds { position, size });
+            drawable.set_bounds(Bounds {
+                position: Vec2::ZERO,
+                size,
+            });
             drawable.draw(cx);
         }
     }

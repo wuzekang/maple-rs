@@ -7,39 +7,19 @@ use crate::resource::Resource;
 use crate::runtime::RUNTIME;
 use crate::sdl::Renderer;
 use crate::style::dimension::length;
-use crate::style::{Cursor, StyleComputeContext, Styleable};
+use crate::style::{compute_layout, Cursor, StyleComputeContext, Styleable};
 use crate::view_id::ViewId;
 use crate::widget::view::View;
 use crate::{fragment, input, Bounds, Drawable, Interactive};
 use glam::{vec2, Vec2};
 use peniko::Color;
-use reactive::{provide_context, RwSignal, Scope, SignalGet, SignalRead, SignalUpdate};
-use sdl3_sys::everything::{
-    SDL_Delay, SDL_GetTicks, SDL_HideCursor, SDL_RenderClear, SDL_RenderPresent,
-    SDL_SetRenderDrawColor, SDL_SetRenderVSync, SDL_ShowCursor,
-};
-use sdl3_sys::{
-    events::{SDL_Event, SDL_EventType},
-    everything::*,
-    render::{SDL_GetRenderWindow, SDL_Renderer},
-    video::SDL_GetWindowSize,
-};
+use reactive::{provide_context, RwSignal, Scope, SignalGet, SignalUpdate};
+use sdl3_sys::everything::*;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::mem;
 use std::rc::Rc;
-use taffy::{prelude::TaffyMaxContent, NodeId, Point, Size, TaffyTree};
-
-fn compute_layout(taffy: &mut TaffyTree, parent: NodeId, viewport: Point<f32>) {
-    let children = taffy.children(parent).unwrap();
-    for child in children {
-        let id = ViewId(child);
-        id.state().borrow_mut().viewport = viewport;
-        let location = taffy.layout(child).unwrap().location;
-        let viewport = viewport + location;
-        compute_layout(taffy, child, viewport);
-    }
-}
+use taffy::{prelude::TaffyMaxContent, Point, Size};
 
 #[derive(Default, Clone)]
 pub struct EventDispatcher {
@@ -243,10 +223,10 @@ impl CursorElement {
 }
 
 impl Drawable for CursorElement {
-    fn draw(&self, cx: &Renderer) {
+    fn draw(&self, cx: &mut Renderer) {
         if self.inspect {
             if let Some(id) = self.target {
-                let layout = id.layout().unwrap();
+                let layout = id.layout();
                 let state = id.state();
                 let viewport = state.borrow().viewport;
                 let location = layout.location + viewport;
@@ -437,9 +417,9 @@ impl Root {
         compute_layout(&mut taffy.borrow_mut(), self.view.id().node(), Point::ZERO);
     }
 
-    pub fn paint(&self) {
-        self.view.paint(&self.painter);
-        self.cursor_element.draw(&self.painter);
+    pub fn paint(&mut self) {
+        self.view.id().paint(&mut self.painter);
+        self.cursor_element.draw(&mut self.painter);
     }
 
     pub fn launch(&mut self) {

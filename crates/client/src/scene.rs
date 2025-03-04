@@ -20,8 +20,7 @@ use ui::{dynamic, fragment, input, view, Drawable, Element, IntoElement, Rendere
 #[derive(Default, Clone)]
 pub struct Camera {
     pub position: Vec2,
-    pub direction: Vec2,
-    pub speed: Vec2,
+    pub size: Vec2,
 }
 
 #[derive(Default)]
@@ -40,8 +39,8 @@ pub struct MainScene {
     renderer: *mut SDL_Renderer,
     size: Vec2,
     camera: Camera,
-    camera_signal: RwSignal<Camera>,
-    player: Player,
+    pub camera_signal: RwSignal<Camera>,
+    player: Option<Player>,
     map: map::Map,
 }
 
@@ -63,7 +62,7 @@ impl MainScene {
                 Some(item.position)
             }
         });
-        let z_map: Arc<ZMap> = Arc::new(base.at_path("zmap.img").unwrap().into());
+        let z_map: Arc<ZMap> = Arc::new(base.at_path("zmap.img").unwrap().try_into().unwrap());
 
         let player = Player {
             avatar: Character::new(
@@ -90,7 +89,7 @@ impl MainScene {
         (player, map)
     }
 
-    pub fn new(player: Player, map: map::Map) -> Self {
+    pub fn new(map: map::Map) -> Self {
         let text_visible = create_rw_signal(false);
         use_key(SDLK_T, move || {
             text_visible.set(!text_visible.get());
@@ -115,7 +114,6 @@ impl MainScene {
                     let position = item.position;
                     texts.push(ui::text({ move || path.clone() }).style(move |s| {
                         let camera_position = camera_signal.get().position;
-                        // let camera_position = Vec2::ZERO;
                         s.position(Position::Absolute)
                             .left(length(position.x - camera_position.x))
                             .top(length(position.y - camera_position.y))
@@ -130,7 +128,12 @@ impl MainScene {
 
         let texts = fragment(texts).into_element();
 
-        let id = view(dynamic({
+        let camera = Camera {
+            size,
+            ..Default::default()
+        };
+
+        let id = view((dynamic({
             move || {
                 if text_visible.get() {
                     texts.clone()
@@ -138,7 +141,7 @@ impl MainScene {
                     Node::Fragment(vec![])
                 }
             }
-        }))
+        }),))
         .style(move |s| {
             let camera = camera_signal.get();
             s.absolute().w_full().h_full().left(0).top(0)
@@ -150,14 +153,25 @@ impl MainScene {
             size,
             window,
             renderer,
-            camera: Camera {
-                speed: Vec2::ONE * 40.0,
-                ..Default::default()
-            },
-            player,
+            camera,
+            player: None,
             map,
             camera_signal,
         }
+    }
+
+    pub fn set_camera_position(&mut self, position: Vec2) {
+        self.camera.position = position;
+        self.camera_signal.set(self.camera.clone());
+    }
+
+    pub fn move_camera_position(&mut self, offset: Vec2) {
+        self.camera.position += offset;
+        self.camera_signal.set(self.camera.clone());
+    }
+
+    pub fn set_player(&mut self, player: Player) {
+        self.player = Some(player);
     }
 }
 
@@ -177,9 +191,9 @@ impl Element for MainScene {
                 size,
                 ..
             } = self;
-            if camera.position != camera_signal.get().position {
-                camera_signal.set(camera.clone());
-            }
+            // if camera.position != camera_signal.get().position {
+            //     camera_signal.set(camera.clone());
+            // }
 
             let camera_position = camera.position;
 
@@ -214,53 +228,57 @@ impl Element for MainScene {
             }
         }
 
-        player.avatar.tick(delta);
+        if let Some(player) = self.player.as_mut() {
+            player.avatar.tick(delta);
+        }
     }
 
     fn event(&mut self, event: &mut Event) {
         let Self { player, .. } = self;
 
-        let pressed_left = input::key_pressed(SDL_Scancode::LEFT);
-        let pressed_right = input::key_pressed(SDL_Scancode::RIGHT);
-        let pressed_up = input::key_pressed(SDL_Scancode::UP);
-        let pressed_down = input::key_pressed(SDL_Scancode::DOWN);
+        if let Some(player) = player.as_mut() {
+            let pressed_left = input::key_pressed(SDL_Scancode::LEFT);
+            let pressed_right = input::key_pressed(SDL_Scancode::RIGHT);
+            let pressed_up = input::key_pressed(SDL_Scancode::UP);
+            let pressed_down = input::key_pressed(SDL_Scancode::DOWN);
 
-        if let Some(event) = event.is_key_down() {
-            match event.scancode {
-                SDL_Scancode::LEFT => {
-                    player.direction.x = -1.0;
+            if let Some(event) = event.is_key_down() {
+                match event.scancode {
+                    SDL_Scancode::LEFT => {
+                        player.direction.x = -1.0;
+                    }
+                    SDL_Scancode::RIGHT => {
+                        player.direction.x = 1.0;
+                    }
+                    SDL_Scancode::UP => {
+                        player.direction.y = -1.0;
+                    }
+                    SDL_Scancode::DOWN => {
+                        player.direction.y = 1.0;
+                    }
+                    _ => {}
                 }
-                SDL_Scancode::RIGHT => {
-                    player.direction.x = 1.0;
+            } else if let Some(event) = event.is_key_up() {
+                match event.scancode {
+                    SDL_Scancode::LEFT => {
+                        player.direction.x = if pressed_right { 1.0 } else { 0.0 };
+                    }
+                    SDL_Scancode::RIGHT => {
+                        player.direction.x = if pressed_left { -1.0 } else { 0.0 };
+                    }
+                    SDL_Scancode::UP => {
+                        player.direction.y = if pressed_down { 1.0 } else { 0.0 };
+                    }
+                    SDL_Scancode::DOWN => {
+                        player.direction.y = if pressed_up { -1.0 } else { 0.0 };
+                    }
+                    _ => {}
                 }
-                SDL_Scancode::UP => {
-                    player.direction.y = -1.0;
-                }
-                SDL_Scancode::DOWN => {
-                    player.direction.y = 1.0;
-                }
-                _ => {}
-            }
-        } else if let Some(event) = event.is_key_up() {
-            match event.scancode {
-                SDL_Scancode::LEFT => {
-                    player.direction.x = if pressed_right { 1.0 } else { 0.0 };
-                }
-                SDL_Scancode::RIGHT => {
-                    player.direction.x = if pressed_left { -1.0 } else { 0.0 };
-                }
-                SDL_Scancode::UP => {
-                    player.direction.y = if pressed_down { 1.0 } else { 0.0 };
-                }
-                SDL_Scancode::DOWN => {
-                    player.direction.y = if pressed_up { -1.0 } else { 0.0 };
-                }
-                _ => {}
             }
         }
     }
 
-    fn paint(&self, renderer: &Renderer) {
+    fn paint(&self, renderer: &mut Renderer) {
         let Self {
             size,
             camera,
@@ -271,7 +289,7 @@ impl Element for MainScene {
 
         let world_size = *size;
 
-        let sprite_renderer = &SpriteRenderer::new(renderer);
+        let sprite_renderer = &mut SpriteRenderer::new(renderer);
         let camera_position = camera.position;
 
         let scale = if true {
@@ -279,13 +297,13 @@ impl Element for MainScene {
         } else {
             (size.x / 800.0).max(size.y / 600.0)
         };
-        renderer.scale(scale);
+        sprite_renderer.scale(scale);
         for item in &map.backgrounds {
             if !item.front {
                 draw_back(camera_position, *size, sprite_renderer, item, scale);
             }
         }
-        renderer.scale(1.0);
+        sprite_renderer.scale(1.0);
 
         for layer in &map.layers {
             for item in &layer.objects {
@@ -325,40 +343,38 @@ impl Element for MainScene {
             }
         }
 
-        for sprite in player.avatar.frame() {
-            sprite_renderer.draw_flip(&sprite, player.position - camera.position, player.flip)
+        if let Some(player) = player.as_ref() {
+            for sprite in player.avatar.frame() {
+                sprite_renderer.draw_flip(&sprite, player.position - camera_position, player.flip)
+            }
         }
 
-        let t = map.info.vr_top.unwrap() as f32 - camera.position.y;
-        let b = map.info.vr_bottom.unwrap() as f32 - camera.position.y;
-        let l = map.info.vr_left.unwrap() as f32 - camera.position.x;
-        let r = map.info.vr_right.unwrap() as f32 - camera.position.x;
+        let t = map.info.vr_top.unwrap() as f32 - camera_position.y;
+        let b = map.info.vr_bottom.unwrap() as f32 - camera_position.y;
+        let l = map.info.vr_left.unwrap() as f32 - camera_position.x;
+        let r = map.info.vr_right.unwrap() as f32 - camera_position.x;
         let vr_size = vec2(r - l, b - t);
         // renderer.set_color(Color::RED);
         // renderer.lines(&[vec2(l, t), vec2(r, t), vec2(r, b), vec2(l, b), vec2(l, t)]);
 
-        for child in self.id.children() {
-            child.element().borrow().paint(renderer);
-        }
-
-        if world_size.x > vr_size.x {
-            let len = (world_size.x - vr_size.x) / 2.0;
-            renderer.fill_rect(Color::BLACK, Vec2::ZERO, vec2(len, world_size.y));
-            renderer.fill_rect(
-                Color::BLACK,
-                vec2(world_size.x - len, 0.0),
-                vec2(len, world_size.y),
-            );
-        }
-        if world_size.y > vr_size.y {
-            let len = (world_size.y - vr_size.y) / 2.0;
-            renderer.fill_rect(Color::BLACK, Vec2::ZERO, vec2(world_size.x, len));
-            renderer.fill_rect(
-                Color::BLACK,
-                vec2(0.0, world_size.y - len),
-                vec2(world_size.x, len),
-            );
-        }
+        // if world_size.x > vr_size.x {
+        //     let len = (world_size.x - vr_size.x) / 2.0;
+        //     renderer.fill_rect(Color::BLACK, Vec2::ZERO, vec2(len, world_size.y));
+        //     renderer.fill_rect(
+        //         Color::BLACK,
+        //         vec2(world_size.x - len, 0.0),
+        //         vec2(len, world_size.y),
+        //     );
+        // }
+        // if world_size.y > vr_size.y {
+        //     let len = (world_size.y - vr_size.y) / 2.0;
+        //     renderer.fill_rect(Color::BLACK, Vec2::ZERO, vec2(world_size.x, len));
+        //     renderer.fill_rect(
+        //         Color::BLACK,
+        //         vec2(0.0, world_size.y - len),
+        //         vec2(world_size.x, len),
+        //     );
+        // }
     }
 }
 
@@ -370,6 +386,10 @@ fn player_move(context: &mut MainScene, delta: f32) {
         map,
         ..
     } = context;
+    if player.is_none() {
+        return;
+    }
+    let player = player.as_mut().unwrap();
 
     let world_size = *size;
 
@@ -407,6 +427,7 @@ fn player_move(context: &mut MainScene, delta: f32) {
         player.position += direction * speed * delta / 1000.0;
     }
 
+    camera.position = player.position - world_size / 2.0;
     let vr_left = map.info.vr_left.unwrap() as f32;
     let vr_right = map.info.vr_right.unwrap() as f32;
     let vr_top = map.info.vr_top.unwrap() as f32;
@@ -466,7 +487,7 @@ fn update_back(
 fn draw_back(
     camera_position: Vec2,
     size: Vec2,
-    sprite_renderer: &SpriteRenderer,
+    sprite_renderer: &mut SpriteRenderer,
     item: &map::MapBackground,
     scale: f32,
 ) {

@@ -1,6 +1,9 @@
+use crate::cursor::CursorState;
+use crate::login::login_scene;
 use crate::map::world_map::WorldMap;
 use crate::scene::MainScene;
 use crate::sprite::{ASpriteAnimation, Sprite, SpriteAnimation};
+use crate::timer::Repeat;
 use crate::wz::Node;
 use crate::WzBase;
 use glam::{vec2, Vec2};
@@ -11,165 +14,48 @@ use std::rc::Rc;
 use std::sync::Arc;
 use ui::event::{use_event, use_key, Interactive};
 use ui::peniko::Color;
-use ui::reactive::{create_rw_signal, use_context, RwSignal, SignalGet, SignalUpdate, SignalWith};
+use ui::reactive::{
+    create_ref, create_rw_signal, use_context, RwSignal, SignalGet, SignalUpdate, SignalWith,
+};
 use ui::style::dimension::{length, percent};
-use ui::style::{Cursor, Styleable};
+use ui::style::Styleable;
 use ui::taffy::{AlignItems, Display, FlexDirection, JustifyContent, Position};
 use ui::view_tuple::ViewTuple;
 use ui::widget::debug::debug;
 use ui::{
-    dynamic, fragment, input, lazy, text, view, Bounds, Drawable, Element, Image, ImageTexture,
-    IntoElement, NineGridTexture, Renderer, Surface, TextInput, View,
+    dynamic, fragment, lazy, text, view, Bounds, Drawable, Element, Image, IntoElement,
+    NineGridTexture, Renderer, Surface, TextInput, View,
 };
 
-enum CursorState {
-    Idle,
-    LClick,
-    Game,
-    House,
-    Grab,
-    Gift,
-    VScroll,
-    HScroll,
-    VScrollIdle,
-    HScrollIdle,
-    Grabbing,
-    Clicking,
-    RClick,
-}
-
-impl CursorState {
-    fn index(&self) -> u8 {
-        match self {
-            CursorState::Idle => 0,
-            CursorState::LClick => 1,
-            CursorState::Game => 2,
-            CursorState::House => 3,
-            CursorState::Grab => 5,
-            CursorState::Gift => 6,
-            CursorState::VScroll => 7,
-            CursorState::HScroll => 8,
-            CursorState::VScrollIdle => 9,
-            CursorState::HScrollIdle => 10,
-            CursorState::Grabbing => 11,
-            CursorState::Clicking => 12,
-            CursorState::RClick => 13,
-        }
-    }
-
-    fn clicking_state(&self) -> CursorState {
-        match self {
-            CursorState::Idle => CursorState::Clicking,
-            CursorState::LClick => CursorState::Clicking,
-            CursorState::Game => CursorState::Clicking,
-            CursorState::House => CursorState::Clicking,
-            CursorState::Grab => CursorState::Grabbing,
-            CursorState::Gift => CursorState::Clicking,
-            CursorState::VScroll => CursorState::Clicking,
-            CursorState::HScroll => CursorState::Clicking,
-            CursorState::VScrollIdle => CursorState::Clicking,
-            CursorState::HScrollIdle => CursorState::Clicking,
-            CursorState::Grabbing => CursorState::Grabbing,
-            CursorState::Clicking => CursorState::Clicking,
-            CursorState::RClick => CursorState::Clicking,
-        }
-    }
-}
-
-impl Into<Cursor> for CursorState {
-    fn into(self) -> Cursor {
-        cursor(self)
-    }
-}
-
-pub fn cursor_image(state: CursorState) -> SpriteAnimation {
-    let WzBase { node: base } = use_context().unwrap();
-    let basic = base.at_path("UI/Basic.img").unwrap();
-    let cursor: SpriteAnimation = basic
-        .at_path(&format!("Cursor/{}", state.index()))
-        .unwrap()
-        .into();
-    cursor
-}
-
-pub fn cursor(state: CursorState) -> Cursor {
-    Cursor::from_drawable({
-        let cursor = DefaultCursor::new(state);
-        move || Box::new(cursor.clone())
-    })
-}
-
 #[derive(Clone)]
-struct DefaultCursor {
-    idle_image: SpriteAnimation,
-    clicking_image: SpriteAnimation,
-    clicking: bool,
+enum Stage {
+    Logo,
+    Login,
+    Main,
 }
 
-impl DefaultCursor {
-    pub fn new(state: CursorState) -> Self {
-        Self {
-            clicking: false,
-            clicking_image: cursor_image(state.clicking_state()),
-            idle_image: cursor_image(state),
-        }
-    }
-}
-
-impl Drawable for DefaultCursor {
-    fn draw(&self, painter: &Renderer) {
-        if self.clicking {
-            self.clicking_image.draw(painter);
-        } else {
-            self.idle_image.draw(painter);
-        }
-    }
-
-    fn size(&self) -> Vec2 {
-        if self.clicking {
-            self.clicking_image.size()
-        } else {
-            self.idle_image.size()
-        }
-    }
-
-    fn set_bounds(&mut self, bounds: Bounds) {
-        self.idle_image.set_bounds(bounds.clone());
-        self.clicking_image.set_bounds(bounds);
-    }
-
-    fn update(&mut self, delta: f32) {
-        self.clicking = input::mouse_button_pressed(SDL_BUTTON_LMASK);
-        if self.clicking {
-            self.clicking_image.update(delta);
-        } else {
-            self.idle_image.update(delta);
-        }
-    }
-}
-
-pub fn ui_view() -> impl IntoElement {
-    let logo_visible = RwSignal::new(true);
+pub fn app() -> impl IntoElement {
+    let stage = RwSignal::new(Stage::Logo);
     let open = RwSignal::new(true);
+
     let current_map = RwSignal::new("910000000".to_string());
 
     fragment((
-        view(dynamic(move || {
-            if logo_visible.get() {
-                fragment(logo(logo_visible))
-            } else {
-                fragment((
-                    map_scene(current_map),
-                    status_bar(),
-                    world_map_window(open, current_map),
-                ))
-            }
+        view(dynamic(move || match stage.get() {
+            Stage::Logo => fragment(logo_scene(move || stage.set(Stage::Login))),
+            Stage::Login => fragment((login_scene(move || stage.set(Stage::Main)))),
+            Stage::Main => fragment((
+                map_scene(current_map),
+                status_bar(),
+                world_map_window(open, current_map),
+            )),
         }))
         .style(move |s| {
             s.cursor(CursorState::Idle)
                 .position(Position::Absolute)
-                .width(percent(1.0))
-                .height(percent(1.0))
+                .w_full()
+                .h_full()
+                .bg_black()
         }),
         debug(),
     ))
@@ -200,7 +86,7 @@ impl SequenceAnimation {
 }
 
 impl Drawable for SequenceAnimation {
-    fn draw(&self, painter: &Renderer) {
+    fn draw(&self, painter: &mut Renderer) {
         let animation = &self.animations[self.index];
         animation.draw(painter);
     }
@@ -236,13 +122,23 @@ impl Drawable for SequenceAnimation {
     }
 }
 
-pub fn logo(visible: RwSignal<bool>) -> impl IntoElement {
+pub fn logo_scene(on_finished: impl Fn() + 'static) -> impl IntoElement {
+    let on_finished = create_ref(on_finished);
+
     lazy(
         move || {
             let WzBase { node: base } = use_context().unwrap();
             async move {
-                let nexon: ASpriteAnimation = base.at_path("UI/Logo.img/Nexon").unwrap().into();
-                let wizet: ASpriteAnimation = base.at_path("UI/Logo.img/Wizet").unwrap().into();
+                let nexon: ASpriteAnimation = base
+                    .at_path("UI/Logo.img/Nexon")
+                    .unwrap()
+                    .try_into()
+                    .unwrap();
+                let wizet: ASpriteAnimation = base
+                    .at_path("UI/Logo.img/Wizet")
+                    .unwrap()
+                    .try_into()
+                    .unwrap();
                 Some((nexon, wizet))
             }
         },
@@ -250,7 +146,7 @@ pub fn logo(visible: RwSignal<bool>) -> impl IntoElement {
             let content = if let Some((nexon, wizet)) = resource {
                 let mut animation = SequenceAnimation::new(vec![nexon, wizet]);
                 animation.on_complete(move || {
-                    visible.set(false);
+                    on_finished.with(|f| f());
                 });
                 fragment(Image::new(animation).on_click(|_| {}))
             } else {
@@ -265,7 +161,9 @@ pub fn logo(visible: RwSignal<bool>) -> impl IntoElement {
                         .items_center()
                         .bg_white()
                 })
-                .on_click(move |_| visible.set(false))
+                .on_click(move |_| {
+                    on_finished.with(|f| f());
+                })
         },
     )
 }
@@ -273,9 +171,9 @@ pub fn logo(visible: RwSignal<bool>) -> impl IntoElement {
 pub fn button(btn_node: Node) -> Image {
     let btn_state = create_rw_signal("normal".to_string());
     Image::dynamic(move || {
-        let path = format!("{}/0", btn_state.get());
-        let image: Arc<DynamicImage> = btn_node.at_path(&path).unwrap().into();
-        ImageTexture::new(use_context().unwrap(), &image)
+        SpriteAnimation::try_from(btn_node.at_path(&btn_state.get()).unwrap())
+            .unwrap()
+            .with_repeat(Repeat::Finite(1))
     })
     .on_mouse_enter(move |_| {
         btn_state.set("mouseOver".to_string());
@@ -297,7 +195,8 @@ pub fn map_scene(map_name: RwSignal<String>) -> impl IntoElement {
         move |map| match map {
             None => fragment(()),
             Some((player, map)) => {
-                let main_scene = Rc::new(RefCell::new(MainScene::new(player, map)));
+                let main_scene = Rc::new(RefCell::new(MainScene::new(map)));
+                main_scene.borrow_mut().set_player(player);
                 use_event({
                     let main_scene = main_scene.clone();
                     move |event| {
@@ -316,7 +215,9 @@ where
 {
     let WzBase { node: base } = use_context().unwrap();
     let node = base.at_path("UI/Basic.img/LevelNo").unwrap();
-    let images: Vec<Arc<DynamicImage>> = (0..9).map(|i| node.get(&i.to_string()).into()).collect();
+    let images: Vec<Arc<DynamicImage>> = (0..9)
+        .map(|i| node.get(&i.to_string()).try_into().unwrap())
+        .collect();
     view((Image::new(images[1].clone()), Image::new(images[8].clone()))).style(|s| {
         s.justify_content(JustifyContent::FlexStart)
             .align_items(AlignItems::FlexStart)
@@ -328,8 +229,8 @@ where
 pub fn bracket_wrap(children: impl ViewTuple) -> View {
     let WzBase { node: base } = use_context().unwrap();
     let node = base.at_path("UI/StatusBar.img/number").unwrap();
-    let left: Arc<DynamicImage> = node.get("Lbracket").into();
-    let right: Arc<DynamicImage> = node.get("Rbracket").into();
+    let left: Arc<DynamicImage> = node.get("Lbracket").try_into().unwrap();
+    let right: Arc<DynamicImage> = node.get("Rbracket").try_into().unwrap();
     view(fragment((
         Image::new(left),
         fragment(children),
@@ -346,9 +247,11 @@ pub fn bracket_wrap(children: impl ViewTuple) -> View {
 pub fn status_bar_number(f: impl (Fn() -> String) + 'static) -> View {
     let WzBase { node: base } = use_context().unwrap();
     let node = base.at_path("UI/StatusBar.img/number").unwrap();
-    let images: Vec<Arc<DynamicImage>> = (0..10).map(|i| node.get(&i.to_string()).into()).collect();
-    let slash: Arc<DynamicImage> = node.get("slash").into();
-    let percent: Arc<DynamicImage> = node.get("percent").into();
+    let images: Vec<Arc<DynamicImage>> = (0..10)
+        .map(|i| node.get(&i.to_string()).try_into().unwrap())
+        .collect();
+    let slash: Arc<DynamicImage> = node.get("slash").try_into().unwrap();
+    let percent: Arc<DynamicImage> = node.get("percent").try_into().unwrap();
 
     view(dynamic(move || {
         f().chars()
@@ -375,17 +278,17 @@ pub fn status_bar_number(f: impl (Fn() -> String) + 'static) -> View {
 pub fn status_bar() -> View {
     let WzBase { node: base } = use_context().unwrap();
     let img = base.at_path("UI/StatusBar.img").unwrap();
-    let background: Arc<DynamicImage> = img.at_path("base").unwrap().get("backgrnd").into();
-    let background2: Arc<DynamicImage> = img.at_path("base").unwrap().get("backgrnd2").into();
+    let background: Arc<DynamicImage> = img.at_path("base").unwrap().get("backgrnd").try_into().unwrap();
+    let background2: Arc<DynamicImage> = img.at_path("base").unwrap().get("backgrnd2").try_into().unwrap();
 
     let gauge = img.at_path("gauge").unwrap();
-    let graduation: Arc<DynamicImage> = gauge.get("graduation").into();
-    let bar: Arc<DynamicImage> = gauge.get("bar").into();
+    let graduation: Arc<DynamicImage> = gauge.get("graduation").try_into().unwrap();
+    let bar: Arc<DynamicImage> = gauge.get("bar").try_into().unwrap();
 
-    let base_box: Arc<DynamicImage> = img.at_path("base/box").unwrap().into();
+    let base_box: Arc<DynamicImage> = img.at_path("base/box").unwrap().try_into().unwrap();
 
-    let icon_memo: Arc<DynamicImage> = img.at_path("base/iconMemo").unwrap().into();
-    let icon_blue: Arc<DynamicImage> = img.at_path("base/iconBlue").unwrap().into();
+    let icon_memo: Arc<DynamicImage> = img.at_path("base/iconMemo").unwrap().try_into().unwrap();
+    let icon_blue: Arc<DynamicImage> = img.at_path("base/iconBlue").unwrap().try_into().unwrap();
 
     view((
         Image::new(background),
@@ -410,19 +313,19 @@ pub fn status_bar() -> View {
                             .align_items(AlignItems::Center)
                     }),
                 ))
-                    .style(|s| {
-                        s.position(Position::Absolute)
-                            .width(percent(1.0))
-                            .height(percent(1.0))
-                            .justify_content(JustifyContent::SpaceBetween)
-                            .align_items(AlignItems::Stretch)
-                    }),
-            ))
                 .style(|s| {
-                    s.margin_right(length(3.0))
-                        .justify_content(JustifyContent::FlexStart)
-                        .align_items(AlignItems::FlexStart)
+                    s.position(Position::Absolute)
+                        .width(percent(1.0))
+                        .height(percent(1.0))
+                        .justify_content(JustifyContent::SpaceBetween)
+                        .align_items(AlignItems::Stretch)
                 }),
+            ))
+            .style(|s| {
+                s.margin_right(length(3.0))
+                    .justify_content(JustifyContent::FlexStart)
+                    .align_items(AlignItems::FlexStart)
+            }),
             view((
                 button(img.get("EquipKey")),
                 button(img.get("InvenKey")),
@@ -431,19 +334,19 @@ pub fn status_bar() -> View {
                 button(img.get("KeySet")),
                 button(img.get("QuickSlot")),
             ))
-                .style(|s| {
-                    s.justify_content(JustifyContent::FlexStart)
-                        .align_items(AlignItems::FlexStart)
-                        .gap_column(2.0)
-                }),
-        ))
             .style(|s| {
-                s.position(Position::Absolute)
-                    .justify_content(JustifyContent::FlexEnd)
+                s.justify_content(JustifyContent::FlexStart)
                     .align_items(AlignItems::FlexStart)
-                    .top(length(8.0))
-                    .right(length(4.0))
+                    .gap_column(2.0)
             }),
+        ))
+        .style(|s| {
+            s.position(Position::Absolute)
+                .justify_content(JustifyContent::FlexEnd)
+                .align_items(AlignItems::FlexStart)
+                .top(length(8.0))
+                .right(length(4.0))
+        }),
         view(
             //
             (view((
@@ -460,11 +363,11 @@ pub fn status_bar() -> View {
                             .align_items(AlignItems::Center)
                     }),
                 )
-                    .style(|s| {
-                        s.margin_left(length(3.0))
-                            .width(length(74.0))
-                            .height(length(30.0))
-                    }),
+                .style(|s| {
+                    s.margin_left(length(3.0))
+                        .width(length(74.0))
+                        .height(length(30.0))
+                }),
                 // job name
                 view((
                     view((
@@ -475,36 +378,36 @@ pub fn status_bar() -> View {
                                 .style(|s| s.color(Color::WHITE).font_size(12.0).line_height(15.0)),
                         ),
                     ))
-                        .style(|s| {
-                            s.justify_content(JustifyContent::FlexStart)
-                                .align_items(AlignItems::FlexStart)
-                                .gap_column(length(2.0))
-                        }),
+                    .style(|s| {
+                        s.justify_content(JustifyContent::FlexStart)
+                            .align_items(AlignItems::FlexStart)
+                            .gap_column(length(2.0))
+                    }),
                     text(|| "三个榔头")
                         .style(|s| s.color(Color::WHITE).font_size(12.0).line_height(15.0)),
                 ))
-                    .style(|s| {
-                        s.margin_left(length(8.0))
-                            .flex_grow(1.0)
-                            .height(length(30.0))
-                            .flex_direction(FlexDirection::Column)
-                    }),
+                .style(|s| {
+                    s.margin_left(length(8.0))
+                        .flex_grow(1.0)
+                        .height(length(30.0))
+                        .flex_direction(FlexDirection::Column)
+                }),
             ))
-                 .style(|s| {
-                     s.width(length(208.0))
-                         .justify_content(JustifyContent::FlexStart)
-                         .align_items(AlignItems::Center)
-                 }),),
-        )
             .style(|s| {
-                s.position(Position::Absolute)
-                    .left(length(2.0))
-                    .right(length(4.0))
-                    .bottom(length(1.0))
-                    .height(length(34.0))
+                s.width(length(208.0))
                     .justify_content(JustifyContent::FlexStart)
                     .align_items(AlignItems::Center)
-            }),
+            }),),
+        )
+        .style(|s| {
+            s.position(Position::Absolute)
+                .left(length(2.0))
+                .right(length(4.0))
+                .bottom(length(1.0))
+                .height(length(34.0))
+                .justify_content(JustifyContent::FlexStart)
+                .align_items(AlignItems::Center)
+        }),
         view((
             Image::new(bar),
             Image::new(graduation).style(|s| s.position(Position::Absolute).bottom(length(0.0))),
@@ -527,26 +430,26 @@ pub fn status_bar() -> View {
                     .left(length(248.0))
             }),
         ))
-            .style(|s| {
-                s.position(Position::Absolute)
-                    .display(Display::Block)
-                    .left(length(218.0))
-                    .bottom(length(1.0))
-            }),
+        .style(|s| {
+            s.position(Position::Absolute)
+                .display(Display::Block)
+                .left(length(218.0))
+                .bottom(length(1.0))
+        }),
         view((
             button(img.get("BtShop")),
             button(img.get("BtNPT")),
             button(img.get("BtMenu")),
             button(img.get("BtShort")),
         ))
-            .style(|s| {
-                s.position(Position::Absolute)
-                    .justify_content(JustifyContent::SpaceBetween)
-                    .right(length(4.0))
-                    .bottom(length(1.0))
-                    .width(length(224.0))
-                    .height(length(34.0))
-            }),
+        .style(|s| {
+            s.position(Position::Absolute)
+                .justify_content(JustifyContent::SpaceBetween)
+                .right(length(4.0))
+                .bottom(length(1.0))
+                .width(length(224.0))
+                .height(length(34.0))
+        }),
     ))
     .style(|s| {
         s.position(Position::Absolute)
@@ -642,8 +545,8 @@ pub fn chat_box() -> impl IntoElement {
 pub fn scroll_vertical() -> View {
     let WzBase { node: base } = use_context().unwrap();
     let node = base.at_path("UI/Basic.img/VScr5/enabled").unwrap();
-    let prev: Arc<DynamicImage> = node.get("prev0").into();
-    let next: Arc<DynamicImage> = node.get("next0").into();
+    let prev: Arc<DynamicImage> = node.get("prev0").try_into().unwrap();
+    let next: Arc<DynamicImage> = node.get("next0").try_into().unwrap();
     view((
         Image::new(prev).style(|s| s.position(Position::Absolute).top(length(0.0))),
         Image::new(next).style(|s| s.position(Position::Absolute).bottom(length(0.0))),
@@ -663,7 +566,8 @@ pub fn world_map_window(open: RwSignal<bool>, current_map: RwSignal<String>) -> 
         let border: Vec<Arc<DynamicImage>> = base
             .at_path("UI/UIWindow.img/WorldMap/Border")
             .unwrap()
-            .into();
+            .try_into()
+            .unwrap();
 
         let surfaces = border
             .into_iter()
@@ -689,20 +593,21 @@ pub fn world_map_window(open: RwSignal<bool>, current_map: RwSignal<String>) -> 
         let map_image: Vec<Sprite> = base
             .at_path("Map/MapHelper.img/worldMap/mapImage")
             .unwrap()
-            .into();
+            .try_into()
+            .unwrap();
 
         let map_image = create_rw_signal(Rc::new(map_image));
 
-        let world_map_signal = create_rw_signal(WorldMap::from(
-            base.at_path("Map/WorldMap/WorldMap.img").unwrap(),
-        ));
+        let world_map_signal = create_rw_signal(
+            WorldMap::try_from(base.at_path("Map/WorldMap/WorldMap.img").unwrap()).unwrap(),
+        );
 
         let hovered_link = create_rw_signal(None);
 
         let content_size = vec2(640.0, 470.0);
 
         let world_map_node = base.at_path("UI/UIWindow.img/WorldMap").unwrap();
-        let title: Sprite = world_map_node.get("title").into();
+        let title: Sprite = world_map_node.get("title").try_into().unwrap();
 
         let spots = dynamic(move || {
             fragment(world_map_signal.with(|world_map| {
@@ -765,10 +670,13 @@ pub fn world_map_window(open: RwSignal<bool>, current_map: RwSignal<String>) -> 
                         .on_click(move |_| {
                             let WzBase { node: base } = use_context().unwrap();
                             hovered_link.set(None);
-                            world_map_signal.set(WorldMap::from(
-                                base.at_path(&format!("Map/WorldMap/{}.img", &link_map))
-                                    .unwrap(),
-                            ));
+                            world_map_signal.set(
+                                WorldMap::try_from(
+                                    base.at_path(&format!("Map/WorldMap/{}.img", &link_map))
+                                        .unwrap(),
+                                )
+                                .unwrap(),
+                            );
                         }),
                 )
             } else {
@@ -855,11 +763,13 @@ pub fn world_map_window(open: RwSignal<bool>, current_map: RwSignal<String>) -> 
                 }),
             )))
             .style(|s| {
-                s.position(Position::Absolute)
-                    .width(percent(1.0))
-                    .height(percent(1.0))
-                    .justify_content(JustifyContent::Center)
-                    .align_items(AlignItems::Center)
+                s.absolute()
+                    .left(0)
+                    .top(0)
+                    .w_full()
+                    .h_full()
+                    .justify_center()
+                    .items_center()
             }),
         );
     })

@@ -4,6 +4,7 @@ use reactive::{create_effect, on_cleanup};
 use slotmap::DefaultKey;
 use std::any::Any;
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::rc::Rc;
 use tokio::task;
 
@@ -50,7 +51,23 @@ impl<T> Unbox<T> {
     }
 }
 
-pub fn use_resource<O, T, F, C>(f: F, c: C)
+pub struct ResourceResult {
+    current: Rc<RefCell<u64>>,
+    cancelled: Rc<RefCell<HashSet<u64>>>
+}
+
+impl ResourceResult {
+    pub fn cancel(&self) -> bool {
+        self.cancelled.borrow_mut().insert(self.current.borrow().clone())
+    }
+
+    pub fn run(&self) {
+
+    }
+}
+
+
+pub fn use_resource<O, T, F, C>(f: F, c: C) -> ResourceResult
 where
     O: Default + Send + 'static,
     T: Future<Output = O> + Send + 'static,
@@ -58,10 +75,15 @@ where
     C: Fn(O) + 'static,
 {
     let current = Rc::new(RefCell::new(0u64));
+    let cancelled = Rc::new(RefCell::new(HashSet::new()));
     let callback = Rc::new({
         let current = current.clone();
+        let cancelled = cancelled.clone();
         move |resource: Resource| {
             if resource.id != *current.borrow() {
+                return;
+            }
+            if cancelled.borrow_mut().remove(&resource.id) {
                 return;
             }
             let value = resource.value.downcast::<Unbox<O>>().unwrap();
@@ -79,23 +101,31 @@ where
         });
     });
 
-    create_effect(move |_| {
-        let id = current.borrow().checked_add(u64::MAX).unwrap_or(0);
-        *current.borrow_mut() = id;
-        let future = f();
-        task::spawn({
-            let sender = sender.clone();
-            async move {
-                sender
-                    .send(Resource {
-                        id,
-                        callback_key,
-                        value: Box::new(Unbox {
-                            value: future.await,
-                        }),
-                    })
-                    .unwrap();
-            }
-        });
+    create_effect({
+        let current = current.clone();
+        move |_| {
+            let id = current.borrow().checked_add(u64::MAX).unwrap_or(0);
+            *current.borrow_mut() = id;
+            let future = f();
+            task::spawn({
+                let sender = sender.clone();
+                async move {
+                    sender
+                        .send(Resource {
+                            id,
+                            callback_key,
+                            value: Box::new(Unbox {
+                                value: future.await,
+                            }),
+                        })
+                        .unwrap();
+                }
+            });
+        }
     });
+
+    ResourceResult {
+        current,
+        cancelled,
+    }
 }

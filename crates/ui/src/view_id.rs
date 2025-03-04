@@ -1,15 +1,15 @@
 use crate::event::Event;
-use crate::style::{
-    PointerEvents, Style, StyleComputeContext, StyleProperty, StylePropertyKey, TaffyStyleProperty,
-    TaffyStylePropertyKey,
-};
-use crate::{element::Element, runtime::RUNTIME, view_state::ViewState};
-use glam::Vec2;
+use crate::style::{compute_style_recursive, PointerEvents, StyleComputeContext};
+use crate::view_state::Layer;
+use crate::{element::Element, runtime::RUNTIME, view_state::ViewState, Renderer};
+use glam::{vec2, Vec2};
 use reactive::on_cleanup;
+use sdl3_sys::everything::*;
 use std::cmp::PartialEq;
-use std::collections::HashMap;
+use std::mem::MaybeUninit;
 use std::{cell::RefCell, rc::Rc};
-use taffy::{NodeId, TaffyTree};
+use taffy::Overflow::Hidden;
+use taffy::{LengthPercentage, NodeId, Point, TaffyTree};
 
 pub struct Rect {
     pub x: f32,
@@ -99,8 +99,8 @@ impl ViewId {
         RUNTIME.with_borrow_mut(|s| s.elements.insert(self.0.into(), element));
     }
 
-    pub fn layout(&self) -> Option<taffy::Layout> {
-        self.taffy().borrow_mut().layout(self.0).cloned().ok()
+    pub fn layout(&self) -> taffy::Layout {
+        self.taffy().borrow_mut().layout(self.0).cloned().unwrap()
     }
 
     pub fn add_event_listener(
@@ -121,7 +121,7 @@ impl ViewId {
     }
 
     pub fn event_capture(&self, location: Vec2, target: &mut ViewId) {
-        if self.rect().contains(location)
+        if self.bounding_rect().contains(location)
             && self.state().borrow().style.pointer_events != PointerEvents::None
         {
             *target = *self;
@@ -157,83 +157,147 @@ impl ViewId {
     }
 
     pub fn compute_style(&self, ctx: &mut StyleComputeContext) {
-        ctx.push();
-
-        let state = self.state();
-        let node = self.node();
-
-        let mut style_props = HashMap::<StylePropertyKey, StyleProperty>::new();
-        let mut taffy_style_props = HashMap::<TaffyStylePropertyKey, TaffyStyleProperty>::new();
-
-        let styles = state.borrow().styles.clone();
-        for style_builder in styles.into_iter().rev() {
-            if let Some(style_builder) = style_builder {
-                for (key, value) in style_builder.taffy_style_props.into_iter().rev() {
-                    if !taffy_style_props.contains_key(&key) {
-                        taffy_style_props.insert(key, value);
-                    }
-                }
-                for (key, value) in style_builder.style_props.into_iter().rev() {
-                    if !style_props.contains_key(&key) {
-                        style_props.insert(key, value);
-                    }
-                }
-            }
-        }
-
-        for (key, value) in TaffyStyleProperty::initial() {
-            if !taffy_style_props.contains_key(&key) {
-                taffy_style_props.insert(key, value);
-            }
-        }
-
-        let mut taffy_style = taffy::Style::default();
-        for (_, value) in taffy_style_props {
-            value.assign_to(&mut taffy_style);
-        }
-
-        self.taffy()
-            .borrow_mut()
-            .set_style(node, taffy_style)
-            .unwrap();
-
-        let mut style = Style::default();
-
-        for (key, value) in StyleProperty::initial() {
-            if !style_props.contains_key(&key) {
-                value.assign_to(&mut style);
-            }
-        }
-
-        for (key, value) in ctx.style.iter() {
-            if !style_props.contains_key(key) && value.inherited() {
-                value.assign_to(&mut style);
-            }
-        }
-
-        for (_, value) in style_props.iter() {
-            value.assign_to(&mut style);
-        }
-
-        state.borrow_mut().style = style;
-
-        for (key, value) in style_props {
-            if value.inherited() {
-                if ctx.style.contains_key(&key) {
-                    ctx.style.remove(&key);
-                }
-                ctx.style.insert(key, value);
-            }
-        }
-
-        for child in self.children() {
-            child.compute_style(ctx);
-        }
-        ctx.pop();
+        compute_style_recursive(*self, ctx);
     }
 
-    pub fn rect(&self) -> Rect {
-        let layout = self.layout().unwrap();
+    pub fn paint(&self, ctx: &mut Renderer) {
+        ctx.save();
+        let layout = self.layout();
+        let location = layout.location;
+        let opacity = self.state().borrow().style.opacity;
+        let overflow = self.taffy().borrow().style(self.0).unwrap().overflow;
+
+        let size = vec2(layout.size.width, layout.size.height);
+
+        let translate = match self.state().borrow().style.translate {
+            Point { x, y } => Point {
+                x: match x {
+                    LengthPercentage::Length(value) => value,
+                    LengthPercentage::Percent(value) => value * layout.size.width,
+                },
+                y: match y {
+                    LengthPercentage::Length(value) => value,
+                    LengthPercentage::Percent(value) => value * layout.size.height,
+                },
+            },
+        };
+
+        ctx.translate(vec2(location.x, location.y));
+        ctx.translate(vec2(translate.x, translate.y));
+
+        if overflow.x == Hidden || overflow.y == Hidden {
+            ctx.clip(Some((Vec2::ZERO, size)));
+        }
+
+        if opacity < 1.0 {
+            let layer = self.state().borrow().layer.clone();
+            if layer.is_none() {
+                let mode = unsafe {
+                    SDL_ComposeCustomBlendMode(
+                        SDL_BlendFactor::ONE,
+                        SDL_BlendFactor::ONE_MINUS_SRC_ALPHA,
+                        SDL_BlendOperation::ADD,
+                        SDL_BlendFactor::ONE,
+                        SDL_BlendFactor::ONE_MINUS_SRC_ALPHA,
+                        SDL_BlendOperation::ADD,
+                    )
+                };
+
+                let texture = Rc::new(
+                    ctx.create_texture(size)
+                        .blend_mode(mode)
+                        .scale_mode_nearest(),
+                );
+
+                let mode = unsafe {
+                    SDL_ComposeCustomBlendMode(
+                        SDL_BlendFactor::ZERO,
+                        SDL_BlendFactor::SRC_ALPHA,
+                        SDL_BlendOperation::ADD,
+                        SDL_BlendFactor::ZERO,
+                        SDL_BlendFactor::SRC_ALPHA,
+                        SDL_BlendOperation::ADD,
+                    )
+                };
+
+                let blend_texture =
+                    Rc::new(ctx.create_streaming_texture(Vec2::ONE).blend_mode(mode));
+                self.state().borrow_mut().layer = Some(Layer {
+                    texture,
+                    blend_texture,
+                });
+            }
+
+            let Layer {
+                texture,
+                blend_texture,
+            } = self.state().borrow().layer.clone().unwrap();
+
+            ctx.with_target(&texture, |ctx| {
+                ctx.save();
+                ctx.reset();
+
+                ctx.clear_texture(size);
+                self.element().borrow().paint(ctx);
+                for child in self.children() {
+                    child.paint(ctx);
+                }
+
+                unsafe {
+                    let mut surface = MaybeUninit::uninit();
+
+                    SDL_LockTextureToSurface(
+                        blend_texture.ptr(),
+                        &SDL_Rect {
+                            x: 0,
+                            y: 0,
+                            w: 1,
+                            h: 1,
+                        },
+                        surface.as_mut_ptr(),
+                    );
+
+                    let surface = surface.assume_init();
+
+                    SDL_WriteSurfacePixel(surface, 0, 0, 0, 0, 0, (opacity * 255.0) as u8);
+
+                    SDL_UnlockTexture(blend_texture.ptr());
+
+                    SDL_DestroySurface(surface);
+                }
+
+                ctx.render_texture(
+                    &blend_texture,
+                    Vec2::ZERO,
+                    Vec2::ZERO,
+                    255,
+                    Some(size),
+                    SDL_FLIP_NONE,
+                );
+
+                ctx.restore();
+            });
+
+            ctx.render_texture(
+                &texture,
+                Vec2::ZERO,
+                Vec2::ZERO,
+                255,
+                None,
+                SDL_FlipMode::NONE,
+            );
+        } else {
+            self.element().borrow().paint(ctx);
+            for child in self.children() {
+                child.paint(ctx);
+            }
+        }
+
+        ctx.restore();
+    }
+
+    pub fn bounding_rect(&self) -> Rect {
+        let layout = self.layout();
         let viewport = self.state().borrow().viewport;
         let location = layout.location + viewport;
         let size = layout.size;

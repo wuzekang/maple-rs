@@ -92,14 +92,14 @@ impl MouseEvent {
 
     pub fn offset(&self) -> Vec2 {
         let target = self.current.unwrap();
-        let location = target.layout().unwrap().location;
+        let location = target.layout().location;
         let viewport = target.state().borrow().viewport;
         self.client() - vec2(viewport.x, viewport.y) - vec2(location.x, location.y)
     }
 
     pub fn in_view_rect(&self) -> bool {
         let id = self.target;
-        let layout = id.layout().unwrap();
+        let layout = id.layout();
         let viewport = id.state().borrow().viewport;
 
         let x = unsafe { self.motion.x } - viewport.x;
@@ -311,7 +311,7 @@ impl Event {
             _ => None,
         }
     }
-    
+
     pub fn is_blur(&mut self) -> Option<&mut FocusEvent> {
         match self {
             Event::Focus(event) => {
@@ -357,7 +357,7 @@ pub struct ElementRef<T: Element> {
     _marker: PhantomData<T>,
 }
 
-impl<T: Element + Sized> ElementRef<T> {
+impl<T: Element> ElementRef<T> {
     pub fn with(&self, f: impl FnOnce(&T)) {
         let id = self.id;
         let element = RUNTIME.with_borrow(move |r| {

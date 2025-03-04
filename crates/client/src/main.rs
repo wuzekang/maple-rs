@@ -1,10 +1,5 @@
 use glam::{vec2, Vec2Swizzles};
-use sdl3_sys::everything::{SDL_GetCurrentDisplayMode, SDL_GetDisplays, SDL_SetWindowBordered, SDL_WINDOW_RESIZABLE, SDL_WINDOW_ALWAYS_ON_TOP, SDL_WINDOW_BORDERLESS, SDL_WINDOW_HIGH_PIXEL_DENSITY, SDL_WINDOW_MAXIMIZED, SDL_WINDOW_FULLSCREEN};
-use sdl3_sys::{
-    init::{SDL_Init, SDL_INIT_VIDEO},
-    render::SDL_CreateRenderer,
-    video::SDL_CreateWindow,
-};
+use sdl3_sys::everything::*;
 use std::error::Error;
 use std::mem::MaybeUninit;
 use ui::widget::image::IntoDrawable;
@@ -15,14 +10,16 @@ use ui::{
 };
 use wz::Node;
 
+mod app;
 mod character;
+mod cursor;
+mod login;
 mod map;
 mod math;
 mod npc;
 mod scene;
 mod sprite;
 mod timer;
-mod ui_view;
 mod wz;
 
 #[derive(Clone)]
@@ -36,8 +33,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         SDL_Init(SDL_INIT_VIDEO);
     }
 
-
-
     // let size = vec2(1920.0, 1080.0);
     // let size = vec2(1366.0, 768.0);
     let size = unsafe {
@@ -50,8 +45,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         vec2(w as f32, h as f32)
     };
 
-    // let size = vec2(800.0, 600.0);
-    let size = vec2(1024.0, 768.0);
+    let size = vec2(800.0, 600.0);
+    // let size = vec2(1024.0, 768.0);
     // let size = vec2(1366.0, 1024.0);
 
     let window = unsafe {
@@ -60,9 +55,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
             size.x as i32,
             size.y as i32,
             // SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_BORDERLESS | SDL_WINDOW_MAXIMIZED | SDL_WINDOW_FULLSCREEN,
-            SDL_WINDOW_HIGH_PIXEL_DENSITY,
+            SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_BORDERLESS,
         )
-
     };
     let renderer = unsafe { SDL_CreateRenderer(window, std::ptr::null()) };
 
@@ -70,7 +64,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         node: wz::resolve_base().unwrap(),
     });
 
-    Root::new(ui_view::ui_view, renderer).launch();
+    Root::new(app::app, renderer).launch();
 
     Ok(())
 }

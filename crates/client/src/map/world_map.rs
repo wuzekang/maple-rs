@@ -12,16 +12,18 @@ pub struct Item {
     pub path: Option<Sprite>,
 }
 
-impl From<Node> for Item {
-    fn from(node: Node) -> Self {
-        Self {
-            r#type: node.get("type").into(),
-            map_no: node.try_get("mapNo").map(Into::into),
-            spot: node.get("spot").into(),
-            title: node.try_get("title").map(Into::into),
-            desc: node.try_get("desc").map(Into::into),
-            path: node.try_get("path").map(Into::into),
-        }
+impl TryFrom<Node> for Item {
+    type Error = ();
+
+    fn try_from(node: Node) -> Result<Self, Self::Error> {
+        Ok(Self {
+            r#type: node.get("type").try_into()?,
+            map_no: node.try_get("mapNo").map(TryInto::try_into).transpose()?,
+            spot: node.get("spot").try_into()?,
+            title: node.try_get("title").map(TryInto::try_into).transpose()?,
+            desc: node.try_get("desc").map(TryInto::try_into).transpose()?,
+            path: node.try_get("path").map(TryInto::try_into).transpose()?,
+        })
     }
 }
 
@@ -31,13 +33,14 @@ pub struct Link {
     pub link_img: Sprite,
 }
 
-impl From<Node> for Link {
-    fn from(node: Node) -> Self {
-        Self {
-            tool_tip: node.try_get("toolTip").map(Into::into),
-            link_map: node.at_path("link/linkMap").unwrap().into(),
-            link_img: node.at_path("link/linkImg").unwrap().into(),
-        }
+impl TryFrom<Node> for Link {
+    type Error = ();
+    fn try_from(node: Node) -> Result<Self, Self::Error> {
+        Ok(Self {
+            tool_tip: node.try_get("toolTip").and_then(|v| v.try_into().ok()),
+            link_map: node.at_path("link/linkMap").unwrap().try_into()?,
+            link_img: node.at_path("link/linkImg").unwrap().try_into()?,
+        })
     }
 }
 
@@ -47,12 +50,13 @@ pub struct WorldMap {
     pub map_link: Option<IndexMap<String, Link>>,
 }
 
-impl From<Node> for WorldMap {
-    fn from(node: Node) -> Self {
-        Self {
-            base_img: node.at_path("BaseImg/0").unwrap().into(),
-            map_list: node.get("MapList").into(),
-            map_link: node.try_get("MapLink").map(Into::into),
-        }
+impl TryFrom<Node> for WorldMap {
+    type Error = ();
+    fn try_from(node: Node) -> Result<Self, Self::Error> {
+        Ok(Self {
+            base_img: node.at_path("BaseImg/0").unwrap().try_into()?,
+            map_list: node.get("MapList").try_into()?,
+            map_link: node.try_get("MapLink").and_then(|v| v.try_into().ok()),
+        })
     }
 }

@@ -226,7 +226,7 @@ impl eframe::App for MyApp {
                                 {
                                     let _ = self.clipboard.set_image(
                                         clipboard_rs::RustImageData::from_dynamic_image(
-                                            image.clone(),
+                                            DynamicImage::ImageRgba8(image.clone().into_rgba8()),
                                         ),
                                     );
                                 }

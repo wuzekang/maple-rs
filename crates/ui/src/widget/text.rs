@@ -34,26 +34,21 @@ impl Text {
             let content = f();
             RUNTIME.with_borrow_mut(move |s| {
                 buffer.with_mut(|buffer| {
-                    let len = content.to_string().len();
                     buffer.set_text(
                         &mut s.font_system,
                         &content.to_string(),
-                        Attrs::new().family(Family::Name("SimSun")),
-                        // Attrs::new(),
+                        Attrs::new().family(Family::Name("Arial")),
                         cosmic_text::Shaping::Advanced,
                     );
                     cache.with_mut(|(a, _)| {
                         *a = None;
                     });
-
                     // for line in &mut buffer.lines {
                     //     line.set_align(Some(cosmic_text::Align::Center));
                     // }
-                    // // TODO: layout
-                    // buffer.set_wrap(&mut s.font_system, cosmic_text::Wrap::Word);
-                    // buffer.set_wrap(&mut s.font_system, cosmic_text::Wrap::None);
                 });
-            })
+            });
+            id.taffy().borrow_mut().mark_dirty(id.0).unwrap();
         });
         Self { id, buffer, cache }
     }
@@ -124,7 +119,7 @@ pub fn text_measure(
 }
 
 pub fn fill_text(
-    ctx: &Renderer,
+    ctx: &mut Renderer,
     buffer: &cosmic_text::Buffer,
     cache: Ref<(Option<Texture>, Option<Texture>)>,
     style: Style,
@@ -134,9 +129,9 @@ pub fn fill_text(
 ) {
     cache.with_mut(|(a, b)| {
         if let Some(texture) = b {
-            ctx.render_texture_rotated(texture, SDL_FlipMode::NONE, location, size, Vec2::ZERO);
+            ctx.render_texture_flip(texture, SDL_FlipMode::NONE, location, size, Vec2::ZERO);
         } else if let Some(texture) = a {
-            ctx.render_texture_rotated(texture, SDL_FlipMode::NONE, location, size, Vec2::ZERO);
+            ctx.render_texture_flip(texture, SDL_FlipMode::NONE, location, size, Vec2::ZERO);
         }
 
         if a.is_none() {
@@ -146,6 +141,9 @@ pub fn fill_text(
             let texture = ctx.create_texture(size * 2.0);
             RUNTIME.with_borrow_mut(|s| {
                 ctx.with_target(&texture, |ctx| {
+                    ctx.save();
+                    ctx.reset();
+                    ctx.clear();
                     ctx.fill_text(
                         style.color(),
                         Vec2::ZERO,
@@ -154,7 +152,8 @@ pub fn fill_text(
                         &mut s.swash_cache,
                         &mut s.font_system,
                         buffer,
-                    )
+                    );
+                    ctx.restore();
                 });
             });
 
@@ -168,19 +167,18 @@ impl Element for Text {
         self.id
     }
 
-    fn paint(&self, ctx: &Renderer) {
-        let layout = self.id.layout().unwrap();
-        let state = self.id.state();
-        let viewport = state.borrow().viewport;
+    fn paint(&self, ctx: &mut Renderer) {
+        let id = self.id();
+        let state = id.state();
         let style = state.borrow().style.clone();
 
-        let location = layout.location + viewport;
+        let layout = id.layout();
         let size = layout.size;
 
         if style.background != Color::TRANSPARENT {
             ctx.fill_rect(
                 style.background,
-                vec2(location.x, location.y),
+                Vec2::ZERO,
                 vec2(size.width, size.height),
             );
         }
@@ -191,7 +189,7 @@ impl Element for Text {
                 buffer,
                 self.cache,
                 style,
-                vec2(location.x, location.y),
+                Vec2::ZERO,
                 vec2(size.width, size.height),
                 Vec2::ZERO,
             );

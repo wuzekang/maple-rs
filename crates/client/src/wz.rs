@@ -2,6 +2,7 @@ use glam::Vec2;
 use image::DynamicImage;
 use indexmap::{Equivalent, IndexMap};
 use std::collections::{HashMap, VecDeque};
+use std::hash::Hash;
 use std::num::ParseIntError;
 use std::sync::{Arc, Mutex, OnceLock};
 use wz_reader::node::Error;
@@ -131,92 +132,101 @@ impl Node {
     }
 }
 
-impl From<Node> for Vec2 {
-    fn from(node: Node) -> Vec2 {
+impl TryFrom<Node> for Vec2 {
+    type Error = ();
+
+    fn try_from(node: Node) -> Result<Self, Self::Error> {
         let node = node.wz_node.read().unwrap();
-        let Vector2D(x, y) = node.try_as_vector2d().unwrap();
-        Vec2 {
+        let Vector2D(x, y) = node.try_as_vector2d().ok_or(())?;
+        Ok(Vec2 {
             x: *x as f32,
             y: *y as f32,
-        }
+        })
     }
 }
 
-impl From<Node> for i32 {
-    fn from(node: Node) -> i32 {
-        let v = node.wz_node.read().unwrap();
+impl TryFrom<Node> for i32 {
+    type Error = ();
 
+    fn try_from(node: Node) -> Result<Self, Self::Error> {
+        let v = node.wz_node.read().unwrap();
         v.try_as_int()
             .map(|v| *v)
-            .unwrap_or_else(|| {
-                let v: i32 = v
-                    .try_as_string()
-                    .unwrap()
-                    .get_string()
-                    .unwrap()
-                    .parse()
-                    .unwrap();
-                v
-            })
-            .to_owned()
+            .or_else(|| v.try_as_string().unwrap().get_string().ok()?.parse().ok())
+            .ok_or(())
     }
 }
 
-impl From<Node> for String {
-    fn from(node: Node) -> String {
+impl TryFrom<Node> for String {
+    type Error = ();
+
+    fn try_from(node: Node) -> Result<Self, Self::Error> {
         node.wz_node
             .read()
             .unwrap()
             .try_as_string()
-            .unwrap()
-            .to_owned()
+            .ok_or(())?
             .get_string()
-            .unwrap()
+            .or(Err(()))
     }
 }
 
-impl From<Node> for DynamicImage {
-    fn from(node: Node) -> DynamicImage {
+impl TryFrom<Node> for DynamicImage {
+    type Error = ();
+
+    fn try_from(node: Node) -> Result<Self, Self::Error> {
         node.wz_node
             .read()
             .unwrap()
             .try_as_png()
-            .unwrap()
-            .to_owned()
+            .ok_or(())?
             .extract_png()
-            .unwrap()
+            .or(Err(()))
     }
 }
 
-impl From<Node> for Arc<DynamicImage> {
-    fn from(node: Node) -> Self {
+impl TryFrom<Node> for Arc<DynamicImage> {
+    type Error = ();
+
+    fn try_from(node: Node) -> Result<Self, Self::Error> {
         static CACHE: OnceLock<Mutex<HashMap<String, Arc<DynamicImage>>>> = OnceLock::new();
         let path = node.wz_node.read().unwrap().get_full_path();
-        CACHE
+        let value = CACHE
             .get_or_init(|| Mutex::new(HashMap::new()))
             .lock()
             .unwrap()
             .entry(path)
-            .or_insert_with(|| Arc::new(node.into()))
-            .clone()
+            .or_insert_with(|| Arc::new(node.try_into().unwrap()))
+            .clone();
+
+        Ok(value)
     }
 }
 
-impl From<Node> for bool {
-    fn from(node: Node) -> Self {
-        let value: i32 = node.into();
-        value != 0
+// impl Into<Arc<DynamicImage>> for Node {
+//     fn into(self) -> Arc<DynamicImage> {
+//         self.try_into().unwrap()
+//     }
+// }
+
+impl TryFrom<Node> for bool {
+    type Error = ();
+    fn try_from(node: Node) -> Result<Self, Self::Error> {
+        let value: i32 = node.try_into()?;
+        Ok(value != 0)
     }
 }
 
-impl<T: From<Node>> From<Node> for Vec<T> {
-    fn from(value: Node) -> Self {
-        value
+impl<T: TryFrom<Node>> TryFrom<Node> for Vec<T> {
+    type Error = ();
+
+    fn try_from(value: Node) -> Result<Self, Self::Error> {
+        Ok(value
             .children()
             .into_iter()
             .filter(|(key, _)| key.to_string().parse::<u32>().is_ok())
-            .map(|(_, node)| node.into())
-            .collect()
+            .filter_map(|(_, node)| node.try_into().ok())
+            .collect())
     }
 }
 
@@ -233,33 +243,38 @@ impl From<NodeName> for String {
     }
 }
 
-impl<T: From<Node>, K: TryFrom<NodeName>> From<Node> for Vec<(K, T)> {
-    fn from(node: Node) -> Self {
-        node.children()
+impl<T: TryFrom<Node>, K: TryFrom<NodeName>> TryFrom<Node> for Vec<(K, T)> {
+    type Error = ();
+
+    fn try_from(value: Node) -> Result<Self, Self::Error> {
+        Ok(value
+            .children()
             .into_iter()
-            .filter_map(|(key, node)| Some((K::try_from(key).ok()?, node.into())))
-            .collect()
+            .filter_map(|(key, node)| Some((K::try_from(key).ok()?, node.try_into().ok()?)))
+            .collect())
     }
 }
 
-impl<T: From<Node>, K: TryFrom<NodeName> + std::hash::Hash + std::cmp::Eq> From<Node>
-    for HashMap<K, T>
-{
-    fn from(node: Node) -> Self {
-        node.children()
+impl<T: TryFrom<Node>, K: TryFrom<NodeName> + Hash + Eq> TryFrom<Node> for HashMap<K, T> {
+    type Error = ();
+
+    fn try_from(value: Node) -> Result<Self, Self::Error> {
+        Ok(value
+            .children()
             .into_iter()
-            .filter_map(|(key, node)| Some((K::try_from(key).ok()?, node.into())))
-            .collect()
+            .filter_map(|(key, node)| Some((K::try_from(key).ok()?, node.try_into().ok()?)))
+            .collect())
     }
 }
 
-impl<T: From<Node>, K: TryFrom<NodeName> + std::hash::Hash + std::cmp::Eq> From<Node>
-    for IndexMap<K, T>
-{
-    fn from(node: Node) -> Self {
-        node.children()
+impl<T: TryFrom<Node>, K: TryFrom<NodeName> + Hash + Eq> TryFrom<Node> for IndexMap<K, T> {
+    type Error = ();
+
+    fn try_from(value: Node) -> Result<Self, Self::Error> {
+        Ok(value
+            .children()
             .into_iter()
-            .filter_map(|(key, node)| Some((K::try_from(key).ok()?, node.into())))
-            .collect()
+            .filter_map(|(key, node)| Some((K::try_from(key).ok()?, node.try_into().ok()?)))
+            .collect())
     }
 }

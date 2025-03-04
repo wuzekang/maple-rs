@@ -1,3 +1,4 @@
+use crate::map;
 use crate::npc::Npc;
 use crate::sprite::{Sprite, SpriteAnimation};
 use crate::timer::Timer;
@@ -5,7 +6,6 @@ use crate::wz::Node;
 use glam::{vec2, Vec2};
 use std::collections::HashMap;
 use wz_reader::node::Error;
-use crate::map;
 
 pub mod world_map;
 
@@ -13,11 +13,12 @@ pub struct MapHelper {
     pub pv: Vec<Sprite>,
 }
 
-impl From<Node> for MapHelper {
-    fn from(node: Node) -> Self {
-        Self {
-            pv: node.at_path("portal/game/pv").unwrap().into(),
-        }
+impl TryFrom<Node> for MapHelper {
+    type Error = ();
+    fn try_from(node: Node) -> Result<Self, Self::Error> {
+        Ok(Self {
+            pv: node.at_path("portal/game/pv").or(Err(()))?.try_into()?,
+        })
     }
 }
 
@@ -34,16 +35,18 @@ pub struct Portal {
     pub position: Vec2,
 }
 
-impl From<Node> for Portal {
-    fn from(node: Node) -> Self {
-        Self {
-            pn: node.get("pn").into(),
-            pt: node.get("pt").into(),
+impl TryFrom<Node> for Portal {
+    type Error = ();
+
+    fn try_from(node: Node) -> Result<Self, Self::Error> {
+        Ok(Self {
+            pn: node.get("pn").try_into()?,
+            pt: node.get("pt").try_into()?,
             position: vec2(
-                i32::from(node.get("x")) as f32,
-                i32::from(node.get("y")) as f32,
+                i32::try_from(node.get("x"))? as f32,
+                i32::try_from(node.get("y"))? as f32,
             ),
-        }
+        })
     }
 }
 
@@ -65,14 +68,16 @@ pub struct MapInfo {
     pub vr_right: Option<i32>,
 }
 
-impl From<Node> for MapInfo {
-    fn from(node: Node) -> Self {
-        Self {
-            vr_top: node.try_get("VRTop").map(Into::into),
-            vr_bottom: node.try_get("VRBottom").map(Into::into),
-            vr_left: node.try_get("VRLeft").map(Into::into),
-            vr_right: node.try_get("VRRight").map(Into::into),
-        }
+impl TryFrom<Node> for MapInfo {
+    type Error = ();
+
+    fn try_from(node: Node) -> Result<Self, Self::Error> {
+        Ok(Self {
+            vr_top: node.try_get("VRTop").and_then(|v| v.try_into().ok()),
+            vr_bottom: node.try_get("VRBottom").and_then(|v| v.try_into().ok()),
+            vr_left: node.try_get("VRLeft").and_then(|v| v.try_into().ok()),
+            vr_right: node.try_get("VRRight").and_then(|v| v.try_into().ok()),
+        })
     }
 }
 
@@ -151,19 +156,21 @@ pub struct MapLife {
     pub y: i32,
 }
 
-impl From<Node> for MapLife {
-    fn from(node: Node) -> Self {
-        Self {
-            cy: node.get("cy").into(),
-            f: node.try_get("f").map(Into::into).unwrap_or(0),
-            fh: node.get("fh").into(),
-            id: node.get("id").into(),
-            rx0: node.get("rx0").into(),
-            rx1: node.get("rx1").into(),
-            r#type: node.get("type").into(),
-            x: node.get("x").into(),
-            y: node.get("y").into(),
-        }
+impl TryFrom<Node> for MapLife {
+    type Error = ();
+
+    fn try_from(node: Node) -> Result<Self, Self::Error> {
+        Ok(Self {
+            cy: node.get("cy").try_into()?,
+            f: node.try_get("f").map(TryInto::try_into).unwrap_or(Ok(0))?,
+            fh: node.get("fh").try_into()?,
+            id: node.get("id").try_into()?,
+            rx0: node.get("rx0").try_into()?,
+            rx1: node.get("rx1").try_into()?,
+            r#type: node.get("type").try_into()?,
+            x: node.get("x").try_into()?,
+            y: node.get("y").try_into()?,
+        })
     }
 }
 
@@ -182,10 +189,10 @@ impl BackgroundSprite {
 }
 
 impl MapBackground {
-    pub fn new(root: Node, node: Node) -> Self {
-        let bs: String = node.get("bS").into();
-        let ani: i32 = node.get("ani").into();
-        let no: i32 = node.get("no").into();
+    pub fn new(root: Node, node: Node) -> Result<Self, ()> {
+        let bs: String = node.get("bS").try_into()?;
+        let ani: i32 = node.get("ani").try_into()?;
+        let no: i32 = node.get("no").try_into()?;
 
         let path = format!(
             "Map/Back/{}.img/{}/{}",
@@ -199,31 +206,31 @@ impl MapBackground {
             no
         );
 
-        let back_node = root.at_path(&path).unwrap();
+        let back_node = root.at_path(&path).or(Err(()))?;
 
-        let x = i32::from(node.get("x")) as f32;
-        let y = i32::from(node.get("y")) as f32;
+        let x = i32::try_from(node.get("x"))? as f32;
+        let y = i32::try_from(node.get("y"))? as f32;
         let background = Self {
             sprite: if ani == 0 {
-                BackgroundSprite::Sprite(Sprite::from(back_node))
+                BackgroundSprite::Sprite(Sprite::try_from(back_node)?)
             } else {
-                BackgroundSprite::SpriteAnimation(SpriteAnimation::from(back_node))
+                BackgroundSprite::SpriteAnimation(SpriteAnimation::try_from(back_node)?)
             },
             offset_x: x,
             offset_y: y,
             bs,
-            front: node.get("front").into(),
+            front: node.get("front").try_into()?,
             ani,
             no,
-            flip: node.get("f").into(),
+            flip: node.get("f").try_into()?,
             x,
             y,
-            cx: node.get("cx").into(),
-            cy: node.get("cy").into(),
-            r#type: node.get("type").into(),
-            rx: node.get("rx").into(),
-            ry: node.get("ry").into(),
-            a: node.get("a").into(),
+            cx: node.get("cx").try_into()?,
+            cy: node.get("cy").try_into()?,
+            r#type: node.get("type").try_into()?,
+            rx: node.get("rx").try_into()?,
+            ry: node.get("ry").try_into()?,
+            a: node.get("a").try_into()?,
         };
         // 0 无平铺
         // 1 水平平铺
@@ -233,7 +240,7 @@ impl MapBackground {
         // 5 垂直平铺+垂直滚动
         // 6 双向平铺+水平滚动
         // 7 双向平铺+垂直滚动
-        background
+        Ok(background)
     }
 }
 pub struct Map {
@@ -249,15 +256,20 @@ pub struct Map {
 }
 
 impl Map {
-    pub fn new(root: Node, name: String) -> Result<Self, Error> {
-        let map_img = root
-            .at_path(&format!("Map/Map/Map{}/{name}.img", &name[0..1]))
-            .unwrap();
+    pub fn new(root: Node, name: String) -> Result<Self, ()> {
+        let map_img = if name == "login" {
+            root.at_path("UI/MapLogin.img").unwrap()
+        } else {
+            root.at_path(&format!("Map/Map/Map{}/{name}.img", &name[0..1]))
+                .unwrap()
+        };
 
         let children = map_img.get("back").children();
         let backgrounds: Vec<_> = (0..children.len())
             .into_iter()
-            .map(|i| MapBackground::new(root.clone(), children[i.to_string().as_str()].clone()))
+            .filter_map(|i| {
+                MapBackground::new(root.clone(), children[i.to_string().as_str()].clone()).ok()
+            })
             .collect();
 
         let mut layers = vec![];
@@ -270,20 +282,20 @@ impl Map {
             if let Some(obj) = node.try_get("obj") {
                 for (id, item) in obj.children() {
                     let id = id.to_string().parse::<i32>().unwrap();
-                    let flip: bool = item.get("f").into();
-                    let x: i32 = item.get("x").into();
-                    let y: i32 = item.get("y").into();
-                    let z: i32 = item.get("z").into();
+                    let flip: bool = item.get("f").try_into()?;
+                    let x: i32 = item.get("x").try_into()?;
+                    let y: i32 = item.get("y").try_into()?;
+                    let z: i32 = item.get("z").try_into()?;
 
                     let path = format!(
                         "Map/Obj/{}.img/{}/{}/{}",
-                        String::from(item.get("oS")),
-                        String::from(item.get("l0")),
-                        String::from(item.get("l1")),
-                        String::from(item.get("l2"))
+                        String::try_from(item.get("oS"))?,
+                        String::try_from(item.get("l0"))?,
+                        String::try_from(item.get("l1"))?,
+                        String::try_from(item.get("l2"))?
                     );
 
-                    let sprites: Vec<Sprite> = root.at_path(&path).unwrap().into();
+                    let sprites: Vec<Sprite> = root.at_path(&path).unwrap().try_into().unwrap();
                     objects.push(MapObject {
                         id,
                         flip,
@@ -297,19 +309,19 @@ impl Map {
 
             if let Some(info) = node.try_get("info") {
                 if info.has("tS") {
-                    let ts: String = info.get("tS").into();
+                    let ts: String = info.get("tS").try_into()?;
                     for (key, value) in node.get("tile").children().iter() {
                         let id = key.to_string().parse::<i32>().unwrap();
-                        let x: i32 = value.get("x").into();
-                        let y: i32 = value.get("y").into();
-                        let no: i32 = value.get("no").into();
-                        let u: String = value.get("u").into();
-                        let zm: i32 = value.get("zM").into();
+                        let x: i32 = value.get("x").try_into()?;
+                        let y: i32 = value.get("y").try_into()?;
+                        let no: i32 = value.get("no").try_into()?;
+                        let u: String = value.get("u").try_into()?;
+                        let zm: i32 = value.get("zM").try_into()?;
                         let tile_path = format!("Map/Tile/{ts}.img/{u}/{no}");
 
                         tiles.push(MapTile {
                             id,
-                            tile: root.at_path(&tile_path).unwrap().into(),
+                            tile: root.at_path(&tile_path).unwrap().try_into().unwrap(),
                             position: vec2(x as f32, y as f32),
                         });
                     }
@@ -328,12 +340,12 @@ impl Map {
             for (z_mass, val) in &val.children() {
                 let z_mass = z_mass.to_string().parse::<i32>().unwrap();
                 for (key, val) in &val.children() {
-                    let x1: i32 = val.get("x1").into();
-                    let x2: i32 = val.get("x2").into();
-                    let y1: i32 = val.get("y1").into();
-                    let y2: i32 = val.get("y2").into();
-                    let next: i32 = val.get("next").into();
-                    let prev: i32 = val.get("prev").into();
+                    let x1: i32 = val.get("x1").try_into()?;
+                    let x2: i32 = val.get("x2").try_into()?;
+                    let y1: i32 = val.get("y1").try_into()?;
+                    let y2: i32 = val.get("y2").try_into()?;
+                    let next: i32 = val.get("next").try_into()?;
+                    let prev: i32 = val.get("prev").try_into()?;
                     let key = key.to_string().parse::<i32>().unwrap();
                     footholds.insert(
                         key,
@@ -359,22 +371,23 @@ impl Map {
         lt.y -= 320.0;
         rb.y += 160.0;
 
-        let helper: MapHelper = root.at_path("Map/MapHelper.img")?.into();
-        let life: Vec<MapLife> = map_img.get("life").into();
+        let helper: MapHelper = root.at_path("Map/MapHelper.img").or(Err(()))?.try_into()?;
+        let life: Vec<MapLife> = map_img.get("life").try_into()?;
         let npc: HashMap<String, Npc> = life
             .iter()
             .filter(|item| item.r#type == "n")
-            .map(|item| {
-                (
+            .filter_map(|item| {
+                Some((
                     item.id.to_string(),
                     root.at_path(&format!("Npc/{}.img", item.id))
                         .unwrap()
-                        .into(),
-                )
+                        .try_into()
+                        .ok()?,
+                ))
             })
             .collect();
 
-        let mut info: MapInfo = map_img.get("info").into();
+        let mut info: MapInfo = map_img.get("info").try_into()?;
         info.vr_left = info.vr_left.or_else(|| Some(lt.x as i32));
         info.vr_top = info.vr_top.or_else(|| Some(lt.y as i32));
         info.vr_right = info.vr_right.or_else(|| Some(rb.x as i32));
@@ -386,7 +399,7 @@ impl Map {
             backgrounds,
             layers,
             footholds,
-            portals: map_img.get("portal").into(),
+            portals: map_img.get("portal").try_into()?,
             info,
             portal_timer: Timer::new((1..helper.pv.len()).into_iter().map(|_| 100.0).collect()),
             helper,

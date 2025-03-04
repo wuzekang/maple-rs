@@ -1,13 +1,13 @@
+use crate::sprite::{Sprite, SpriteRenderer};
+use crate::timer::Timer;
+use crate::wz::Node;
 use glam::Vec2;
 use image::DynamicImage;
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::sync::Arc;
+use ui::{Drawable, Renderer};
 use wz_reader::WzNodeCast;
-
-use crate::sprite::Sprite;
-use crate::wz::Node;
-use crate::timer::Timer;
 
 #[derive(Debug)]
 pub struct AvatarFramePart {
@@ -17,15 +17,16 @@ pub struct AvatarFramePart {
     pub z: String,
 }
 
-impl From<Node> for AvatarFramePart {
-    fn from(node: Node) -> Self {
+impl TryFrom<Node> for AvatarFramePart {
+    type Error = ();
+    fn try_from(node: Node) -> Result<Self, Self::Error> {
         let frame = AvatarFramePart {
-            origin: node.get("origin").into(),
-            z: node.get("z").into(),
-            map: node.get("map").into(),
-            image: node.into(),
+            origin: node.get("origin").try_into()?,
+            z: node.get("z").try_into()?,
+            map: node.get("map").try_into()?,
+            image: node.try_into()?,
         };
-        frame
+        Ok(frame)
     }
 }
 
@@ -34,9 +35,10 @@ pub struct ZMap {
     pub layers: HashMap<String, i32>,
 }
 
-impl From<Node> for ZMap {
-    fn from(node: Node) -> Self {
-        Self {
+impl TryFrom<Node> for ZMap {
+    type Error = ();
+    fn try_from(node: Node) -> Result<Self, ()> {
+        Ok(Self {
             layers: node
                 .children()
                 .keys()
@@ -44,7 +46,7 @@ impl From<Node> for ZMap {
                 .enumerate()
                 .map(|(index, item)| (item.to_string(), index as i32))
                 .collect(),
-        }
+        })
     }
 }
 
@@ -54,9 +56,11 @@ pub struct AvatarFrame {
     pub delay: Option<i32>,
 }
 
-impl From<Node> for AvatarFrame {
-    fn from(node: Node) -> Self {
-        AvatarFrame {
+impl TryFrom<Node> for AvatarFrame {
+    type Error = ();
+
+    fn try_from(node: Node) -> Result<Self, ()> {
+        Ok(AvatarFrame {
             parts: node
                 .children()
                 .into_iter()
@@ -64,12 +68,12 @@ impl From<Node> for AvatarFrame {
                     if body_node.wz_node.read().unwrap().try_as_png().is_none() {
                         None
                     } else {
-                        Some((key.to_string(), AvatarFramePart::from(body_node)))
+                        Some((key.to_string(), AvatarFramePart::try_from(body_node).ok()?))
                     }
                 })
                 .collect(),
-            delay: node.try_get("delay").map(Into::into),
-        }
+            delay: node.try_get("delay").and_then(|v| v.try_into().ok()),
+        })
     }
 }
 
@@ -79,17 +83,18 @@ pub struct AvatarPart {
     pub variant: HashMap<String, Vec<AvatarFrame>>,
 }
 
-impl From<Node> for AvatarPart {
-    fn from(node: Node) -> Self {
-        let info: AvatarPartInfo = node.get("info").into();
-        Self {
+impl TryFrom<Node> for AvatarPart {
+    type Error = ();
+    fn try_from(node: Node) -> Result<Self, Self::Error> {
+        let info: AvatarPartInfo = node.get("info").try_into()?;
+        Ok(Self {
             info,
             variant: node
                 .children()
                 .into_iter()
                 .filter(|(key, _)| key.as_str() != "info")
-                .map(|(key, node)| {
-                    (key.to_string(), {
+                .filter_map(|(key, node)| {
+                    Some((key.to_string(), {
                         let children = node.children();
                         if children.contains_key("0") {
                             children
@@ -98,32 +103,33 @@ impl From<Node> for AvatarPart {
                                     if node.has("action") {
                                         None
                                     } else {
-                                        Some(node.into())
+                                        Some(node.try_into().ok()?)
                                     }
                                 })
                                 .collect()
                         } else {
-                            vec![node.into()]
+                            vec![node.try_into().ok()?]
                         }
-                    })
+                    }))
                 })
                 .collect(),
-        }
+        })
     }
 }
 
 #[derive(Debug)]
 pub struct AvatarPartInfo {
     pub slot: String,
-    pub cash: bool,
+    // pub cash: bool,
 }
 
-impl From<Node> for AvatarPartInfo {
-    fn from(value: Node) -> Self {
-        Self {
-            slot: value.get("islot").into(),
-            cash: value.get("cash").into(),
-        }
+impl TryFrom<Node> for AvatarPartInfo {
+    type Error = ();
+    fn try_from(value: Node) -> Result<Self, Self::Error> {
+        Ok(Self {
+            slot: value.get("islot").try_into()?,
+            // cash: value.get("cash").into(),
+        })
     }
 }
 
@@ -132,6 +138,7 @@ pub struct Character {
     pub slots: HashMap<String, AvatarPart>,
     pub action: String,
     pub emotion: String,
+    pub flip: bool,
     timer: Timer,
     z_map: Arc<ZMap>,
 }
@@ -142,23 +149,27 @@ impl Character {
             slots: HashMap::new(),
             action: "stand1".to_string(),
             emotion: "default".to_string(),
+            flip: false,
             timer: Timer::new(vec![]),
             z_map,
         };
+        let len = parts.len();
         for part in parts {
             item.insert(part);
         }
-        item.timer = Timer::new(
-            item.slots["Bd"].variant[&item.action]
-                .iter()
-                .map(|frame| frame.delay.unwrap() as f32)
-                .collect(),
-        );
+        if len > 0 {
+            item.timer = Timer::new(
+                item.slots["Bd"].variant[&item.action]
+                    .iter()
+                    .map(|frame| frame.delay.unwrap() as f32)
+                    .collect(),
+            );
+        }
         item
     }
 
     pub fn insert(&mut self, node: Node) {
-        let part: AvatarPart = node.into();
+        let part: AvatarPart = node.try_into().unwrap();
         self.slots.insert(part.info.slot.clone(), part);
     }
 
@@ -189,6 +200,7 @@ impl Character {
         let index = self.timer.index;
 
         let body = &self.slots["Bd"].variant[action][index].parts["body"].map;
+        let arm = &self.slots["Bd"].variant[action][index].parts["arm"].map;
         let head = &self.slots["Hd"].variant[action][index].parts["head"].map;
         let offset = |slot: &str, part: &str, item: &HashMap<String, Vec2>| match slot {
             "Bd" => match part {
@@ -197,6 +209,7 @@ impl Character {
             },
             "Hd" => item["neck"] - body["neck"],
             "Fc" | "Hr" => item["brow"] - head["brow"] + head["neck"] - body["neck"],
+            "Wp" => item["hand"] - arm["hand"] + arm["navel"] - body["navel"],
             _ => item["navel"] - body["navel"],
         };
 
@@ -227,5 +240,22 @@ impl Character {
 
         frame.sort_by_key(|item| item.z);
         frame
+    }
+}
+
+impl Drawable for Character {
+    fn draw(&self, ctx: &mut Renderer) {
+        let mut sprite_renderer = SpriteRenderer::new(ctx);
+        for sprite in &self.frame() {
+            sprite_renderer.draw_flip(sprite, Vec2::ZERO, self.flip);
+        }
+    }
+
+    fn size(&self) -> Vec2 {
+        Vec2::ZERO
+    }
+
+    fn update(&mut self, delta: f32) {
+        self.timer.tick(delta);
     }
 }

@@ -34,6 +34,15 @@ impl OffsetEditor {
     fn insert_string(&mut self, data: &str) {
         self.editor.insert_string(data, None);
         self.update();
+        self.editor.with_buffer(|buf| {
+            let text = buf
+                .lines
+                .iter()
+                .map(|line| line.text())
+                .collect::<Vec<_>>()
+                .join("\n");
+            dbg!(text);
+        })
     }
 
     fn action(&mut self, action: Action) {
@@ -41,6 +50,15 @@ impl OffsetEditor {
             self.editor.action(&mut s.font_system, action);
         });
         self.update();
+        self.editor.with_buffer(|buf| {
+            let text = buf
+                .lines
+                .iter()
+                .map(|line| line.text())
+                .collect::<Vec<_>>()
+                .join("\n");
+            dbg!(text);
+        })
     }
 
     fn update(&mut self) {
@@ -62,7 +80,7 @@ impl OffsetEditor {
         if let Some((x, y)) = self.editor.cursor_position() {
             let x = x as f32;
             let y = y as f32;
-            let rect = self.id.rect();
+            let rect = self.id.bounding_rect();
             let rect_width = ((rect.width - 1.0) * dpr).max(0.0);
             let rect_height = rect.height * dpr;
             if self.offset.x + x > rect_width {
@@ -103,15 +121,17 @@ impl OffsetEditor {
 #[derive(Clone, Copy)]
 struct TextView {
     id: ViewId,
+    focused: Ref<bool>,
     editor: Ref<OffsetEditor>,
     cache: Ref<(Option<Texture>, Option<Texture>)>,
 }
 
 impl TextView {
-    fn new() -> Self {
+    fn new(focused: Ref<bool>) -> Self {
         let id = ViewId::new();
         Self {
             id,
+            focused,
             editor: create_ref(OffsetEditor::new(id)),
             cache: create_ref((None, None)),
         }
@@ -137,19 +157,18 @@ impl Element for TextView {
         self.id
     }
 
-    fn paint(&self, ctx: &Renderer) {
-        let layout = self.id.layout().unwrap();
-        let state = self.id.state();
-        let viewport = state.borrow().viewport;
+    fn paint(&self, ctx: &mut Renderer) {
+        let id = self.id();
+        let state = id.state();
         let style = state.borrow().style.clone();
 
-        let location = layout.location + viewport;
+        let layout = id.layout();
         let size = layout.size;
 
         if style.background != Color::TRANSPARENT {
             ctx.fill_rect(
                 style.background,
-                vec2(location.x, location.y),
+                Vec2::ZERO,
                 vec2(size.width, size.height),
             );
         }
@@ -164,26 +183,26 @@ impl Element for TextView {
                     ctx,
                     buffer,
                     self.cache,
-                    style,
-                    vec2(location.x, location.y),
+                    style.clone(),
+                    Vec2::ZERO,
                     vec2(size.width, size.height),
                     offset,
                 );
                 buffer.metrics().line_height
             }) / dpr;
 
-            ctx.fill_selection(Color::BLUE.multiply_alpha(0.5), location, size, editor, dpr);
-
-            if let Some((x, y)) = editor.editor.cursor_position() {
-                let x = x as f32 / dpr;
-                let y = y as f32 / dpr;
-                let p = location
-                    + Point {
-                        x: offset.x / dpr,
-                        y: offset.y / dpr,
-                    };
-                ctx.set_color(Color::BLACK);
-                ctx.line(p.x + x, p.y + y, p.x + x, p.y + y + line_height)
+            if self.focused.with(|v| *v) {
+                ctx.fill_selection(Color::BLUE.multiply_alpha(0.5), Vec2::ZERO, vec2(size.width, size.height), editor, dpr);
+                if let Some((x, y)) = editor.editor.cursor_position() {
+                    let x = x as f32 / dpr;
+                    let y = y as f32 / dpr;
+                    let p = Point {
+                            x: offset.x / dpr,
+                            y: offset.y / dpr,
+                        };
+                    ctx.set_color(style.color);
+                    ctx.line(vec2(p.x + x, p.y + y), vec2(p.x + x, p.y + y + line_height))
+                }
             }
         });
     }
@@ -209,7 +228,8 @@ pub struct TextInput {
 
 impl TextInput {
     pub fn new() -> Self {
-        let text_view = TextView::new();
+        let focused = create_ref(false);
+        let text_view = TextView::new(focused);
 
         let element = view(
             (text_view.style(|s| {
@@ -224,10 +244,12 @@ impl TextInput {
         element
             .on_click(|_| {})
             .on_focus(move |_| unsafe {
+                focused.with_mut(|f| *f = true);
                 text_view.editor.with_mut(|editor| editor.update());
                 SDL_StartTextInput(use_context().unwrap());
             })
             .on_blur(move |_| unsafe {
+                focused.with_mut(|f| *f = false);
                 SDL_StopTextInput(use_context().unwrap());
             })
             .on_key_down(move |event| {

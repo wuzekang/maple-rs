@@ -7,19 +7,23 @@ use std::sync::Arc;
 use ui::{Bounds, Drawable, Renderer, Texture};
 
 pub struct SpriteRenderer<'a> {
-    renderer: &'a Renderer,
+    renderer: &'a mut Renderer,
 }
 
 impl<'a> SpriteRenderer<'a> {
-    pub fn new(renderer: &'a Renderer) -> Self {
+    pub fn new(renderer: &'a mut Renderer) -> Self {
         Self { renderer }
     }
 
-    pub fn draw(&self, sprite: &Sprite, position: Vec2) {
+    pub fn scale(&mut self, scale: f32) {
+        self.renderer.scale(scale);
+    }
+
+    pub fn draw(&mut self, sprite: &Sprite, position: Vec2) {
         self.draw_flip(sprite, position, false);
     }
 
-    pub fn draw_flip(&self, sprite: &Sprite, position: Vec2, flip: bool) {
+    pub fn draw_flip(&mut self, sprite: &Sprite, position: Vec2, flip: bool) {
         let texture = self.renderer.texture(&sprite.image);
         self.renderer.render_texture(
             &texture,
@@ -36,7 +40,7 @@ impl<'a> SpriteRenderer<'a> {
     }
 
     pub fn draw_flip_once(&self, sprite: &ASprite, position: Vec2, flip: bool) {
-        let image: Arc<DynamicImage> = sprite.node.clone().into();
+        let image: Arc<DynamicImage> = sprite.node.clone().try_into().unwrap();
         let texture = Texture::from_image(&image, self.renderer.renderer);
         self.renderer.render_texture(
             &texture,
@@ -66,21 +70,54 @@ pub struct Sprite {
     pub delay: i32,
 }
 
-impl From<Node> for Sprite {
-    fn from(node: Node) -> Self {
-        let image: Arc<DynamicImage> = node.clone().into();
-        Self {
+impl TryFrom<Node> for Sprite {
+    fn try_from(node: Node) -> Result<Self, ()> {
+        let image: Arc<DynamicImage> = node.clone().try_into()?;
+        Ok(Self {
             path: node.path(),
-            origin: node.get("origin").into(),
-            z: node.try_get("z").map(Into::into).unwrap_or(0),
-            delay: node.try_get("delay").map(Into::into).unwrap_or(100),
-            a0: node.try_get("a0").map(Into::into).unwrap_or(255),
-            a1: node.try_get("a1").map(Into::into).unwrap_or(255),
+            origin: node.get("origin").try_into()?,
+            z: node.try_get("z").map(TryInto::try_into).unwrap_or(Ok(0))?,
+            delay: node
+                .try_get("delay")
+                .map(TryInto::try_into)
+                .unwrap_or(Ok(100))?,
+            a0: node
+                .try_get("a0")
+                .map(TryInto::try_into)
+                .unwrap_or(Ok(255))?,
+            a1: node
+                .try_get("a1")
+                .map(TryInto::try_into)
+                .unwrap_or(Ok(255))?,
             alpha: 255.into(),
             size: vec2(image.width() as f32, image.height() as f32),
             image,
-        }
+        })
     }
+
+    type Error = ();
+}
+
+pub struct SpriteDrawable {
+    pub sprite: Sprite,
+    pub bounds: Bounds,
+}
+
+impl Drawable for SpriteDrawable {
+    fn draw(&self, renderer: &mut Renderer) {
+        let mut sprite_renderer = SpriteRenderer::new(renderer);
+        sprite_renderer.draw(&self.sprite, self.bounds.position);
+    }
+
+    fn size(&self) -> Vec2 {
+        self.sprite.size
+    }
+
+    fn set_bounds(&mut self, bounds: Bounds) {
+        self.bounds = bounds;
+    }
+
+    fn update(&mut self, delta: f32) {}
 }
 
 #[derive(Clone)]
@@ -96,19 +133,34 @@ pub struct ASprite {
     pub delay: i32,
 }
 
-impl From<Node> for ASprite {
-    fn from(node: Node) -> Self {
-        Self {
+impl TryFrom<Node> for ASprite {
+    type Error = ();
+    fn try_from(node: Node) -> Result<Self, Self::Error> {
+        Ok(Self {
             node: node.clone(),
             path: node.path(),
-            origin: node.get("origin").into(),
-            z: node.try_get("z").map(Into::into).unwrap_or(0),
-            delay: node.try_get("delay").map(Into::into).unwrap_or(100),
-            a0: node.try_get("a0").map(Into::into).unwrap_or(255),
-            a1: node.try_get("a1").map(Into::into).unwrap_or(255),
+            origin: node.get("origin").try_into()?,
+            z: node
+                .try_get("z")
+                .map(TryInto::try_into)
+                .transpose()?
+                .unwrap_or(0),
+            delay: node
+                .try_get("delay")
+                .map(TryInto::try_into)
+                .transpose()?
+                .unwrap_or(100),
+            a0: node
+                .try_get("a0")
+                .map(TryInto::try_into)
+                .unwrap_or(Ok(255))?,
+            a1: node
+                .try_get("a1")
+                .map(TryInto::try_into)
+                .unwrap_or(Ok(255))?,
             alpha: 255.into(),
             size: Vec2::ZERO,
-        }
+        })
     }
 }
 
@@ -120,10 +172,11 @@ pub struct ASpriteAnimation {
     pub complete: bool,
 }
 
-impl From<Node> for ASpriteAnimation {
-    fn from(node: Node) -> Self {
-        let frames: Vec<ASprite> = node.into();
-        Self {
+impl TryFrom<Node> for ASpriteAnimation {
+    type Error = ();
+    fn try_from(node: Node) -> Result<Self, Self::Error> {
+        let frames: Vec<ASprite> = node.try_into()?;
+        Ok(Self {
             timer: Timer {
                 repeat: Repeat::Finite(1),
                 ..Timer::new(frames.iter().map(|frame| frame.delay as f32).collect())
@@ -131,7 +184,7 @@ impl From<Node> for ASpriteAnimation {
             frames,
             bounds: Bounds::default(),
             complete: false,
-        }
+        })
     }
 }
 
@@ -150,12 +203,11 @@ impl ASpriteAnimation {
     pub fn current_frame(&self) -> &ASprite {
         &self.frames[self.timer.index]
     }
-
 }
 
 impl Drawable for ASpriteAnimation {
-    fn draw(&self, renderer: &Renderer) {
-        let sprite_renderer = &SpriteRenderer::new(renderer);
+    fn draw(&self, renderer: &mut Renderer) {
+        let mut sprite_renderer = SpriteRenderer::new(renderer);
         let frame = self.current_frame();
         sprite_renderer.draw_flip_once(frame, self.bounds.position, false);
     }
@@ -180,14 +232,15 @@ pub struct SpriteAnimation {
     pub bounds: Bounds,
 }
 
-impl From<Node> for SpriteAnimation {
-    fn from(node: Node) -> Self {
-        let frames: Vec<Sprite> = node.into();
-        Self {
+impl TryFrom<Node> for SpriteAnimation {
+    type Error = ();
+    fn try_from(node: Node) -> Result<Self, Self::Error> {
+        let frames: Vec<Sprite> = node.try_into()?;
+        Ok(Self {
             timer: Timer::new(frames.iter().map(|frame| frame.delay as f32).collect()),
             frames,
             bounds: Bounds::default(),
-        }
+        })
     }
 }
 
@@ -203,17 +256,22 @@ impl SpriteAnimation {
     pub fn current_frame(&self) -> &Sprite {
         &self.frames[self.timer.index]
     }
+
+    pub fn with_repeat(mut self, repeat: Repeat) -> Self {
+        self.timer.repeat = repeat;
+        self
+    }
 }
 
 impl Drawable for SpriteAnimation {
-    fn draw(&self, renderer: &Renderer) {
-        let sprite_renderer = &SpriteRenderer::new(renderer);
+    fn draw(&self, renderer: &mut Renderer) {
+        let mut sprite_renderer = SpriteRenderer::new(renderer);
         let frame = self.current_frame();
         sprite_renderer.draw(frame, self.bounds.position);
     }
 
     fn size(&self) -> Vec2 {
-        Vec2::ZERO
+        self.current_frame().size
     }
 
     fn set_bounds(&mut self, bounds: Bounds) {

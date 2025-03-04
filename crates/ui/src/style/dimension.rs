@@ -79,6 +79,13 @@ impl Into<taffy::LengthPercentageAuto> for LengthPercentageAuto {
     }
 }
 
+impl From<taffy::LengthPercentageAuto> for LengthPercentageAuto {
+    fn from(value: taffy::LengthPercentageAuto) -> Self {
+        Self(value)
+    }
+}
+
+
 pub struct LengthPercentage(taffy::LengthPercentage);
 
 impl From<Length> for LengthPercentage {

@@ -1,19 +1,19 @@
 pub mod dimension;
 
-use crate::{Drawable, Element};
-use cosmic_text::Wrap;
-use glam::Vec2;
+use crate::{Drawable, Element, ViewId};
+use cosmic_text::{Align, Wrap};
 use peniko::Color;
 use reactive::create_effect;
 use sdl3_sys::everything::{SDL_CreateSystemCursor, SDL_Cursor, SDL_SystemCursor};
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Pointer;
+use std::mem;
 use std::rc::Rc;
 use taffy::prelude::*;
 use taffy::{Overflow, Point};
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub enum TextWrap {
     None,
     Glyph,
@@ -45,19 +45,66 @@ impl Default for TextWrap {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+pub enum TextAlign {
+    Left,
+    Right,
+    Center,
+    Justified,
+    End,
+}
+
+impl From<TextAlign> for Align {
+    fn from(t: TextAlign) -> Self {
+        match t {
+            TextAlign::Left => Self::Left,
+            TextAlign::Right => Self::Right,
+            TextAlign::Center => Self::Center,
+            TextAlign::Justified => Self::Justified,
+            TextAlign::End => Self::End,
+        }
+    }
+}
+
+impl Default for TextAlign {
+    fn default() -> Self {
+        Self::Left
+    }
+}
+
+#[derive(Clone)]
 pub struct Style {
     pub background: Color,
     pub color: Color,
     pub line_height: Option<f32>,
     pub font_size: Option<f32>,
     pub text_wrap: TextWrap,
+    pub text_align: TextAlign,
     pub cursor: Cursor,
     pub pointer_events: PointerEvents,
-    pub translate: Vec2,
+    pub translate: Point<LengthPercentage>,
+    pub opacity: f32,
+    pub clip: bool,
 }
 
 impl Style {
+    pub const DEFAULT: Self = Self {
+        background: Color::TRANSPARENT,
+        color: Color::BLACK,
+        line_height: None,
+        font_size: None,
+        text_wrap: TextWrap::WordOrGlyph,
+        text_align: TextAlign::Left,
+        cursor: Cursor::None,
+        pointer_events: PointerEvents::Auto,
+        translate: Point {
+            x: LengthPercentage::ZERO,
+            y: LengthPercentage::ZERO,
+        },
+        opacity: 1.0,
+        clip: false,
+    };
+
     pub fn background(self) -> Color {
         self.background
     }
@@ -66,16 +113,26 @@ impl Style {
     }
 }
 
-#[derive(Clone)]
+impl Default for Style {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
+#[derive(Clone, PartialEq)]
 pub enum StyleProperty {
     Background(Color),
     Color(Color),
     LineHeight(Option<f32>),
     FontSize(Option<f32>),
     TextWrap(TextWrap),
+    TextAlign(TextAlign),
     Cursor(Cursor),
     PointerEvents(PointerEvents),
-    Translate(Vec2),
+    Translate(Point<LengthPercentage>),
+    TranslateX(LengthPercentage),
+    TranslateY(LengthPercentage),
+    Opacity(f32),
 }
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -85,9 +142,25 @@ pub enum StylePropertyKey {
     LineHeight,
     FontSize,
     TextWrap,
+    TextAlign,
     Cursor,
     PointerEvents,
     Translate,
+    TranslateX,
+    TranslateY,
+    Opacity,
+}
+
+impl StylePropertyKey {
+    pub(crate) fn inherited(&self) -> bool {
+        match self {
+            Self::TextWrap => false,
+            Self::Background => false,
+            Self::Translate | Self::TranslateX | Self::TranslateY => false,
+            Self::Opacity => false,
+            _ => true,
+        }
+    }
 }
 
 impl StyleProperty {
@@ -111,20 +184,24 @@ impl StyleProperty {
             Self::TextWrap(value) => {
                 style.text_wrap = value.clone();
             }
+            Self::TextAlign(value) => {
+                style.text_align = value.clone();
+            }
             Self::PointerEvents(value) => {
                 style.pointer_events = value.clone();
             }
             Self::Translate(value) => {
                 style.translate = value.clone();
             }
-        }
-    }
-
-    pub(crate) fn inherited(&self) -> bool {
-        match self {
-            Self::TextWrap(_) => false,
-            Self::Background(_) => false,
-            _ => true,
+            Self::TranslateX(value) => {
+                style.translate.x = value.clone();
+            }
+            Self::TranslateY(value) => {
+                style.translate.y = value.clone();
+            }
+            Self::Opacity(value) => {
+                style.opacity = value.clone();
+            }
         }
     }
 
@@ -142,6 +219,10 @@ impl StyleProperty {
                 Self::TextWrap(TextWrap::WordOrGlyph),
             ),
             (
+                StylePropertyKey::TextAlign,
+                Self::TextAlign(TextAlign::Left),
+            ),
+            (
                 StylePropertyKey::Cursor,
                 Self::Cursor(Cursor::system_default()),
             ),
@@ -149,11 +230,12 @@ impl StyleProperty {
                 StylePropertyKey::PointerEvents,
                 Self::PointerEvents(PointerEvents::Auto),
             ),
+            (StylePropertyKey::Opacity, Self::Opacity(1.0)),
         ])
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub enum TaffyStyleProperty {
     Display(Display),
     Overflow(Point<Overflow>),
@@ -420,7 +502,7 @@ impl TaffyStyleProperty {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct StyleBuilder {
     pub taffy_style_props: Vec<(TaffyStylePropertyKey, TaffyStyleProperty)>,
     pub style_props: Vec<(StylePropertyKey, StyleProperty)>,
@@ -740,13 +822,30 @@ impl StyleBuilder {
         ));
         self
     }
-    pub fn flex_wrap(mut self, value: FlexWrap) -> Self {
+    pub fn flex_wrap(mut self) -> Self {
         self.taffy_style_props.push((
             TaffyStylePropertyKey::FlexWrap,
-            TaffyStyleProperty::FlexWrap(value),
+            TaffyStyleProperty::FlexWrap(FlexWrap::Wrap),
         ));
         self
     }
+
+    pub fn flex_nowrap(mut self) -> Self {
+        self.taffy_style_props.push((
+            TaffyStylePropertyKey::FlexWrap,
+            TaffyStyleProperty::FlexWrap(FlexWrap::NoWrap),
+        ));
+        self
+    }
+
+    pub fn flex_wrap_reverse(mut self) -> Self {
+        self.taffy_style_props.push((
+            TaffyStylePropertyKey::FlexWrap,
+            TaffyStyleProperty::FlexWrap(FlexWrap::WrapReverse),
+        ));
+        self
+    }
+
     pub fn flex_basis(mut self, value: Dimension) -> Self {
         self.taffy_style_props.push((
             TaffyStylePropertyKey::FlexBasis,
@@ -805,6 +904,12 @@ impl StyleBuilder {
         self
     }
 
+    pub fn text_align(mut self, value: TextAlign) -> Self {
+        self.style_props
+            .push((StylePropertyKey::TextAlign, StyleProperty::TextAlign(value)));
+        self
+    }
+
     pub fn cursor(mut self, value: impl Into<Cursor>) -> Self {
         self.style_props.push((
             StylePropertyKey::Cursor,
@@ -821,9 +926,31 @@ impl StyleBuilder {
         self
     }
 
-    pub fn translate(mut self, value: Vec2) -> Self {
+    pub fn translate(mut self, value: Point<LengthPercentage>) -> Self {
         self.style_props
             .push((StylePropertyKey::Translate, StyleProperty::Translate(value)));
+        self
+    }
+
+    pub fn translate_x(mut self, value: impl Into<dimension::LengthPercentage>) -> Self {
+        self.style_props.push((
+            StylePropertyKey::TranslateX,
+            StyleProperty::TranslateX(value.into().into()),
+        ));
+        self
+    }
+
+    pub fn translate_y(mut self, value: impl Into<dimension::LengthPercentage>) -> Self {
+        self.style_props.push((
+            StylePropertyKey::TranslateY,
+            StyleProperty::TranslateY(value.into().into()),
+        ));
+        self
+    }
+
+    pub fn opacity(mut self, value: f32) -> Self {
+        self.style_props
+            .push((StylePropertyKey::Opacity, StyleProperty::Opacity(value)));
         self
     }
 
@@ -840,6 +967,11 @@ impl StyleBuilder {
     #[inline]
     pub fn absolute(mut self) -> Self {
         self.position(Position::Absolute)
+    }
+
+    #[inline]
+    pub fn block(mut self) -> Self {
+        self.display(Display::Block)
     }
 
     #[inline]
@@ -883,6 +1015,11 @@ impl StyleBuilder {
     }
 
     #[inline]
+    pub fn justify_stretch(mut self) -> Self {
+        self.justify_content(JustifyContent::Stretch)
+    }
+
+    #[inline]
     pub fn items_start(mut self) -> Self {
         self.align_items(AlignItems::Start)
     }
@@ -895,6 +1032,11 @@ impl StyleBuilder {
     #[inline]
     pub fn items_center(mut self) -> Self {
         self.align_items(AlignItems::Center)
+    }
+
+    #[inline]
+    pub fn items_stretch(mut self) -> Self {
+        self.align_items(AlignItems::Stretch)
     }
 
     #[inline]
@@ -915,6 +1057,11 @@ impl StyleBuilder {
     #[inline]
     pub fn pointer_events_auto(mut self) -> Self {
         self.pointer_events(PointerEvents::Auto)
+    }
+
+    #[inline]
+    pub fn text_center(mut self) -> Self {
+        self.text_align(TextAlign::Center)
     }
 }
 
@@ -1005,6 +1152,7 @@ impl Default for Cursor {
 pub struct StyleComputeContext {
     pub style: HashMap<StylePropertyKey, StyleProperty>,
     pub stack: Vec<HashMap<StylePropertyKey, StyleProperty>>,
+    pub dirty: bool,
 }
 
 impl StyleComputeContext {
@@ -1012,6 +1160,7 @@ impl StyleComputeContext {
         Self {
             style: StyleProperty::initial(),
             stack: Vec::new(),
+            dirty: false,
         }
     }
 
@@ -1035,9 +1184,147 @@ pub trait Styleable: Sized + Element {
 
         create_effect(move |_| {
             let state = id.state();
-            state.borrow_mut().styles[index] = Some(f(StyleBuilder::default()));
-            state.borrow_mut().style_dirty = true;
+            let prev = mem::take(&mut state.borrow_mut().styles[index]);
+            let next = Some(f(StyleBuilder::default()));
+            let style_dirty = prev != next;
+            let inherited_style_dirty = style_dirty && {
+                let prev = prev
+                    .map(|v| v.style_props)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .collect::<HashMap<_, _>>();
+                let next = next
+                    .clone()
+                    .map(|v| v.style_props)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .collect::<HashMap<_, _>>();
+                let keys = prev.keys().chain(next.keys()).collect::<HashSet<_>>();
+                keys.into_iter()
+                    .any(|k| k.inherited() && prev.get(k) != next.get(k))
+            };
+            let mut state = state.borrow_mut();
+            state.style_dirty = style_dirty;
+            state.inherited_style_dirty = inherited_style_dirty;
+            state.styles[index] = next;
         });
         self
+    }
+}
+
+fn compute_style(id: ViewId, ctx: &mut StyleComputeContext) {
+    let state = id.state();
+    let node = id.node();
+
+    let mut style_props = HashMap::<StylePropertyKey, StyleProperty>::new();
+    let mut taffy_style_props = HashMap::<TaffyStylePropertyKey, TaffyStyleProperty>::new();
+
+    let styles = state.borrow().styles.clone();
+    for style_builder in styles.into_iter().rev() {
+        if let Some(style_builder) = style_builder {
+            for (key, value) in style_builder.taffy_style_props.into_iter().rev() {
+                if !taffy_style_props.contains_key(&key) {
+                    taffy_style_props.insert(key, value);
+                }
+            }
+            for (key, value) in style_builder.style_props.into_iter().rev() {
+                if !style_props.contains_key(&key) {
+                    style_props.insert(key, value);
+                }
+            }
+        }
+    }
+
+    for (key, value) in TaffyStyleProperty::initial() {
+        if !taffy_style_props.contains_key(&key) {
+            taffy_style_props.insert(key, value);
+        }
+    }
+
+    let mut taffy_style = taffy::Style::default();
+    for (_, value) in taffy_style_props {
+        value.assign_to(&mut taffy_style);
+    }
+
+    if *id.taffy().borrow().style(node).unwrap() != taffy_style {
+        id.taffy()
+            .borrow_mut()
+            .set_style(node, taffy_style)
+            .unwrap();
+    }
+
+    let mut style = Style::default();
+
+    for (key, value) in StyleProperty::initial() {
+        if !style_props.contains_key(&key) {
+            value.assign_to(&mut style);
+        }
+    }
+
+    for (key, value) in ctx.style.iter() {
+        if !style_props.contains_key(key) && key.inherited() {
+            value.assign_to(&mut style);
+        }
+    }
+
+    for (_, value) in style_props.iter() {
+        value.assign_to(&mut style);
+    }
+
+    state.borrow_mut().style = style;
+
+    for (key, value) in style_props {
+        if key.inherited() {
+            if ctx.style.contains_key(&key) {
+                ctx.style.remove(&key);
+            }
+            ctx.style.insert(key, value);
+        }
+    }
+}
+
+pub fn compute_style_recursive(id: ViewId, ctx: &mut StyleComputeContext) {
+    ctx.push();
+
+    let state = id.state();
+    ctx.dirty = ctx.dirty || state.borrow().inherited_style_dirty || true;
+    if ctx.dirty || state.borrow().style_dirty {
+        compute_style(id, ctx);
+        state.borrow_mut().style_dirty = false;
+        state.borrow_mut().inherited_style_dirty = false;
+    }
+
+    for child in id.children() {
+        compute_style_recursive(child, ctx);
+    }
+
+    ctx.pop();
+}
+
+pub fn compute_layout(taffy: &mut TaffyTree, parent: NodeId, viewport: Point<f32>) {
+    let children = taffy.children(parent).unwrap();
+    for child in children {
+        let id = ViewId(child);
+        let state = id.state();
+        state.borrow_mut().viewport = viewport;
+        let layout = taffy.layout(child).unwrap();
+        let size = layout.size;
+        let location = layout.location;
+
+        let translate = match state.borrow().style.translate {
+            Point { x, y } => Point {
+                x: match x {
+                    LengthPercentage::Length(value) => value,
+                    LengthPercentage::Percent(value) => value * size.width,
+                },
+                y: match y {
+                    LengthPercentage::Length(value) => value,
+                    LengthPercentage::Percent(value) => value * size.height,
+                },
+            },
+        };
+
+        let viewport = viewport + location + translate;
+        compute_layout(taffy, child, viewport);
     }
 }

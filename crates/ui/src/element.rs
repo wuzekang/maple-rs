@@ -1,9 +1,9 @@
 use crate::event::Event;
 use crate::{
-    runtime::RUNTIME, sdl::Renderer, view_id::ViewId, widget::dynamic::Dynamic,
-    widget::fragment::Fragment, widget::text::Text,
+    sdl::Renderer, view_id::ViewId, widget::dynamic::Dynamic, widget::fragment::Fragment,
+    widget::text::Text,
 };
-use glam::vec2;
+use glam::{vec2, Vec2};
 use peniko::Color;
 use reactive::{Scope, SignalGet};
 use std::any::Any;
@@ -18,26 +18,15 @@ pub trait Element: Any {
 
     fn event(&mut self, event: &mut Event) {}
 
-    fn paint(&self, ctx: &Renderer) {
+    fn paint(&self, ctx: &mut Renderer) {
         let id = self.id();
-        let layout = id.layout().unwrap();
         let state = id.state();
-        let viewport = state.borrow().viewport;
         let style = state.borrow().style.clone();
-
-        let location = layout.location + viewport;
+        let layout = id.layout();
         let size = layout.size;
 
         if style.background != Color::TRANSPARENT {
-            ctx.fill_rect(
-                style.background,
-                vec2(location.x, location.y),
-                vec2(size.width, size.height),
-            );
-        }
-
-        for child in self.id().children() {
-            child.element().borrow().paint(ctx);
+            ctx.fill_rect(style.background, Vec2::ZERO, vec2(size.width, size.height));
         }
     }
 

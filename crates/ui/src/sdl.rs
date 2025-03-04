@@ -1,6 +1,6 @@
 use crate::OffsetEditor;
 use cosmic_text::{Edit, FontSystem, Placement, SwashCache};
-use glam::{vec2, Vec2};
+use glam::{vec2, Vec2, Vec4, Vec4Swizzles};
 use image::DynamicImage;
 use peniko::Color;
 use sdl3_sys::{
@@ -21,7 +21,7 @@ use sdl3_sys::{
     },
 };
 use std::rc::Rc;
-use std::{cell::RefCell, cmp, collections::HashMap, sync::Arc};
+use std::{cmp, collections::HashMap, sync::Arc};
 use taffy::prelude::length;
 use taffy::{LengthPercentage, Rect};
 use unicode_segmentation::UnicodeSegmentation;
@@ -43,6 +43,10 @@ impl Surface {
         }
     }
 
+    pub fn ptr(&self) -> *mut SDL_Surface {
+        self.surface
+    }
+
     pub fn blit(&self, dest: &Surface, x: i32, y: i32) {
         unsafe {
             SDL_BlitSurface(
@@ -60,6 +64,18 @@ impl Surface {
                     w: self.width,
                     h: self.height,
                 },
+            );
+        }
+    }
+
+    pub fn clear(&self, color: Color) {
+        unsafe {
+            SDL_ClearSurface(
+                self.surface,
+                color.r as f32 / 255.0,
+                color.g as f32 / 255.0,
+                color.b as f32 / 255.0,
+                color.a as f32 / 255.0,
             );
         }
     }
@@ -179,6 +195,7 @@ impl NineGridTexture {
 
     pub fn render(&self, painter: &Renderer, position: Vec2, size: Option<Vec2>) {
         let size = size.unwrap_or(self.texture.size);
+        let position = position + painter.translate;
         unsafe {
             SDL_RenderTexture9Grid(
                 painter.renderer,
@@ -201,7 +218,7 @@ impl NineGridTexture {
 }
 
 impl Drawable for NineGridTexture {
-    fn draw(&self, painter: &Renderer) {
+    fn draw(&self, painter: &mut Renderer) {
         self.render(painter, self.bounds.position, Some(self.bounds.size));
     }
 
@@ -234,7 +251,7 @@ pub struct Bounds {
 }
 
 pub trait Drawable {
-    fn draw(&self, painter: &Renderer);
+    fn draw(&self, ctx: &mut Renderer);
     fn size(&self) -> Vec2;
     fn set_bounds(&mut self, bounds: Bounds) {}
     fn update(&mut self, delta: f32) {}
@@ -246,8 +263,8 @@ impl ImageTexture {
             renderer,
             SDL_PixelFormat::ABGR8888,
             SDL_TextureAccess::STATIC,
-            image.width(),
-            image.height(),
+            image.width() as i32,
+            image.height() as i32,
         );
 
         unsafe {
@@ -262,6 +279,8 @@ impl ImageTexture {
                 image.width() as i32 * 4,
             );
             SDL_SetTextureScaleMode(texture.ptr(), SDL_ScaleMode::NEAREST);
+            // SDL_SetTextureBlendMode(texture.ptr(), SDL_BLENDMODE_BLEND);
+            // SDL_SetTextureBlendMode(texture.ptr(), SDL_BLENDMODE_NONE);
         }
 
         ImageTexture {
@@ -275,10 +294,10 @@ impl ImageTexture {
 }
 
 impl Drawable for ImageTexture {
-    fn draw(&self, painter: &Renderer) {
+    fn draw(&self, painter: &mut Renderer) {
         let origin = vec2(0.0, 0.0);
         self.texture.set_alpha_mod(self.alpha);
-        painter.render_texture_rotated(
+        painter.render_texture_flip(
             &self.texture,
             self.flip,
             self.bounds.position,
@@ -306,11 +325,10 @@ impl Texture {
         renderer: *mut SDL_Renderer,
         format: SDL_PixelFormat,
         access: SDL_TextureAccess,
-        width: u32,
-        height: u32,
+        width: i32,
+        height: i32,
     ) -> Self {
-        let texture =
-            unsafe { SDL_CreateTexture(renderer, format, access, width as i32, height as i32) };
+        let texture = unsafe { SDL_CreateTexture(renderer, format, access, width, height) };
         Self {
             texture,
             size: vec2(width as f32, height as f32),
@@ -346,7 +364,6 @@ impl Texture {
                 bytes.as_ptr() as *const core::ffi::c_void,
                 image.width() as i32 * 4,
             );
-            SDL_SetTextureScaleMode(texture, SDL_ScaleMode::NEAREST);
         }
         Texture {
             texture,
@@ -368,6 +385,27 @@ impl Texture {
         }
         self
     }
+
+    pub fn blend_mode_none(self) -> Self {
+        unsafe {
+            SDL_SetTextureBlendMode(self.ptr(), SDL_BLENDMODE_NONE);
+        }
+        self
+    }
+
+    pub fn blend_mode_blend(self) -> Self {
+        unsafe {
+            SDL_SetTextureBlendMode(self.ptr(), SDL_BLENDMODE_BLEND);
+        }
+        self
+    }
+
+    pub fn blend_mode(self, mode: SDL_BlendMode) -> Self {
+        unsafe {
+            SDL_SetTextureBlendMode(self.ptr(), mode);
+        }
+        self
+    }
 }
 impl Drop for Texture {
     fn drop(&mut self) {
@@ -377,12 +415,22 @@ impl Drop for Texture {
     }
 }
 
+struct RendererState {
+    translate: Vec2,
+    alpha: f32,
+}
+
 pub struct Renderer {
     dpr: f32,
     scale: f32,
     pub renderer: *mut SDL_Renderer,
-    text_textures: RefCell<HashMap<cosmic_text::CacheKey, TextTexture>>,
-    textures: RefCell<HashMap<*const DynamicImage, Arc<Texture>>>,
+    text_textures: HashMap<cosmic_text::CacheKey, TextTexture>,
+    textures: HashMap<*const DynamicImage, Arc<Texture>>,
+    translate: Vec2,
+    pub texture_blend_mode: SDL_BlendMode,
+    states: Vec<RendererState>,
+    transparent: Texture,
+    pub alpha: f32,
 }
 
 impl Renderer {
@@ -396,7 +444,14 @@ impl Renderer {
         //     )
         // };
 
-        unsafe { SDL_SetRenderScale(renderer, dpr, dpr) };
+        unsafe {
+            SDL_SetRenderScale(renderer, dpr, dpr);
+            SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND)
+        };
+
+        let surface = Surface::new(1, 1);
+        surface.clear(Color::rgba8(0, 0, 0, 0));
+        let transparent = Texture::from_surface(&surface, renderer).blend_mode_none();
 
         Self {
             dpr,
@@ -404,57 +459,137 @@ impl Renderer {
             renderer,
             text_textures: Default::default(),
             textures: Default::default(),
+            translate: Vec2::ZERO,
+            texture_blend_mode: SDL_BLENDMODE_BLEND,
+            states: Default::default(),
+            transparent,
+            alpha: 1.0,
         }
     }
 
-    pub fn render_texture_rotated(
+    pub fn translate(&mut self, delta: Vec2) {
+        self.translate += delta;
+    }
+
+    pub fn save(&mut self) {
+        self.states.push(RendererState {
+            translate: self.translate,
+            alpha: self.alpha,
+        });
+    }
+
+    pub fn restore(&mut self) {
+        if let Some(state) = self.states.pop() {
+            self.translate = state.translate;
+            self.alpha = state.alpha;
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.translate = vec2(0.0, 0.0);
+    }
+
+    pub fn render_texture_flip(
         &self,
         texture: &Texture,
         flip: SDL_FlipMode,
         position: Vec2,
         size: Vec2,
         origin: Vec2,
-    ) -> bool {
+    ) {
+        self.render_texture_rotated(
+            texture,
+            Vec4::from((Vec2::ZERO, texture.size)),
+            Vec4::from((
+                vec2(
+                    if flip == SDL_FlipMode::HORIZONTAL {
+                        position.x - (size.x - origin.x)
+                    } else {
+                        position.x - origin.x
+                    },
+                    if flip == SDL_FlipMode::VERTICAL {
+                        position.y - (size.y - origin.y)
+                    } else {
+                        position.y - origin.y
+                    },
+                ),
+                size,
+            )),
+            0.0,
+            None,
+            flip,
+        );
+    }
+
+    pub fn render_texture_rotated(
+        &self,
+        texture: &Texture,
+        src_rect: Vec4,
+        dst_rect: Vec4,
+        angle: f64,
+        center: Option<Vec2>,
+        flip: SDL_FlipMode,
+    )  {
+        let position = dst_rect.xy() + self.translate;
+
         unsafe {
             SDL_RenderTextureRotated(
                 self.renderer,
                 texture.ptr(),
                 &SDL_FRect {
-                    x: 0.0,
-                    y: 0.0,
-                    w: texture.size.x,
-                    h: texture.size.y,
+                    x: src_rect.x,
+                    y: src_rect.y,
+                    w: src_rect.z,
+                    h: src_rect.w,
                 },
                 &SDL_FRect {
-                    x: if flip == SDL_FlipMode::HORIZONTAL {
-                        position.x - (size.x - origin.x)
-                    } else {
-                        position.x - origin.x
-                    },
-                    y: if flip == SDL_FlipMode::VERTICAL {
-                        position.y - (size.y - origin.y)
-                    } else {
-                        position.y - origin.y
-                    },
-                    w: size.x,
-                    h: size.y,
+                    x: position.x,
+                    y: position.y,
+                    w: dst_rect.z,
+                    h: dst_rect.w,
                 },
-                0.0,
-                std::ptr::null(),
+                angle,
+                if let Some(center) = center {
+                    &SDL_FPoint {
+                        x: center.x,
+                        y: center.y,
+                    }
+                } else {
+                    std::ptr::null()
+                },
                 flip,
-            )
+            );
         }
+    }
+
+    pub fn blend_mode_blend(&self) {
+        unsafe {
+            SDL_SetRenderDrawBlendMode(self.renderer, SDL_BLENDMODE_BLEND);
+        }
+    }
+
+    pub fn blend_mode_none(&self) {
+        unsafe {
+            SDL_SetRenderDrawBlendMode(self.renderer, SDL_BLENDMODE_NONE);
+        }
+    }
+
+    pub fn texture_blend_mode_blend(&mut self) {
+        self.texture_blend_mode = SDL_BLENDMODE_BLEND;
+    }
+
+    pub fn texture_blend_mode_none(&mut self) {
+        self.texture_blend_mode = SDL_BLENDMODE_NONE;
     }
 
     pub fn fill_rect(&self, color: Color, location: Vec2, size: Vec2) {
         unsafe {
-            SDL_SetRenderDrawBlendMode(self.renderer, SDL_BLENDMODE_BLEND);
             SDL_SetRenderDrawColor(self.renderer, color.r, color.g, color.b, color.a);
             SDL_RenderFillRect(
                 self.renderer,
                 &SDL_FRect {
-                    x: location.x,
-                    y: location.y,
+                    x: location.x + self.translate.x,
+                    y: location.y + self.translate.y,
                     w: size.x,
                     h: size.y,
                 } as *const SDL_FRect,
@@ -468,9 +603,11 @@ impl Renderer {
         }
     }
 
-    pub fn line(&self, x1: f32, y1: f32, x2: f32, y2: f32) {
+    pub fn line(&self, p1: Vec2, p2: Vec2) {
+        let p1 = p1 + self.translate;
+        let p2 = p2 + self.translate;
         unsafe {
-            SDL_RenderLine(self.renderer, x1, y1, x2, y2);
+            SDL_RenderLine(self.renderer, p1.x, p1.y, p2.x, p2.y);
         }
     }
 
@@ -478,7 +615,10 @@ impl Renderer {
         let count = points.len() as i32;
         let points = points
             .iter()
-            .map(|p| SDL_FPoint { x: p.x, y: p.y })
+            .map(|p| {
+                let p = p + self.translate;
+                SDL_FPoint { x: p.x, y: p.y }
+            })
             .collect::<Vec<_>>();
         unsafe { SDL_RenderLines(self.renderer, points.as_ptr(), count) };
     }
@@ -486,19 +626,20 @@ impl Renderer {
     pub fn fill_selection(
         &self,
         color: Color,
-        location: taffy::Point<f32>,
-        size: taffy::Size<f32>,
+        location: Vec2,
+        size: Vec2,
         editor: &OffsetEditor,
         dpr: f32,
     ) {
+        let location = location + self.translate;
         let offset = editor.offset;
         let f = |x: i32, y: i32, w: u32, h: u32| {
             let mut x = x as f32 + offset.x;
             let mut y = y as f32 + offset.y;
             let mut w = w as f32;
             let mut h = h as f32;
-            w = w.min(size.width * dpr - x);
-            h = h.min(size.height * dpr - y);
+            w = w.min(size.x * dpr - x);
+            h = h.min(size.y * dpr - y);
             if w <= 0.0 || h <= 0.0 || x + w <= 0.0 || y + h <= 0.0 {
                 return;
             }
@@ -586,9 +727,18 @@ impl Renderer {
         });
     }
 
-    pub fn with_target(&self, texture: &Texture, f: impl FnOnce(&Self)) {
+    pub fn set_target(&self, texture: Option<&Texture>) {
+        if let Some(texture) = texture {
+            unsafe { SDL_SetRenderTarget(self.renderer, texture.ptr()) };
+        } else {
+            unsafe { SDL_SetRenderTarget(self.renderer, std::ptr::null_mut()) };
+        }
+    }
+    pub fn with_target(&mut self, texture: &Texture, f: impl FnOnce(&mut Self)) {
         unsafe { SDL_SetRenderTarget(self.renderer, texture.ptr()) };
+        // self.texture_blend_mode = SDL_BLENDMODE_NONE;
         f(self);
+        // self.texture_blend_mode = SDL_BLENDMODE_BLEND;
         unsafe { SDL_SetRenderTarget(self.renderer, std::ptr::null_mut()) };
     }
 
@@ -599,7 +749,7 @@ impl Renderer {
     }
 
     pub fn fill_text(
-        &self,
+        &mut self,
         color: Color,
         location: Vec2,
         size: Vec2,
@@ -608,6 +758,7 @@ impl Renderer {
         font_system: &mut FontSystem,
         buffer: &cosmic_text::Buffer,
     ) {
+        let location = location + self.translate;
         for run in buffer.layout_runs() {
             // self.line(0.0, location.y + run.line_top, 1000.0, location.y + run.line_top);
             // self.line(0.0, location.y + run.line_y, 1000.0, location.y + run.line_y);
@@ -618,8 +769,8 @@ impl Renderer {
 
             for glyph in run.glyphs.iter() {
                 let physical_glyph = glyph.physical((0., 0.), 1.0);
-                let mut text_textures = self.text_textures.borrow_mut();
-                let texture = text_textures
+                let texture = self
+                    .text_textures
                     .entry(physical_glyph.cache_key)
                     .or_insert_with(|| {
                         let image = swash_cache
@@ -693,11 +844,15 @@ impl Renderer {
         }
     }
 
-    pub fn texture(&self, image: &Arc<DynamicImage>) -> Arc<Texture> {
+    pub fn texture(&mut self, image: &Arc<DynamicImage>) -> Arc<Texture> {
         self.textures
-            .borrow_mut()
             .entry(Arc::as_ptr(image))
-            .or_insert_with(|| Texture::from_image(image, self.renderer).into())
+            .or_insert_with(|| {
+                Texture::from_image(image, self.renderer)
+                    .blend_mode_blend()
+                    .scale_mode_nearest()
+                    .into()
+            })
             .clone()
     }
 
@@ -712,8 +867,10 @@ impl Renderer {
     ) {
         let size = size.unwrap_or(texture.size);
         unsafe {
-            SDL_SetTextureAlphaMod(texture.texture, alpha as u8);
-            self.render_texture_rotated(texture, flip, position, size, origin);
+            if alpha != 255 {
+                SDL_SetTextureAlphaMod(texture.texture, alpha as u8);
+            }
+            self.render_texture_flip(texture, flip, position, size, origin);
         }
     }
 
@@ -722,8 +879,58 @@ impl Renderer {
             self.renderer,
             SDL_PixelFormat::ABGR8888,
             SDL_TextureAccess::TARGET,
-            (size.x) as u32,
-            (size.y) as u32,
+            size.x as i32,
+            size.y as i32,
         )
+    }
+
+    pub fn create_streaming_texture(&self, size: Vec2) -> Texture {
+        Texture::new(
+            self.renderer,
+            SDL_PixelFormat::ARGB8888,
+            SDL_TextureAccess::STREAMING,
+            size.x as i32,
+            size.y as i32,
+        )
+    }
+
+    pub fn clear(&self) {
+        unsafe {
+            SDL_SetRenderDrawColor(self.renderer, 0, 0, 0, 0);
+            SDL_RenderClear(self.renderer);
+        }
+    }
+
+    pub fn clear_texture(&mut self, size: Vec2) {
+        self.render_texture(
+            &self.transparent,
+            Vec2::ZERO,
+            Vec2::ZERO,
+            255,
+            Some(size),
+            SDL_FLIP_NONE,
+        );
+    }
+
+    pub fn clip(&self, rect: Option<(Vec2, Vec2)>) {
+        if let Some((position, size)) = rect {
+            let position = position + self.translate;
+            unsafe {
+                SDL_RenderClipEnabled(self.renderer);
+                SDL_SetRenderClipRect(
+                    self.renderer,
+                    &SDL_Rect {
+                        x: position.x as i32,
+                        y: position.y as i32,
+                        w: size.x as i32,
+                        h: size.y as i32,
+                    },
+                );
+            }
+        } else {
+            unsafe {
+                SDL_SetRenderClipRect(self.renderer, std::ptr::null());
+            }
+        }
     }
 }
