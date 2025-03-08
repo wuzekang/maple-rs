@@ -1,5 +1,6 @@
 use crate::app::button;
 use crate::character::{Character, ZMap};
+use crate::geometry::CubicBezier;
 use crate::scene::MainScene;
 use crate::sprite::{Sprite, SpriteAnimation, SpriteDrawable};
 use crate::timer::Repeat;
@@ -26,7 +27,6 @@ use ui::{dynamic, fragment, view, Drawable, Element, IntoElement, Renderer, Text
 use ui::{text, View};
 use ui::{use_resource, Interactive};
 use ui::{Bounds, Image};
-use crate::geometry::CubicBezier;
 
 impl IntoDrawable for wz::Node {
     fn into_drawable(self) -> Box<dyn Drawable> {
@@ -324,7 +324,21 @@ pub fn title_view(on_login: impl Fn() + 'static) -> impl IntoElement {
     let check_image: Vec<Arc<::image::DynamicImage>> =
         title.at_path("check").unwrap().try_into().unwrap();
 
-    view((
+    let position = [(562, 2), (561, 4), (565, 5), (558, 4), (552, 4), (555, 3)];
+
+    let effect = Vec::<SpriteAnimation>::try_from(title.get("effect")).unwrap();
+    let effect = view(
+        effect
+            .into_iter()
+            .enumerate()
+            .map(|(i, item)| {
+                Image::new(item).style(move |s| s.absolute().left(position[i].0).top(position[i].1))
+            })
+            .collect::<Vec<_>>(),
+    )
+    .style(|s| s.pointer_events_none().absolute().left(0).top(0));
+
+    let board = view((
         view((
             TextInput::new().style(|s| s.height(23)),
             TextInput::new().style(|s| s.height(23)),
@@ -376,7 +390,9 @@ pub fn title_view(on_login: impl Fn() + 'static) -> impl IntoElement {
                 .gap_column(8)
         }),
     ))
-    .style(move |s| s.absolute().left(396).top(223).width(288).height(165))
+    .style(move |s| s.absolute().left(396).top(223).width(288).height(165));
+
+    fragment((board, effect))
 }
 
 pub fn select_character_view() -> impl IntoElement {
@@ -805,8 +821,16 @@ pub fn create_normal() -> impl IntoElement {
                 Image::new(node.get("charName"))
                     .style(|s| s.absolute().left(481).top(95).width(201).height(224))
                     .children((
-                        TextInput::new()
-                            .style(|s| s.absolute().left(29).top(104).width(147).height(23)),
+                        TextInput::new().style(|s| {
+                            s.absolute()
+                                .left(29)
+                                .top(104)
+                                .width(147)
+                                .height(23)
+                                .font_size(13.0)
+                                .line_height(15.0)
+                                .color(Color::WHITE)
+                        }),
                         button(node.get("BtYes"))
                             .style(|s| s.absolute().left(27).bottom(5))
                             .on_click(move |_| {
@@ -971,11 +995,11 @@ pub fn login_scene(on_enter: impl Fn() + 'static) -> View {
         // select race
         fragment(select_race_view()),
         // knight
-        fragment(title_view(move || step.update(|step| *step += 1))),
+        fragment(create_normal()),
         // adventure
         fragment(create_normal()),
         // aran
-        fragment(title_view(move || step.update(|step| *step += 1))),
+        fragment(create_normal()),
     ];
 
     let len = steps.len();
@@ -983,9 +1007,8 @@ pub fn login_scene(on_enter: impl Fn() + 'static) -> View {
     let compute_scroll_top = move || (len - step.get() - 1) as f32 * size.y;
     let scroll_top = create_rw_signal(compute_scroll_top());
 
-
     create_effect(move |_| {
-        let easing = CubicBezier::new(0.17,0.0,0.26,1.09);
+        let easing = CubicBezier::new(0.17, 0.0, 0.26, 1.09);
         let from = scroll_top.get_untracked();
         let to = compute_scroll_top();
         let duration = 600.0;

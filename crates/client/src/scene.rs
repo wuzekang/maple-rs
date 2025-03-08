@@ -211,7 +211,7 @@ impl Element for MainScene {
 
         for layer in &mut map.layers {
             for item in &mut layer.objects {
-                item.timer.tick(delta);
+                item.update(delta);
             }
         }
 

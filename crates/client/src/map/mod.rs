@@ -1,7 +1,7 @@
 use crate::map;
 use crate::npc::Npc;
 use crate::sprite::{Sprite, SpriteAnimation};
-use crate::timer::Timer;
+use crate::timer::{Repeat, Timer};
 use crate::wz::Node;
 use glam::{vec2, Vec2};
 use std::collections::HashMap;
@@ -88,6 +88,15 @@ pub struct MapObject {
     pub sprites: Vec<Sprite>,
     pub position: Vec2,
     pub z: i32,
+}
+
+impl MapObject {
+    pub fn update(&mut self, delta: f32) {
+        self.timer.tick(delta);
+        let sprite = &mut self.sprites[self.timer.index];
+        let p = self.timer.progress();
+        sprite.alpha = (((1.0 - p) * sprite.a0 as f32 + p * sprite.a1 as f32) as i32);
+    }
 }
 
 pub enum MapItem {
@@ -287,6 +296,7 @@ impl Map {
                     let y: i32 = item.get("y").try_into()?;
                     let z: i32 = item.get("z").try_into()?;
 
+
                     let path = format!(
                         "Map/Obj/{}.img/{}/{}/{}",
                         String::try_from(item.get("oS"))?,
@@ -295,13 +305,25 @@ impl Map {
                         String::try_from(item.get("l2"))?
                     );
 
-                    let sprites: Vec<Sprite> = root.at_path(&path).unwrap().try_into().unwrap();
+                    let node = root.at_path(&path).unwrap();
+                    let repeat = node
+                        .try_get("repeat")
+                        .map(i32::try_from)
+                        .transpose()?
+                        .map(|i| i != -1)
+                        .unwrap_or(true);
+
+                    let sprites: Vec<Sprite> = node.try_into().unwrap();
+                    let mut timer = Timer::new(sprites.iter().map(|item| item.delay as f32).collect());
+                    if !repeat {
+                        timer.repeat = Repeat::Finite(1)
+                    }
                     objects.push(MapObject {
                         id,
                         flip,
                         position: vec2(x as f32, y as f32),
-                        z: z,
-                        timer: Timer::new(sprites.iter().map(|item| item.delay as f32).collect()),
+                        z,
+                        timer,
                         sprites,
                     });
                 }

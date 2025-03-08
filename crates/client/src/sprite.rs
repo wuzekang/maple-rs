@@ -3,6 +3,7 @@ use crate::wz::Node;
 use glam::{vec2, Vec2};
 use image::DynamicImage;
 use sdl3_sys::surface::SDL_FlipMode;
+use std::fmt::{Debug, Pointer};
 use std::sync::Arc;
 use ui::{Bounds, Drawable, Renderer, Texture};
 
@@ -70,9 +71,22 @@ pub struct Sprite {
     pub delay: i32,
 }
 
+impl Debug for Sprite {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Sprite")
+            .field("path", &self.path)
+            .field("size", &self.size)
+            .field("a0", &self.a0)
+            .field("a1", &self.a1)
+            .finish()
+    }
+}
+
 impl TryFrom<Node> for Sprite {
     fn try_from(node: Node) -> Result<Self, ()> {
         let image: Arc<DynamicImage> = node.clone().try_into()?;
+        let a0 = node.try_get("a0").map(TryInto::try_into).transpose()?;
+        let a1 = node.try_get("a1").map(TryInto::try_into).transpose()?;
         Ok(Self {
             path: node.path(),
             origin: node.get("origin").try_into()?,
@@ -81,14 +95,8 @@ impl TryFrom<Node> for Sprite {
                 .try_get("delay")
                 .map(TryInto::try_into)
                 .unwrap_or(Ok(100))?,
-            a0: node
-                .try_get("a0")
-                .map(TryInto::try_into)
-                .unwrap_or(Ok(255))?,
-            a1: node
-                .try_get("a1")
-                .map(TryInto::try_into)
-                .unwrap_or(Ok(255))?,
+            a0: a0.or(a1).unwrap_or(255),
+            a1: a1.or(a0).unwrap_or(255),
             alpha: 255.into(),
             size: vec2(image.width() as f32, image.height() as f32),
             image,
@@ -225,7 +233,7 @@ impl Drawable for ASpriteAnimation {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SpriteAnimation {
     pub frames: Vec<Sprite>,
     pub timer: Timer,

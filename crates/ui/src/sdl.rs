@@ -244,7 +244,7 @@ pub struct ImageTexture {
     pub bounds: Bounds,
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug)]
 pub struct Bounds {
     pub position: Vec2,
     pub size: Vec2,
@@ -446,7 +446,7 @@ impl Renderer {
 
         unsafe {
             SDL_SetRenderScale(renderer, dpr, dpr);
-            SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND)
+            SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
         };
 
         let surface = Surface::new(1, 1);
@@ -867,9 +867,7 @@ impl Renderer {
     ) {
         let size = size.unwrap_or(texture.size);
         unsafe {
-            if alpha != 255 {
-                SDL_SetTextureAlphaMod(texture.texture, alpha as u8);
-            }
+            SDL_SetTextureAlphaMod(texture.ptr(), alpha as u8);
             self.render_texture_flip(texture, flip, position, size, origin);
         }
     }
