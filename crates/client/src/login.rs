@@ -8,7 +8,7 @@ use crate::{map, wz};
 use glam::{vec2, Vec2, Vec4};
 use image::DynamicImage;
 use sdl3_sys::everything::SDL_FlipMode;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -26,6 +26,7 @@ use ui::{dynamic, fragment, view, Drawable, Element, IntoElement, Renderer, Text
 use ui::{text, View};
 use ui::{use_resource, Interactive};
 use ui::{Bounds, Image};
+use crate::geometry::CubicBezier;
 
 impl IntoDrawable for wz::Node {
     fn into_drawable(self) -> Box<dyn Drawable> {
@@ -603,7 +604,6 @@ pub fn create_normal() -> impl IntoElement {
                 parts.push(format!("Weapon/0{}", value[7]));
 
                 for part in parts {
-                    dbg!(&part);
                     avatar
                         .borrow_mut()
                         .insert(base.at_path(&format!("Character/{part}.img")).unwrap())
@@ -953,7 +953,6 @@ pub fn login_scene(on_enter: impl Fn() + 'static) -> View {
     let frame: Arc<::image::DynamicImage> =
         img.at_path("Common/frame").unwrap().try_into().unwrap();
 
-    let scroll_top = create_rw_signal(0.0);
     let step = create_rw_signal(LoginStep::Title.into());
     // let step = create_rw_signal(LoginStep::CreateAdventure.into());
     let ctx = LoginContext { step };
@@ -981,9 +980,24 @@ pub fn login_scene(on_enter: impl Fn() + 'static) -> View {
 
     let len = steps.len();
     let size = vec2(800.0, 600.0);
+    let compute_scroll_top = move || (len - step.get() - 1) as f32 * size.y;
+    let scroll_top = create_rw_signal(compute_scroll_top());
+
 
     create_effect(move |_| {
-        scroll_top.set((len - step.get() - 1) as f32 * size.y);
+        let easing = CubicBezier::new(0.17,0.0,0.26,1.09);
+        let from = scroll_top.get_untracked();
+        let to = compute_scroll_top();
+        let duration = 600.0;
+        let mut elapsed = Cell::new(0.0);
+
+        use_raf(move |delta| {
+            elapsed.set(elapsed.get() + delta);
+            let x = elapsed.get().min(duration) / duration;
+            let y = easing.solve(x as f64);
+            let value = y as f32 * (to - from) + from;
+            scroll_top.set(value)
+        });
     });
 
     let scene = Rc::new(RefCell::new(MainScene::new(

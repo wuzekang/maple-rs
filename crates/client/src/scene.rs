@@ -1,7 +1,7 @@
 use crate::character::Character;
 use crate::character::ZMap;
 use crate::map;
-use crate::math;
+use crate::geometry;
 use crate::sprite::SpriteRenderer;
 use crate::wz;
 use glam::{vec2, Vec2};
@@ -402,7 +402,7 @@ fn player_move(context: &mut MainScene, delta: f32) {
         let prev = player.position;
         player.position += vec2(0.0, 200.0) * delta / 1000.0;
         for (i, fh) in map.footholds.iter() {
-            if let Some(p) = math::intersect(&fh.start, &fh.end, &prev, &player.position) {
+            if let Some(p) = geometry::intersect(&fh.start, &fh.end, &prev, &player.position) {
                 player.position = p;
                 player.foothold = *i;
                 player.avatar.set_action("stand1");
