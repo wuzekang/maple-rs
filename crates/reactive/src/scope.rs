@@ -46,12 +46,20 @@ impl Scope {
     /// Create a child Scope of this Scope
     pub fn create_child(&self) -> Scope {
         let child = Id::next();
+        self.add_child(child);
+        Scope(child)
+    }
+
+    pub fn add_child(&self, child: Id) {
         RUNTIME.with(|runtime| {
             let mut children = runtime.children.borrow_mut();
             let children = children.entry(self.0).or_default();
             children.insert(child);
+            let contexts = runtime.contexts.borrow().get(&self.0).cloned();
+            if let Some(contexts) = contexts {
+                runtime.contexts.borrow_mut().insert(child, contexts);
+            }
         });
-        Scope(child)
     }
 
     /// Create a new Signal under this Scope

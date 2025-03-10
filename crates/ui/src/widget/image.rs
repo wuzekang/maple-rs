@@ -2,12 +2,10 @@ use crate::animation::use_raf;
 use crate::event::Interactive;
 use crate::sdl::{Bounds, Drawable};
 use crate::style::Styleable;
-use crate::view_tuple::ViewTuple;
 use crate::{
     element::Element,
-    sdl::{ImageTexture, Renderer},
+    sdl::{DynamicImageDrawable, Renderer},
     view_id::ViewId,
-    View,
 };
 use glam::{vec2, Vec2};
 use image::DynamicImage;
@@ -20,7 +18,7 @@ use taffy::{AvailableSpace, Size};
 enum ImageState {
     None,
     Loading(DynamicImage),
-    Loaded(ImageTexture),
+    Loaded(DynamicImageDrawable),
 }
 
 pub trait IntoDrawable: Sized {
@@ -35,8 +33,7 @@ impl<T: Drawable + 'static> IntoDrawable for T {
 
 impl IntoDrawable for Arc<DynamicImage> {
     fn into_drawable(self) -> Box<dyn Drawable> {
-        let renderer: *mut sdl3_sys::render::SDL_Renderer = use_context().unwrap();
-        Box::new(ImageTexture::new(renderer, &self))
+        Box::new(DynamicImageDrawable::new(self))
     }
 }
 
@@ -65,35 +62,42 @@ impl Image {
         use_raf({
             let drawable = drawable.clone();
             move |delta| {
-                drawable.borrow_mut().as_mut().unwrap().update(delta);
+                if let Some(drawable) = drawable.borrow_mut().as_mut() {
+                    if (drawable.update(delta)) {
+                        id.request_repaint();
+                    }
+                }
             }
         });
         Self { id, drawable }
     }
 
-    pub fn children<VT: ViewTuple>(self, children: VT) -> Self {
-        View::new(self.id, children);
-        self
-    }
-
     pub fn dynamic<T, D>(f: T) -> Self
     where
-        T: Fn() -> D + 'static,
+        T: Fn() -> Option<D> + 'static,
         D: IntoDrawable,
     {
+        let id = ViewId::new();
         let drawable: Rc<RefCell<Option<Box<dyn Drawable>>>> = Default::default();
         create_effect({
             let drawable = drawable.clone();
-            move |_| *drawable.borrow_mut() = Some(f().into_drawable())
+            move |_| {
+                id.request_repaint();
+                *drawable.borrow_mut() = f().map(IntoDrawable::into_drawable)
+            }
         });
         use_raf({
             let drawable = drawable.clone();
             move |delta| {
-                drawable.borrow_mut().as_mut().unwrap().update(delta);
+                if let Some(drawable) = drawable.borrow_mut().as_mut() {
+                     if (drawable.update(delta)) {
+                         id.request_repaint();
+                     }
+                }
             }
         });
         Self {
-            id: ViewId::new(),
+            id,
             drawable,
         }
     }
@@ -104,6 +108,10 @@ impl Element for Image {
         self.id
     }
 
+    fn name(&self) -> String {
+        "Image".to_string()
+    }
+    
     fn paint(&self, cx: &mut Renderer) {
         if let Some(drawable) = self.drawable.borrow_mut().as_mut() {
             let id = self.id();

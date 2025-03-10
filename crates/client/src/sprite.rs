@@ -125,7 +125,7 @@ impl Drawable for SpriteDrawable {
         self.bounds = bounds;
     }
 
-    fn update(&mut self, delta: f32) {}
+
 }
 
 #[derive(Clone)]
@@ -228,8 +228,10 @@ impl Drawable for ASpriteAnimation {
         self.bounds = bounds;
     }
 
-    fn update(&mut self, delta: f32) {
+    fn update(&mut self, delta: f32) -> bool {
+        let index = self.timer.index;
         self.tick(delta);
+        index != self.timer.index
     }
 }
 
@@ -286,7 +288,9 @@ impl Drawable for SpriteAnimation {
         self.bounds = bounds;
     }
 
-    fn update(&mut self, delta: f32) {
+    fn update(&mut self, delta: f32) -> bool {
+        let index = self.timer.index;
         self.tick(delta);
+        index != self.timer.index
     }
 }

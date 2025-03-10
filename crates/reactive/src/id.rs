@@ -1,7 +1,7 @@
 use std::sync::atomic::AtomicU64;
 
 use crate::reference::Reference;
-use crate::{effect::observer_clean_up, runtime::RUNTIME, signal::Signal};
+use crate::{effect::observer_clean_up, runtime::RUNTIME, signal::Signal, Scope};
 
 /// An internal id which can reference a Signal/Effect/Scope.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Hash)]
@@ -32,7 +32,7 @@ impl Id {
         RUNTIME.with(|runtime| runtime.references.borrow_mut().insert(*self, reference));
     }
 
-    pub(crate) fn add_cleanup(&self, f: impl Fn() + 'static) {
+    pub(crate) fn add_cleanup(&self, f: impl FnOnce() + 'static) {
         RUNTIME.with(|runtime| {
             runtime
                 .cleanups
@@ -45,22 +45,18 @@ impl Id {
 
     /// Make this Id a child of the current Scope
     pub(crate) fn set_scope(&self) {
-        RUNTIME.with(|runtime| {
-            let scope = runtime.current_scope.borrow();
-            let mut children = runtime.children.borrow_mut();
-            let children = children.entry(*scope).or_default();
-            children.insert(*self);
-        });
+        Scope::current().add_child(*self);
     }
 
     /// Dispose the relevant resources that's linking to this Id, and the all the children
     /// and grandchildren.
     pub(crate) fn dispose(&self) {
-        if let Ok((children, signal, cleanup, _)) = RUNTIME.try_with(|runtime| {
+        if let Ok((children, signal, cleanup, _, _)) = RUNTIME.try_with(|runtime| {
             (
                 runtime.children.borrow_mut().remove(self),
                 runtime.signals.borrow_mut().remove(self),
                 runtime.cleanups.borrow_mut().remove(self),
+                runtime.contexts.borrow_mut().remove(self),
                 runtime.references.borrow_mut().remove(self),
             )
         }) {

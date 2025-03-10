@@ -1,5 +1,5 @@
 use crate::resource::Resource;
-use crate::{element::Element, view_state::ViewState};
+use crate::{element::Element, view_state::ViewState, ViewId};
 use cosmic_text::{fontdb::Source, FontSystem, SwashCache};
 use slotmap::{DefaultKey, SecondaryMap, SlotMap};
 use std::collections::HashMap;
@@ -21,6 +21,7 @@ pub struct Runtime {
     pub sender: Sender<Resource>,
     pub receiver: Receiver<Resource>,
     pub resources: RefCell<SlotMap<DefaultKey, Rc<dyn Fn(Resource)>>>,
+    pub mutation_observers: RefCell<SlotMap<DefaultKey, (ViewId, Rc<dyn Fn()>)>>,
 }
 
 impl Default for Runtime {
@@ -38,6 +39,7 @@ impl Default for Runtime {
             sender,
             receiver,
             resources: Default::default(),
+            mutation_observers: Default::default(),
         }
     }
 }

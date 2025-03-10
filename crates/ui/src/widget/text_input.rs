@@ -10,6 +10,7 @@ use peniko::Color;
 use reactive::{create_ref, use_context, Ref, SignalUpdate};
 use sdl3_sys::everything::*;
 use std::fmt::Display;
+use log::trace;
 use taffy::{AlignItems, AvailableSpace, JustifyContent, Point, Size};
 
 pub struct OffsetEditor {
@@ -157,6 +158,10 @@ impl Element for TextView {
         self.id
     }
 
+    fn name(&self) -> String {
+        "TextView".to_string()
+    }
+
     fn paint(&self, ctx: &mut Renderer) {
         let id = self.id();
         let state = id.state();
@@ -166,11 +171,7 @@ impl Element for TextView {
         let size = layout.size;
 
         if style.background != Color::TRANSPARENT {
-            ctx.fill_rect(
-                style.background,
-                Vec2::ZERO,
-                vec2(size.width, size.height),
-            );
+            ctx.fill_rect(style.background, Vec2::ZERO, vec2(size.width, size.height));
         }
 
         let dpr = 2.0f32;
@@ -182,7 +183,7 @@ impl Element for TextView {
                 fill_text(
                     ctx,
                     buffer,
-                    self.cache,
+                    // self.cache,
                     style.clone(),
                     Vec2::ZERO,
                     vec2(size.width, size.height),
@@ -192,14 +193,20 @@ impl Element for TextView {
             }) / dpr;
 
             if self.focused.with(|v| *v) {
-                ctx.fill_selection(Color::BLUE.multiply_alpha(0.5), Vec2::ZERO, vec2(size.width, size.height), editor, dpr);
+                ctx.fill_selection(
+                    Color::BLUE.multiply_alpha(0.5),
+                    Vec2::ZERO,
+                    vec2(size.width, size.height),
+                    editor,
+                    dpr,
+                );
                 if let Some((x, y)) = editor.editor.cursor_position() {
                     let x = x as f32 / dpr;
                     let y = y as f32 / dpr;
                     let p = Point {
-                            x: offset.x / dpr,
-                            y: offset.y / dpr,
-                        };
+                        x: offset.x / dpr,
+                        y: offset.y / dpr,
+                    };
                     ctx.set_color(style.color);
                     ctx.line(vec2(p.x + x, p.y + y), vec2(p.x + x, p.y + y + line_height))
                 }
@@ -231,7 +238,7 @@ impl TextInput {
         let focused = create_ref(false);
         let text_view = TextView::new(focused);
 
-        let element = view(
+        let element = view().tab_index(0).children(
             (text_view.style(|s| {
                 s.font_size(12.0)
                     .line_height(12.0)
@@ -241,7 +248,7 @@ impl TextInput {
             })),
         );
 
-        element
+        let element = element
             .on_click(|_| {})
             .on_focus(move |_| unsafe {
                 focused.with_mut(|f| *f = true);
@@ -292,6 +299,7 @@ impl TextInput {
                     .padding_right(4)
             });
 
+
         Self { id: element.id() }
     }
 }
@@ -299,6 +307,10 @@ impl TextInput {
 impl Element for TextInput {
     fn id(&self) -> ViewId {
         self.id
+    }
+
+    fn name(&self) -> String {
+        "TextInput".to_string()
     }
 }
 

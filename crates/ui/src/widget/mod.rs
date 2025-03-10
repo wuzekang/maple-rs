@@ -5,3 +5,5 @@ pub mod text_input;
 pub mod text;
 pub mod view;
 pub mod debug;
+pub mod focus_trap;
+pub mod scroll_view;

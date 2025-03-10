@@ -14,6 +14,8 @@ pub mod view_state;
 pub mod view_tuple;
 pub mod widget;
 pub mod input;
+pub mod mutation_observer;
+pub mod geometry;
 
 pub use crate::element::{Element, IntoElement};
 pub use crate::event::Interactive;
@@ -29,5 +31,5 @@ pub use crate::widget::text::{text, Text};
 pub use crate::widget::view::{view, View};
 pub use peniko;
 pub use reactive;
-pub use sdl::ImageTexture;
+pub use sdl::DynamicImageDrawable;
 pub use taffy;

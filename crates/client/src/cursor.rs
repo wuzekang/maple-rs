@@ -2,7 +2,7 @@ use crate::sprite::SpriteAnimation;
 use crate::WzBase;
 use glam::Vec2;
 use sdl3_sys::everything::*;
-use ui::reactive::use_context;
+use ui::reactive::{use_context, Scope};
 use ui::style::{Cursor, Styleable};
 use ui::{input, Bounds, Drawable, Renderer};
 
@@ -123,12 +123,14 @@ impl Drawable for DefaultCursor {
         self.clicking_image.set_bounds(bounds);
     }
 
-    fn update(&mut self, delta: f32) {
+    fn update(&mut self, delta: f32) -> bool {
+        let clicking = self.clicking;
         self.clicking = input::mouse_button_pressed(SDL_BUTTON_LMASK);
-        if self.clicking {
-            self.clicking_image.update(delta);
+        let updated = if self.clicking {
+            self.clicking_image.update(delta)
         } else {
-            self.idle_image.update(delta);
-        }
+            self.idle_image.update(delta)
+        };
+        updated || clicking != self.clicking
     }
 }

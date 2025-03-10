@@ -255,7 +255,9 @@ impl Drawable for Character {
         Vec2::ZERO
     }
 
-    fn update(&mut self, delta: f32) {
+    fn update(&mut self, delta: f32) -> bool {
+        let index = self.timer.index;
         self.timer.tick(delta);
+        index != self.timer.index
     }
 }

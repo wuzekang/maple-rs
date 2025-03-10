@@ -5,7 +5,6 @@ use crate::style::Styleable;
 use crate::{element::Element, view_id::ViewId, view_tuple::ViewTuple};
 use reactive::{create_effect, use_context, Scope};
 
-#[derive(Debug, Clone, Copy)]
 pub struct View {
     id: ViewId,
 }
@@ -20,23 +19,39 @@ impl Element for View {
     fn id(&self) -> ViewId {
         self.id
     }
+
+    fn name(&self) -> String {
+        "View".to_string()
+    }
 }
 
 impl Interactive for View {}
 impl Styleable for View {}
 
-pub fn view<VT: ViewTuple>(children: VT) -> View {
-    View::new(ViewId::new(), children)
+pub fn view() -> View {
+    View::new()
 }
 
 impl View {
-    pub fn new<VT: ViewTuple>(id: ViewId, children: VT) -> Self {
+    pub fn new() -> Self {
+        Self { id: ViewId::new() }
+    }
+
+    pub fn children<VT: ViewTuple>(self, children: VT) -> Self {
+        let id = self.id;
         let children = children.into_vec();
-        subscribe(id, &children, use_context().unwrap());
+        let ctx: EventDispatcher = use_context().unwrap();
+        subscribe(id, &children, ctx.clone());
         create_effect(move |_| {
             id.set_children(flatten(&children));
+            id.request_repaint();
         });
-        Self { id }
+        self
+    }
+
+    pub fn composite(self) -> Self {
+        self.id.state().borrow_mut().composite = true;
+        self
     }
 }
 
@@ -88,7 +103,7 @@ fn subscribe(parent: ViewId, node: &Node, ctx: EventDispatcher) {
     match node.clone() {
         Node::Static(id) => {
             if mounted {
-                mount(id, &ctx);
+                mount(id, parent, &ctx);
             }
         }
         Node::Fragment(vec) => {
@@ -103,7 +118,7 @@ fn subscribe(parent: ViewId, node: &Node, ctx: EventDispatcher) {
                 if let Some((node, scope)) = prev {
                     let (views, scopes) = collect(&node);
                     for child in views {
-                        unmount(child, &ctx);
+                        unmount(child, parent, &ctx);
                     }
                     for scope in scopes {
                         ctx.dispose(scope);
@@ -119,24 +134,24 @@ fn subscribe(parent: ViewId, node: &Node, ctx: EventDispatcher) {
     }
 }
 
-fn mount(id: ViewId, ctx: &EventDispatcher) {
+fn mount(id: ViewId, parent: ViewId, ctx: &EventDispatcher) {
     if id.state().borrow().mounted {
         return;
     }
-    ctx.mount(id);
+    ctx.mount(id, parent);
     id.state().borrow_mut().mounted = true;
     for child in id.children() {
-        mount(child, ctx);
+        mount(child, parent, ctx);
     }
 }
 
-fn unmount(id: ViewId, ctx: &EventDispatcher) {
+fn unmount(id: ViewId, parent: ViewId, ctx: &EventDispatcher) {
     if !id.state().borrow().mounted {
         return;
     }
-    for child in id.children() {
-        unmount(child, ctx);
-    }
-    ctx.unmount(id);
+    ctx.unmount(id, parent);
     id.state().borrow_mut().mounted = false;
+    for child in id.children() {
+        unmount(child, parent, ctx);
+    }
 }

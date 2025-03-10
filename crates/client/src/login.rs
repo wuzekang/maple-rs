@@ -1,6 +1,5 @@
 use crate::app::button;
 use crate::character::{Character, ZMap};
-use crate::geometry::CubicBezier;
 use crate::scene::MainScene;
 use crate::sprite::{Sprite, SpriteAnimation, SpriteDrawable};
 use crate::timer::Repeat;
@@ -16,14 +15,16 @@ use std::time::Duration;
 use tokio::time::sleep;
 use ui::animation::use_raf;
 use ui::event::MouseEvent;
+use ui::geometry::{CubicBezier, Rect};
 use ui::peniko::Color;
 use ui::reactive::{
-    create_effect, create_ref, create_rw_signal, provide_context, use_context, RwSignal, SignalGet,
-    SignalRead, SignalUpdate, SignalWith,
+    create_effect, create_ref, create_rw_signal, provide_context, use_context, Ref, RwSignal,
+    SignalGet, SignalRead, SignalTrack, SignalUpdate, SignalWith,
 };
 use ui::style::{StyleBuilder, Styleable, TextWrap};
+use ui::widget::focus_trap::focus_trap;
 use ui::widget::image::IntoDrawable;
-use ui::{dynamic, fragment, view, Drawable, Element, IntoElement, Renderer, TextInput};
+use ui::{dynamic, fragment, view, Drawable, Element, Fragment, IntoElement, Renderer, TextInput};
 use ui::{text, View};
 use ui::{use_resource, Interactive};
 use ui::{Bounds, Image};
@@ -61,8 +62,8 @@ impl Drawable for ClipImage {
         let clip = self.clip.min(texture.size).max(Vec2::ZERO);
         ctx.render_texture_rotated(
             &texture,
-            Vec4::from((Vec2::ZERO, clip)),
-            Vec4::from((-sprite.origin, clip)),
+            Rect::from((Vec2::ZERO, clip)),
+            Rect::from((-sprite.origin, clip)),
             0.0,
             None,
             SDL_FlipMode::NONE,
@@ -81,27 +82,28 @@ pub fn notice_loading(
     let WzBase { node: base } = use_context().unwrap();
     let img = base.at_path("UI/Login.img").unwrap();
     use_resource(|| sleep(Duration::from_secs(2)), move |_| on_connected());
-    view(
-        (view((
-            Image::new(img.at_path("Notice/Loading/backgrnd").unwrap()),
-            button(img.at_path("Notice/Loading/BtCancel").unwrap())
-                .style(|s| s.absolute().right(28).top(44))
-                .on_click(move |_| on_cancel()),
-            Image::new(
-                SpriteAnimation::try_from(img.at_path("Notice/Loading/bar").unwrap()).unwrap(),
-            )
-            .style(|s| s.absolute().bottom(38).right(42)),
-        ))),
-    )
-    .style(|s| {
-        s.absolute()
-            .left(0)
-            .top(0)
-            .w_full()
-            .h_full()
-            .justify_center()
-            .items_center()
-    })
+    view()
+        .style(|s| {
+            s.absolute()
+                .left(0)
+                .top(0)
+                .w_full()
+                .h_full()
+                .justify_center()
+                .items_center()
+        })
+        .children(
+            view().children((
+                Image::new(img.at_path("Notice/Loading/backgrnd").unwrap()),
+                button(img.at_path("Notice/Loading/BtCancel").unwrap())
+                    .style(|s| s.absolute().right(28).top(44))
+                    .on_click(move |_| on_cancel()),
+                Image::new(
+                    SpriteAnimation::try_from(img.at_path("Notice/Loading/bar").unwrap()).unwrap(),
+                )
+                .style(|s| s.absolute().bottom(38).right(42)),
+            )),
+        )
 }
 
 pub fn channel_option(
@@ -118,7 +120,7 @@ pub fn channel_option(
 
     progress.borrow_mut().clip.x = i as f32 * 2.0;
 
-    view((
+    view().on_click(move |_| on_select()).children((
         Image::new(
             img.at_path(&format!("WorldSelect/channel/{i}/normal"))
                 .unwrap(),
@@ -144,7 +146,6 @@ pub fn channel_option(
             }
         }),
     ))
-    .on_click(move |_| on_select())
 }
 
 pub fn world_select_view(on_enter: impl Fn() + 'static) -> impl IntoElement {
@@ -173,124 +174,129 @@ pub fn world_select_view(on_enter: impl Fn() + 'static) -> impl IntoElement {
         })
         .collect::<Vec<_>>();
 
-    view((
-        view((
-            dynamic({
-                let img = img.clone();
-                move || {
-                    if let Some(i) = scroll_state.get() {
-                        fragment(Image::new(
-                            SpriteAnimation::try_from(
-                                img.at_path(&format!("WorldSelect/scroll/{i}")).unwrap(),
-                            )
-                            .unwrap()
-                            .with_repeat(Repeat::Finite(1)),
-                        ))
-                    } else {
-                        fragment(())
-                    }
+    view()
+        .style(|s| s.w_full().h_full())
+        .on_click(move |event| {
+            if event.current.map(|v| v == event.target).unwrap_or_default() {
+                if selected_world.get_untracked().is_some() {
+                    selected_world.set(None);
+                    scroll_state.set(Some(1));
                 }
-            }),
-            dynamic({
-                let img = img.clone();
-                move || {
-                    if let Some(world) = selected_world.get() {
-                        let title: Arc<DynamicImage> = img
-                            .at_path(&format!("WorldSelect/world/{world}"))
-                            .unwrap()
-                            .try_into()
-                            .unwrap();
-
-                        let delay = 350.0;
-                        let duration = 250.0;
-                        let mut elapsed = Rc::new(RefCell::new(0.0));
-                        let alpha = create_rw_signal(0.0);
-                        use_raf(move |delta| {
-                            *elapsed.borrow_mut() += delta;
-                            let value =
-                                (*elapsed.borrow() - delay).max(0.0).min(duration) / duration;
-                            if value != alpha.get_untracked() {
-                                alpha.set(value);
-                            }
-                        });
-
-                        let selected_channel = create_rw_signal(None);
-
-                        fragment((view((
-                            Image::new(title).style(|s| s.absolute().left(33).top(8)),
-                            view(
-                                (0..20)
-                                    .map(move |i| {
-                                        channel_option(
-                                            i,
-                                            move || {
-                                                selected_channel
-                                                    .get()
-                                                    .map(|value| value == i)
-                                                    .unwrap_or(false)
-                                            },
-                                            move || {
-                                                let current = selected_channel.get_untracked();
-                                                selected_channel.set(Some(i));
-                                                if current == Some(i) {
-                                                    loading.set(true)
-                                                }
-                                            },
-                                        )
-                                    })
-                                    .collect::<Vec<_>>(),
-                            )
-                            .style(|s| {
-                                s.absolute()
-                                    .left(35)
-                                    .top(65)
-                                    .width(374)
-                                    .height(158)
-                                    .flex_wrap()
-                                    .gap_row(2)
-                                    .gap_column(2)
-                            }),
-                            button(img.at_path("WorldSelect/BtGoworld").unwrap())
-                                .style(|s| s.absolute().right(22).bottom(2))
-                                .on_click(move |_| {
-                                    loading.set(true);
-                                }),
-                        ))
-                        .style(|s| s.absolute().left(38).top(133).width(449).height(268))
-                        .style(move |s| s.opacity(alpha.get())),))
-                    } else {
-                        fragment(())
+            }
+        })
+        .children((
+            view().style(|s| s.absolute().left(158).top(79)).children((
+                dynamic({
+                    let img = img.clone();
+                    move || {
+                        if let Some(i) = scroll_state.get() {
+                            fragment(Image::new(
+                                SpriteAnimation::try_from(
+                                    img.at_path(&format!("WorldSelect/scroll/{i}")).unwrap(),
+                                )
+                                .unwrap()
+                                .with_repeat(Repeat::Finite(1)),
+                            ))
+                        } else {
+                            fragment(())
+                        }
                     }
+                }),
+                dynamic({
+                    let img = img.clone();
+                    move || {
+                        if let Some(world) = selected_world.get() {
+                            let title: Arc<DynamicImage> = img
+                                .at_path(&format!("WorldSelect/world/{world}"))
+                                .unwrap()
+                                .try_into()
+                                .unwrap();
+
+                            let delay = 350.0;
+                            let duration = 250.0;
+                            let mut elapsed = Rc::new(RefCell::new(0.0));
+                            let alpha = create_rw_signal(0.0);
+                            use_raf(move |delta| {
+                                *elapsed.borrow_mut() += delta;
+                                let value =
+                                    (*elapsed.borrow() - delay).max(0.0).min(duration) / duration;
+                                if value != alpha.get_untracked() {
+                                    alpha.set(value);
+                                }
+                            });
+
+                            let selected_channel = create_rw_signal(None);
+
+                            fragment((view()
+                                .style(|s| s.absolute().left(38).top(133).width(449).height(268))
+                                .style(move |s| s.opacity(alpha.get()))
+                                .children((
+                                    Image::new(title).style(|s| s.absolute().left(33).top(8)),
+                                    view()
+                                        .style(|s| {
+                                            s.absolute()
+                                                .left(35)
+                                                .top(65)
+                                                .width(374)
+                                                .height(158)
+                                                .flex_wrap()
+                                                .gap_row(2)
+                                                .gap_column(2)
+                                        })
+                                        .children(
+                                            (0..20)
+                                                .map(move |i| {
+                                                    channel_option(
+                                                        i,
+                                                        move || {
+                                                            selected_channel
+                                                                .get()
+                                                                .map(|value| value == i)
+                                                                .unwrap_or(false)
+                                                        },
+                                                        move || {
+                                                            let current =
+                                                                selected_channel.get_untracked();
+                                                            selected_channel.set(Some(i));
+                                                            if current == Some(i) {
+                                                                loading.set(true)
+                                                            }
+                                                        },
+                                                    )
+                                                })
+                                                .collect::<Vec<_>>(),
+                                        ),
+                                    button(img.at_path("WorldSelect/BtGoworld").unwrap())
+                                        .style(|s| s.absolute().right(22).bottom(2))
+                                        .on_click(move |_| {
+                                            loading.set(true);
+                                        }),
+                                )),))
+                        } else {
+                            fragment(())
+                        }
+                    }
+                }),
+            )),
+            view()
+                .style(|s| s.absolute().left(151).top(104).gap_row(1))
+                .children(worlds),
+            dynamic(move || {
+                if loading.get() {
+                    fragment(notice_loading(
+                        move || {
+                            loading.set(false);
+                        },
+                        move || {
+                            loading.set(false);
+                            on_enter.with(|f| f());
+                        },
+                    ))
+                } else {
+                    fragment(())
                 }
             }),
         ))
-        .style(|s| s.absolute().left(158).top(79)),
-        view(worlds).style(|s| s.absolute().left(151).top(104).gap_row(1)),
-        dynamic(move || {
-            if loading.get() {
-                fragment(notice_loading(
-                    move || {
-                        loading.set(false);
-                    },
-                    move || {
-                        loading.set(false);
-                        on_enter.with(|f| f());
-                    },
-                ))
-            } else {
-                fragment(())
-            }
-        }),
-    ))
-    .style(|s| s.w_full().h_full())
-    .on_click(move |event| {
-        if event.current.map(|v| v == event.target).unwrap_or_default() {
-            if selected_world.get_untracked().is_some() {
-                selected_world.set(None);
-                scroll_state.set(Some(1));
-            }
-        }
-    })
 }
 
 pub fn world_select_sidebar(
@@ -302,17 +308,18 @@ pub fn world_select_sidebar(
     let step_1: Arc<::image::DynamicImage> =
         img.at_path("Common/step/1").unwrap().try_into().unwrap();
     fragment(
-        view((
-            Image::new(step_1).style(|s| s.absolute().left(0).top(33)),
-            button(img.at_path("WorldSelect/BtViewChoice").unwrap())
-                .style(|s| s.absolute().left(0).top(125)),
-            button(img.at_path("ViewAllChar/BtVAC").unwrap())
-                .style(|s| s.absolute().left(0).top(375)),
-            button(img.at_path("Common/BtStart").unwrap())
-                .style(|s| s.absolute().left(0).top(425))
-                .on_click(on_back),
-        ))
-        .style(|s| s.absolute().left(0).top(0).width(0).height(0)),
+        view()
+            .style(|s| s.absolute().left(0).top(0).width(0).height(0))
+            .children((
+                Image::new(step_1).style(|s| s.absolute().left(0).top(33)),
+                button(img.at_path("WorldSelect/BtViewChoice").unwrap())
+                    .style(|s| s.absolute().left(0).top(125)),
+                button(img.at_path("ViewAllChar/BtVAC").unwrap())
+                    .style(|s| s.absolute().left(0).top(375)),
+                button(img.at_path("Common/BtStart").unwrap())
+                    .style(|s| s.absolute().left(0).top(425))
+                    .on_click(on_back),
+            )),
     )
 }
 
@@ -327,70 +334,76 @@ pub fn title_view(on_login: impl Fn() + 'static) -> impl IntoElement {
     let position = [(562, 2), (561, 4), (565, 5), (558, 4), (552, 4), (555, 3)];
 
     let effect = Vec::<SpriteAnimation>::try_from(title.get("effect")).unwrap();
-    let effect = view(
-        effect
-            .into_iter()
-            .enumerate()
-            .map(|(i, item)| {
-                Image::new(item).style(move |s| s.absolute().left(position[i].0).top(position[i].1))
-            })
-            .collect::<Vec<_>>(),
-    )
-    .style(|s| s.pointer_events_none().absolute().left(0).top(0));
+    let effect = view()
+        .style(|s| s.pointer_events_none().absolute().left(0).top(0))
+        .children(
+            effect
+                .into_iter()
+                .enumerate()
+                .map(|(i, item)| {
+                    Image::new(item)
+                        .style(move |s| s.absolute().left(position[i].0).top(position[i].1))
+                })
+                .collect::<Vec<_>>(),
+        );
 
-    let board = view((
-        view((
-            TextInput::new().style(|s| s.height(23)),
-            TextInput::new().style(|s| s.height(23)),
-        ))
-        .style(|s| {
-            s.absolute()
-                .left(45)
-                .top(12)
-                .width(147)
-                .flex_col()
-                .items_stretch()
-                .gap_column(6)
-                .color(Color::WHITE)
-        }),
-        button(title.get("BtLogin"))
-            .style(|s| s.absolute().top(0).right(0))
-            .on_click(move |e| {
-                on_login();
-            }),
-        view((
-            dynamic(move || {
-                let image = if checked.get() {
-                    Image::new(check_image[1].clone())
-                } else {
-                    Image::new(check_image[0].clone())
-                };
-                image.style(|s| s.margin_top(1))
-            }),
-            button(title.get("BtLoginIDSave"))
-                .style(|s| s.absolute().top(1).left(19))
-                .on_click(move |_| {
-                    checked.update(|value| *value = !*value);
+    let board = view()
+        .style(move |s| s.absolute().left(396).top(223).width(288).height(165))
+        .children((
+            view()
+                .style(|s| {
+                    s.absolute()
+                        .left(45)
+                        .top(12)
+                        .width(147)
+                        .flex_col()
+                        .items_stretch()
+                        .gap_column(6)
+                        .color(Color::WHITE)
+                })
+                .children((
+                    TextInput::new().style(|s| s.height(23)),
+                    TextInput::new().style(|s| s.height(23)),
+                )),
+            button(title.get("BtLogin"))
+                .style(|s| s.absolute().top(0).right(0))
+                .on_click(move |e| {
+                    on_login();
                 }),
-            button(title.get("BtLoginIDLost")).style(|s| s.absolute().top(0).left(126)),
-            button(title.get("BtPasswdLost")).style(|s| s.absolute().top(1).left(208)),
-        ))
-        .style(|s| s.absolute().left(4).top(78).width(274).height(24)),
-        view((
-            button(title.get("BtNew")).style(|s| s.margin_top(1)),
-            button(title.get("BtHomePage")),
-            button(title.get("BtQuit")),
-        ))
-        .style(|s| {
-            s.absolute()
-                .width(284)
-                .height(40)
-                .left(0)
-                .top(125)
-                .gap_column(8)
-        }),
-    ))
-    .style(move |s| s.absolute().left(396).top(223).width(288).height(165));
+            view()
+                .style(|s| s.absolute().left(4).top(78).width(274).height(24))
+                .children((
+                    dynamic(move || {
+                        let image = if checked.get() {
+                            Image::new(check_image[1].clone())
+                        } else {
+                            Image::new(check_image[0].clone())
+                        };
+                        image.style(|s| s.margin_top(1))
+                    }),
+                    button(title.get("BtLoginIDSave"))
+                        .style(|s| s.absolute().top(1).left(19))
+                        .on_click(move |_| {
+                            checked.update(|value| *value = !*value);
+                        }),
+                    button(title.get("BtLoginIDLost")).style(|s| s.absolute().top(0).left(126)),
+                    button(title.get("BtPasswdLost")).style(|s| s.absolute().top(1).left(208)),
+                )),
+            view()
+                .style(|s| {
+                    s.absolute()
+                        .width(284)
+                        .height(40)
+                        .left(0)
+                        .top(125)
+                        .gap_column(8)
+                })
+                .children((
+                    button(title.get("BtNew")).style(|s| s.margin_top(1)),
+                    button(title.get("BtHomePage")),
+                    button(title.get("BtQuit")),
+                )),
+        ));
 
     fragment((board, effect))
 }
@@ -400,36 +413,39 @@ pub fn select_character_view() -> impl IntoElement {
     let node = base.at_path("UI/Login.img/CharSelect").unwrap();
     let ctx: LoginContext = use_context().unwrap();
 
-    view((
+    view().style(|s| s.w_full().h_full()).children((
         fragment(
             (0..3)
                 .map(|i| {
-                    view((
-                        Image::new(
-                            SpriteAnimation::try_from(node.at_path("character/1").unwrap())
-                                .unwrap(),
-                        )
-                        .style(|s| s.absolute()),
-                        Image::new(
-                            SpriteAnimation::try_from(node.at_path("character/0").unwrap())
-                                .unwrap(),
-                        )
-                        .style(|s| s.absolute()),
-                    ))
-                    .style(move |s| s.absolute().left(252 + i * 125).top(370))
+                    view()
+                        .style(move |s| s.absolute().left(252 + i * 125).top(370))
+                        .children((
+                            Image::new(
+                                SpriteAnimation::try_from(node.at_path("character/1").unwrap())
+                                    .unwrap(),
+                            )
+                            .style(|s| s.absolute()),
+                            Image::new(
+                                SpriteAnimation::try_from(node.at_path("character/0").unwrap())
+                                    .unwrap(),
+                            )
+                            .style(|s| s.absolute()),
+                        ))
                 })
                 .collect::<Vec<_>>(),
         ),
-        view((
-            button(node.get("BtSelect")),
-            button(node.get("BtNew"))
-                .style(|s| s.margin_top(8))
-                .on_click(move |_| ctx.scroll_to(LoginStep::SelectRace)),
-            button(node.get("BtDelete")).style(|s| s.margin_top(14)),
-        ))
-        .style(|s| s.block().absolute().left(576).top(147)),
+        view()
+            .style(|s| s.block().absolute().left(576).top(147))
+            .children((
+                button(node.get("BtSelect")).on_click(move |_| {
+                    ctx.start();
+                }),
+                button(node.get("BtNew"))
+                    .style(|s| s.margin_top(8))
+                    .on_click(move |_| ctx.scroll_to(LoginStep::SelectRace)),
+                button(node.get("BtDelete")).style(|s| s.margin_top(14)),
+            )),
     ))
-    .style(|s| s.w_full().h_full())
 }
 
 pub fn select_race_view() -> impl IntoElement {
@@ -445,7 +461,7 @@ pub fn select_race_view() -> impl IntoElement {
         _ => |s: StyleBuilder| s,
     };
 
-    view((
+    view().style(|s| s.w_full().h_full()).children((
         Image::new(SpriteAnimation::try_from(node.get("textGL")).unwrap())
             .style(|s| s.absolute().left(315 + 91).top(32 + 19)),
         button(node.at_path("knight/BtKnight").unwrap())
@@ -480,15 +496,14 @@ pub fn select_race_view() -> impl IntoElement {
             }
         }),
         button(node.at_path("BtSelect").unwrap())
-            .style(|s| s.absolute().left(530 + 36).top(402 + 14))
-            .on_click(move |_| match selected.get() {
+            .style(|s| s.absolute().left(530).top(402))
+            .on_mouse_up(move |_| match selected.get() {
                 "knight" => ctx.scroll_to(LoginStep::CreateKnight),
                 "normal" => ctx.scroll_to(LoginStep::CreateAdventure),
                 "aran" => ctx.scroll_to(LoginStep::CreateAran),
                 _ => {}
             }),
     ))
-    .style(|s| s.w_full().h_full())
 }
 
 pub fn create_normal() -> impl IntoElement {
@@ -814,13 +829,14 @@ pub fn create_normal() -> impl IntoElement {
     // },
     // gender
 
-    view((
+    view().style(|s| s.w_full().h_full()).children((
         Image::new(avatar as Rc<RefCell<dyn Drawable>>).style(|s| s.absolute().left(395).top(340)),
         dynamic(move || {
             if !name_confirmed.get() {
-                Image::new(node.get("charName"))
+                view()
                     .style(|s| s.absolute().left(481).top(95).width(201).height(224))
                     .children((
+                        Image::new(node.get("charName")),
                         TextInput::new().style(|s| {
                             s.absolute()
                                 .left(29)
@@ -841,82 +857,87 @@ pub fn create_normal() -> impl IntoElement {
                             .on_click(move |_| ctx.scroll_to(LoginStep::SelectRace)),
                     ))
             } else {
-                Image::new(node.get("charSet"))
+                view()
                     .style(|s| s.absolute().left(481).top(95).width(225).height(377))
                     .children((
-                        view(
-                            (0..9)
-                                .map(|i| {
-                                    let len = options[gender.get()][i].len();
-                                    view((
-                                        Image::new(
-                                            node.at_path(&format!("avatarSel/{i}/normal")).unwrap(),
-                                        ),
-                                        view(
-                                            text({
-                                                let options = options.clone();
-                                                move || {
-                                                    let gender = gender.get();
-                                                    options[gender][i][value.get()[gender][i]]
-                                                        .1
-                                                        .to_string()
-                                                }
-                                            })
-                                            .style(|s| s.text_wrap(TextWrap::None)),
-                                        )
-                                        .style(|s| {
-                                            s.absolute()
-                                                .right(15)
-                                                .bottom(0)
-                                                .width(113)
-                                                .height(15)
-                                                .font_size(13.0)
-                                                .line_height(15.0)
-                                                .justify_center()
-                                        }),
-                                        button(node.get("BtLeft"))
-                                            .style(|s| s.absolute().left(57).bottom(0))
-                                            .on_click(move |_| {
-                                                if i == 8 {
-                                                    gender.update(|v| {
-                                                        *v = if *v == 0 { 1 } else { 0 }
-                                                    });
-                                                    return;
-                                                }
-                                                let gender = gender.get_untracked();
-                                                value.update(move |v| {
-                                                    let v = &mut v[gender][i];
-                                                    *v = if *v == 0 { len - 1 } else { *v - 1 };
+                        Image::new(node.get("charSet")),
+                        view()
+                            .style(|s| {
+                                s.absolute()
+                                    .left(11)
+                                    .top(105)
+                                    .width(200)
+                                    .height(161)
+                                    .flex_col()
+                                    .gap_column(1)
+                            })
+                            .children(
+                                (0..9)
+                                    .map(|i| {
+                                        let len = options[gender.get()][i].len();
+                                        view().children((
+                                            Image::new(
+                                                node.at_path(&format!("avatarSel/{i}/normal"))
+                                                    .unwrap(),
+                                            ),
+                                            view()
+                                                .style(|s| {
+                                                    s.absolute()
+                                                        .right(15)
+                                                        .bottom(0)
+                                                        .width(113)
+                                                        .height(15)
+                                                        .font_size(13.0)
+                                                        .line_height(15.0)
+                                                        .justify_center()
                                                 })
-                                            }),
-                                        button(node.get("BtRight"))
-                                            .style(|s| s.absolute().right(0).bottom(0))
-                                            .on_click(move |_| {
-                                                if i == 8 {
-                                                    gender.update(|v| {
-                                                        *v = if *v == 0 { 1 } else { 0 }
-                                                    });
-                                                    return;
-                                                }
-                                                let gender = gender.get_untracked();
-                                                value.update(move |v| {
-                                                    let v = &mut v[gender][i];
-                                                    *v = if *v == len - 1 { 0 } else { *v + 1 };
-                                                })
-                                            }),
-                                    ))
-                                })
-                                .collect::<Vec<_>>(),
-                        )
-                        .style(|s| {
-                            s.absolute()
-                                .left(11)
-                                .top(105)
-                                .width(200)
-                                .height(161)
-                                .flex_col()
-                                .gap_column(1)
-                        }),
+                                                .children(
+                                                    text({
+                                                        let options = options.clone();
+                                                        move || {
+                                                            let gender = gender.get();
+                                                            options[gender][i]
+                                                                [value.get()[gender][i]]
+                                                                .1
+                                                                .to_string()
+                                                        }
+                                                    })
+                                                    .style(|s| s.text_wrap(TextWrap::None)),
+                                                ),
+                                            button(node.get("BtLeft"))
+                                                .style(|s| s.absolute().left(57).bottom(0))
+                                                .on_click(move |_| {
+                                                    if i == 8 {
+                                                        gender.update(|v| {
+                                                            *v = if *v == 0 { 1 } else { 0 }
+                                                        });
+                                                        return;
+                                                    }
+                                                    let gender = gender.get_untracked();
+                                                    value.update(move |v| {
+                                                        let v = &mut v[gender][i];
+                                                        *v = if *v == 0 { len - 1 } else { *v - 1 };
+                                                    })
+                                                }),
+                                            button(node.get("BtRight"))
+                                                .style(|s| s.absolute().right(0).bottom(0))
+                                                .on_click(move |_| {
+                                                    if i == 8 {
+                                                        gender.update(|v| {
+                                                            *v = if *v == 0 { 1 } else { 0 }
+                                                        });
+                                                        return;
+                                                    }
+                                                    let gender = gender.get_untracked();
+                                                    value.update(move |v| {
+                                                        let v = &mut v[gender][i];
+                                                        *v = if *v == len - 1 { 0 } else { *v + 1 };
+                                                    })
+                                                }),
+                                        ))
+                                    })
+                                    .collect::<Vec<_>>(),
+                            ),
                         button(node.get("BtYes"))
                             .style(|s| s.absolute().left(37).bottom(5))
                             .on_click(move |_| {
@@ -931,9 +952,9 @@ pub fn create_normal() -> impl IntoElement {
             }
         }),
     ))
-    .style(|s| s.w_full().h_full())
 }
 
+#[derive(Debug, Copy, Clone)]
 enum LoginStep {
     Title,
     SelectWorld,
@@ -958,62 +979,77 @@ impl Into<usize> for LoginStep {
     }
 }
 
+impl LoginStep {
+    fn view(&self) -> Fragment {
+        let ctx: LoginContext = use_context().unwrap();
+
+        match self {
+            LoginStep::Title => fragment(title_view(move || ctx.scroll_to(LoginStep::SelectWorld))),
+            LoginStep::SelectWorld => fragment(world_select_view(move || {
+                ctx.scroll_to(LoginStep::SelectCharacter)
+            })),
+            LoginStep::SelectCharacter => fragment(select_character_view()),
+            LoginStep::SelectRace => fragment(select_race_view()),
+            LoginStep::CreateKnight => fragment(create_normal()),
+            LoginStep::CreateAdventure => fragment(create_normal()),
+            LoginStep::CreateAran => fragment(create_normal()),
+        }
+    }
+}
+
 #[derive(Copy, Clone)]
 struct LoginContext {
     step: RwSignal<usize>,
+    on_start: Ref<Box<dyn Fn()>>,
 }
 
 impl LoginContext {
     pub fn scroll_to(&self, step: LoginStep) {
         self.step.set(step.into());
     }
+
+    pub fn start(&self) {
+        self.on_start.with(|f| f());
+    }
 }
 
 pub fn login_scene(on_enter: impl Fn() + 'static) -> View {
-    let on_enter = create_ref(on_enter);
-
     let WzBase { node: base } = use_context().unwrap();
     let img = base.at_path("UI/Login.img").unwrap();
     let frame: Arc<::image::DynamicImage> =
         img.at_path("Common/frame").unwrap().try_into().unwrap();
 
     let step = create_rw_signal(LoginStep::Title.into());
-    // let step = create_rw_signal(LoginStep::CreateAdventure.into());
-    let ctx = LoginContext { step };
+
+    let ctx = LoginContext {
+        step,
+        on_start: create_ref(Box::new(on_enter)),
+    };
 
     provide_context(ctx);
 
     let steps = [
-        // title
-        fragment(title_view(move || ctx.scroll_to(LoginStep::SelectWorld))),
-        // world & channel
-        fragment(world_select_view(move || {
-            ctx.scroll_to(LoginStep::SelectCharacter)
-        })),
-        // select character
-        fragment(select_character_view()),
-        // select race
-        fragment(select_race_view()),
-        // knight
-        fragment(create_normal()),
-        // adventure
-        fragment(create_normal()),
-        // aran
-        fragment(create_normal()),
+        LoginStep::Title,
+        LoginStep::SelectWorld,
+        LoginStep::SelectCharacter,
+        LoginStep::SelectRace,
+        LoginStep::CreateKnight,
+        LoginStep::CreateAdventure,
+        LoginStep::CreateAran,
     ];
 
     let len = steps.len();
     let size = vec2(800.0, 600.0);
-    let compute_scroll_top = move || (len - step.get() - 1) as f32 * size.y;
+    let compute_scroll_top = move || (len - step.get_untracked() - 1) as f32 * size.y;
     let scroll_top = create_rw_signal(compute_scroll_top());
 
     create_effect(move |_| {
+        step.track();
         let easing = CubicBezier::new(0.17, 0.0, 0.26, 1.09);
         let from = scroll_top.get_untracked();
         let to = compute_scroll_top();
         let duration = 600.0;
         let mut elapsed = Cell::new(0.0);
-
         use_raf(move |delta| {
             elapsed.set(elapsed.get() + delta);
             let x = elapsed.get().min(duration) / duration;
@@ -1037,17 +1073,23 @@ pub fn login_scene(on_enter: impl Fn() + 'static) -> View {
         }
     });
 
-    view((
+    view().children((
         scene,
-        view(
-            steps
-                .into_iter()
-                .rev()
-                .map(move |step| view(step).style(move |s| s.width(size.x).height(size.y)))
-                .collect::<Vec<_>>(),
-        )
-        .style(|s| s.flex_col())
-        .style(move |s| s.translate_y(-scroll_top.get()).translate_x(0.0)),
+        view()
+            .style(|s| s.flex_col())
+            .style(move |s| s.translate_y(-scroll_top.get()).translate_x(0.0))
+            .children(
+                steps
+                    .into_iter()
+                    .rev()
+                    .map(move |i| {
+                        focus_trap()
+                            .active(move || step.get() == i.into())
+                            .style(move |s| s.width(size.x).height(size.y))
+                            .children(|| i.view())
+                    })
+                    .collect::<Vec<_>>(),
+            ),
         Image::new(frame).style(move |s| {
             s.pointer_events_none()
                 .absolute()

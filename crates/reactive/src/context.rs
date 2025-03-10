@@ -1,6 +1,6 @@
-use std::any::{Any, TypeId};
-
 use crate::runtime::RUNTIME;
+use std::any::{Any, TypeId};
+use std::rc::Rc;
 
 /// Try to retrieve a stored Context value in the reactive system.
 /// You can store a Context value anywhere, and retrieve it from anywhere afterwards.
@@ -8,14 +8,14 @@ use crate::runtime::RUNTIME;
 /// # Example
 /// In a parent component:
 /// ```rust
-/// # use floem_reactive::provide_context;
+/// # use reactive::provide_context;
 /// provide_context(42);
 /// provide_context(String::from("Hello world"));
 /// ```
 ///
 /// And so in a child component you can retrieve each context data by specifying the type:
 /// ```rust
-/// # use floem_reactive::use_context;
+/// # use reactive::use_context;
 /// let foo: Option<i32> = use_context();
 /// let bar: Option<String> = use_context();
 /// ```
@@ -27,8 +27,9 @@ where
     RUNTIME.with(|runtime| {
         let contexts = runtime.contexts.borrow();
         let context = contexts
-            .get(&ty)
-            .and_then(|val| val.downcast_ref::<T>())
+            .get(&runtime.current_scope.borrow())?
+            .get(&ty)?
+            .downcast_ref::<T>()
             .cloned();
         context
     })
@@ -40,14 +41,14 @@ where
 /// # Example
 /// In a parent component:
 /// ```rust
-/// # use floem_reactive::provide_context;
+/// # use reactive::provide_context;
 /// provide_context(42);
 /// provide_context(String::from("Hello world"));
 /// ```
 ///
 /// And so in a child component you can retrieve each context data by specifying the type:
 /// ```rust
-/// # use floem_reactive::use_context;
+/// # use reactive::use_context;
 /// let foo: Option<i32> = use_context();
 /// let bar: Option<String> = use_context();
 /// ```
@@ -59,6 +60,9 @@ where
 
     RUNTIME.with(|runtime| {
         let mut contexts = runtime.contexts.borrow_mut();
-        contexts.insert(id, Box::new(value) as Box<dyn Any>);
+        contexts
+            .entry(*runtime.current_scope.borrow())
+            .or_insert_with(Default::default)
+            .insert(id, Rc::new(value) as Rc<dyn Any>);
     });
 }

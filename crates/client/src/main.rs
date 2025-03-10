@@ -13,7 +13,6 @@ use wz::Node;
 mod app;
 mod character;
 mod cursor;
-mod geometry;
 mod login;
 mod map;
 mod npc;
@@ -45,7 +44,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         vec2(w as f32, h as f32)
     };
 
-    let size = vec2(800.0, 600.0);
+    let size = vec2(1600.0, 600.0);
     // let size = vec2(1024.0, 768.0);
     // let size = vec2(1366.0, 1024.0);
 
@@ -55,7 +54,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             size.x as i32,
             size.y as i32,
             // SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_BORDERLESS | SDL_WINDOW_MAXIMIZED | SDL_WINDOW_FULLSCREEN,
-            SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_BORDERLESS,
+            SDL_WINDOW_HIGH_PIXEL_DENSITY,
         )
     };
     let renderer = unsafe { SDL_CreateRenderer(window, std::ptr::null()) };

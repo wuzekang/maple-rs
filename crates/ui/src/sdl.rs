@@ -1,3 +1,4 @@
+use crate::geometry::Rect;
 use crate::OffsetEditor;
 use cosmic_text::{Edit, FontSystem, Placement, SwashCache};
 use glam::{vec2, Vec2, Vec4, Vec4Swizzles};
@@ -20,10 +21,11 @@ use sdl3_sys::{
         SDL_FlipMode, SDL_ScaleMode, SDL_Surface,
     },
 };
+use std::ops::SubAssign;
 use std::rc::Rc;
 use std::{cmp, collections::HashMap, sync::Arc};
 use taffy::prelude::length;
-use taffy::{LengthPercentage, Rect};
+use taffy::LengthPercentage;
 use unicode_segmentation::UnicodeSegmentation;
 
 pub struct Surface {
@@ -184,8 +186,8 @@ impl NineGridTexture {
         )
     }
 
-    pub fn border(&self) -> Rect<LengthPercentage> {
-        Rect {
+    pub fn border(&self) -> taffy::Rect<LengthPercentage> {
+        taffy::Rect {
             left: length(self.left_width as f32),
             right: length(self.right_width as f32),
             top: length(self.top_height as f32),
@@ -231,16 +233,121 @@ impl Drawable for NineGridTexture {
     }
 }
 
-struct TextTexture {
+struct TextLocation {
     pub placement: Placement,
-    pub texture: *mut SDL_Texture,
+    pub index: usize,
+    pub location: Vec2,
 }
 
-pub struct ImageTexture {
-    pub texture: Texture,
+struct TextTexture {
+    renderer: *mut SDL_Renderer,
+    texture: Texture,
+    line_height: f32,
+    offset: Vec2,
+}
+
+impl TextTexture {
+    pub fn new(renderer: *mut SDL_Renderer) -> Self {
+        Self {
+            renderer,
+            texture: Texture::new(
+                renderer,
+                SDL_PixelFormat::ABGR8888,
+                SDL_TextureAccess::TARGET,
+                1024,
+                1024,
+            )
+            .blend_mode_blend(),
+            line_height: 0.0,
+            offset: Vec2::ZERO,
+        }
+    }
+
+    fn allocate(&mut self, size: Vec2) -> Option<Vec2> {
+        if size.x > self.texture.size.x || size.y > self.texture.size.y {
+            return None;
+        }
+
+        if size.x + self.offset.x <= self.texture.size.x
+            && size.y.max(self.line_height) + self.offset.y <= self.texture.size.y
+        {
+            let offset = self.offset;
+            self.offset.x += size.x;
+            self.line_height = self.line_height.max(size.y);
+            return Some(offset);
+        }
+
+        self.offset.y += self.line_height;
+        self.offset.x = 0.0;
+        self.line_height = 0.0;
+        if size.y + self.offset.y < self.texture.size.y {
+            let offset = self.offset;
+            self.offset.x += size.x;
+            self.line_height = size.y;
+            return Some(offset);
+        }
+
+        None
+    }
+
+    pub fn insert(&mut self, image: cosmic_text::SwashImage) -> Option<TextLocation> {
+        let size = vec2(image.placement.width as f32, image.placement.height as f32);
+        let location = self.allocate(size);
+        if location.is_none() {
+            return None;
+        }
+        let location = location.unwrap();
+
+        let texture = unsafe {
+            SDL_CreateTexture(
+                self.renderer,
+                SDL_PixelFormat::ARGB8888,
+                SDL_TextureAccess::STATIC,
+                image.placement.width.try_into().unwrap(),
+                image.placement.height.try_into().unwrap(),
+            )
+        };
+
+        let data = image
+            .data
+            .iter()
+            .map(|v| ((*v as u32) << 24) | 0xFF_FF_FF)
+            .collect::<Vec<_>>();
+
+        unsafe {
+            SDL_UpdateTexture(
+                texture,
+                std::ptr::null(),
+                data.as_ptr() as *const core::ffi::c_void,
+                image.placement.width as i32 * 4,
+            );
+            SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_NONE);
+            SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_LINEAR);
+        }
+        let prev = unsafe { SDL_GetRenderTarget(self.renderer) };
+        unsafe { SDL_SetRenderTarget(self.renderer, self.texture.ptr()) };
+        unsafe {
+            SDL_RenderTexture(
+                self.renderer,
+                texture,
+                std::ptr::null_mut(),
+                &Rect::from((location, size)).into(),
+            );
+        };
+
+        unsafe { SDL_SetRenderTarget(self.renderer, prev) };
+
+        Some(TextLocation {
+            placement: image.placement,
+            index: 0,
+            location,
+        })
+    }
+}
+
+pub struct DynamicImageDrawable {
     pub size: Vec2,
-    pub flip: SDL_FlipMode,
-    pub alpha: u8,
+    pub image: Arc<DynamicImage>,
     pub bounds: Bounds,
 }
 
@@ -254,55 +361,30 @@ pub trait Drawable {
     fn draw(&self, ctx: &mut Renderer);
     fn size(&self) -> Vec2;
     fn set_bounds(&mut self, bounds: Bounds) {}
-    fn update(&mut self, delta: f32) {}
+    fn update(&mut self, delta: f32) -> bool {
+        false
+    }
 }
 
-impl ImageTexture {
-    pub fn new(renderer: *mut SDL_Renderer, image: &DynamicImage) -> Self {
-        let texture = Texture::new(
-            renderer,
-            SDL_PixelFormat::ABGR8888,
-            SDL_TextureAccess::STATIC,
-            image.width() as i32,
-            image.height() as i32,
-        );
-
-        unsafe {
-            let bytes = match image {
-                DynamicImage::ImageRgba8(data) => data,
-                _ => &image.clone().to_rgba8(),
-            };
-            SDL_UpdateTexture(
-                texture.ptr(),
-                std::ptr::null(),
-                bytes.as_ptr() as *const core::ffi::c_void,
-                image.width() as i32 * 4,
-            );
-            SDL_SetTextureScaleMode(texture.ptr(), SDL_ScaleMode::NEAREST);
-            // SDL_SetTextureBlendMode(texture.ptr(), SDL_BLENDMODE_BLEND);
-            // SDL_SetTextureBlendMode(texture.ptr(), SDL_BLENDMODE_NONE);
-        }
-
-        ImageTexture {
-            texture,
+impl DynamicImageDrawable {
+    pub fn new(image: Arc<DynamicImage>) -> Self {
+        DynamicImageDrawable {
             size: vec2(image.width() as f32, image.height() as f32),
-            flip: SDL_FlipMode::NONE,
-            alpha: 255,
+            image,
             bounds: Default::default(),
         }
     }
 }
 
-impl Drawable for ImageTexture {
-    fn draw(&self, painter: &mut Renderer) {
-        let origin = vec2(0.0, 0.0);
-        self.texture.set_alpha_mod(self.alpha);
-        painter.render_texture_flip(
-            &self.texture,
-            self.flip,
-            self.bounds.position,
-            self.bounds.size,
-            origin,
+impl Drawable for DynamicImageDrawable {
+    fn draw(&self, ctx: &mut Renderer) {
+        let texture = ctx.texture(&self.image);
+        ctx.render_texture_flip(
+            &texture,
+            SDL_FlipMode::NONE,
+            Vec2::ZERO,
+            self.size,
+            Vec2::ZERO,
         );
     }
 
@@ -418,15 +500,19 @@ impl Drop for Texture {
 struct RendererState {
     translate: Vec2,
     alpha: f32,
+    clip: Option<Rect>,
 }
 
 pub struct Renderer {
     dpr: f32,
     scale: f32,
     pub renderer: *mut SDL_Renderer,
-    text_textures: HashMap<cosmic_text::CacheKey, TextTexture>,
+    text_locations: HashMap<cosmic_text::CacheKey, TextLocation>,
+    text_textures: TextTexture,
     textures: HashMap<*const DynamicImage, Arc<Texture>>,
     translate: Vec2,
+    clip: Option<Rect>,
+    size: Vec2,
     pub texture_blend_mode: SDL_BlendMode,
     states: Vec<RendererState>,
     transparent: Texture,
@@ -457,9 +543,12 @@ impl Renderer {
             dpr,
             scale: dpr,
             renderer,
-            text_textures: Default::default(),
+            text_locations: HashMap::new(),
+            text_textures: TextTexture::new(renderer),
             textures: Default::default(),
             translate: Vec2::ZERO,
+            clip: None,
+            size,
             texture_blend_mode: SDL_BLENDMODE_BLEND,
             states: Default::default(),
             transparent,
@@ -468,13 +557,37 @@ impl Renderer {
     }
 
     pub fn translate(&mut self, delta: Vec2) {
+        self.clip.as_mut().map(|clip| *clip -= delta);
         self.translate += delta;
+    }
+
+    pub fn clip(&mut self, rect: &Rect) {
+        self.clip = Some(if let Some(clip) = self.clip {
+            clip.intersect_rect(rect)
+        } else {
+            *rect
+        });
+        self.set_clip();
+    }
+
+    fn set_clip(&self) {
+        unsafe {
+            SDL_SetRenderClipRect(
+                self.renderer,
+                if let Some(clip) = self.clip.as_ref() {
+                    &(*clip + self.translate).into()
+                } else {
+                    std::ptr::null()
+                },
+            );
+        }
     }
 
     pub fn save(&mut self) {
         self.states.push(RendererState {
             translate: self.translate,
             alpha: self.alpha,
+            clip: self.clip,
         });
     }
 
@@ -482,11 +595,16 @@ impl Renderer {
         if let Some(state) = self.states.pop() {
             self.translate = state.translate;
             self.alpha = state.alpha;
+            self.clip = state.clip;
+            self.set_clip();
         }
     }
 
     pub fn reset(&mut self) {
         self.translate = vec2(0.0, 0.0);
+        self.alpha = 1.0;
+        self.clip = None;
+        self.set_clip();
     }
 
     pub fn render_texture_flip(
@@ -499,8 +617,8 @@ impl Renderer {
     ) {
         self.render_texture_rotated(
             texture,
-            Vec4::from((Vec2::ZERO, texture.size)),
-            Vec4::from((
+            Rect::from((Vec2::ZERO, texture.size)),
+            Rect::from((
                 vec2(
                     if flip == SDL_FlipMode::HORIZONTAL {
                         position.x - (size.x - origin.x)
@@ -524,30 +642,27 @@ impl Renderer {
     pub fn render_texture_rotated(
         &self,
         texture: &Texture,
-        src_rect: Vec4,
-        dst_rect: Vec4,
+        src_rect: Rect,
+        dst_rect: Rect,
         angle: f64,
         center: Option<Vec2>,
         flip: SDL_FlipMode,
-    )  {
-        let position = dst_rect.xy() + self.translate;
+    ) {
+        if self
+            .clip
+            .as_ref()
+            .map(|clip| !dst_rect.intersect(clip))
+            .unwrap_or(false)
+        {
+            return;
+        }
 
         unsafe {
             SDL_RenderTextureRotated(
                 self.renderer,
                 texture.ptr(),
-                &SDL_FRect {
-                    x: src_rect.x,
-                    y: src_rect.y,
-                    w: src_rect.z,
-                    h: src_rect.w,
-                },
-                &SDL_FRect {
-                    x: position.x,
-                    y: position.y,
-                    w: dst_rect.z,
-                    h: dst_rect.w,
-                },
+                &src_rect.into(),
+                &(dst_rect + self.translate).into(),
                 angle,
                 if let Some(center) = center {
                     &SDL_FPoint {
@@ -735,11 +850,16 @@ impl Renderer {
         }
     }
     pub fn with_target(&mut self, texture: &Texture, f: impl FnOnce(&mut Self)) {
-        unsafe { SDL_SetRenderTarget(self.renderer, texture.ptr()) };
+        let prev = unsafe { SDL_GetRenderTarget(self.renderer) };
+        unsafe {
+            SDL_SetRenderTarget(self.renderer, texture.ptr());
+            SDL_SetRenderScale(self.renderer, self.dpr, self.dpr);
+        };
+
         // self.texture_blend_mode = SDL_BLENDMODE_NONE;
         f(self);
         // self.texture_blend_mode = SDL_BLENDMODE_BLEND;
-        unsafe { SDL_SetRenderTarget(self.renderer, std::ptr::null_mut()) };
+        unsafe { SDL_SetRenderTarget(self.renderer, prev) };
     }
 
     pub fn scale(&self, scale: f32) -> &Self {
@@ -758,69 +878,38 @@ impl Renderer {
         font_system: &mut FontSystem,
         buffer: &cosmic_text::Buffer,
     ) {
+        let dpr = 2.0;
         let location = location + self.translate;
         for run in buffer.layout_runs() {
             // self.line(0.0, location.y + run.line_top, 1000.0, location.y + run.line_top);
             // self.line(0.0, location.y + run.line_y, 1000.0, location.y + run.line_y);
             let y = run.line_top + offset.y;
-            if y + run.line_height <= 0.0 || y >= size.y {
-                continue;
-            }
+            // if y + run.line_height <= 0.0 || y >= size.y {
+            //     continue;
+            // }
 
             for glyph in run.glyphs.iter() {
                 let physical_glyph = glyph.physical((0., 0.), 1.0);
                 let texture = self
-                    .text_textures
+                    .text_locations
                     .entry(physical_glyph.cache_key)
                     .or_insert_with(|| {
                         let image = swash_cache
                             .get_image_uncached(font_system, physical_glyph.cache_key)
                             .unwrap();
-
-                        let texture = unsafe {
-                            SDL_CreateTexture(
-                                self.renderer,
-                                SDL_PixelFormat::ARGB8888,
-                                SDL_TextureAccess::STATIC,
-                                image.placement.width.try_into().unwrap(),
-                                image.placement.height.try_into().unwrap(),
-                            )
-                        };
-
-                        let data = image
-                            .data
-                            .iter()
-                            .map(|v| ((*v as u32) << 24) | 0xFF_FF_FF)
-                            .collect::<Vec<_>>();
-
-                        unsafe {
-                            SDL_UpdateTexture(
-                                texture,
-                                std::ptr::null(),
-                                data.as_ptr() as *const core::ffi::c_void,
-                                image.placement.width as i32 * 4,
-                            );
-                            // SDL_SetTextureScaleMode(texture, SDL_ScaleMode::NEAREST);
-                            // SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
-                            SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_NONE);
-                        };
-
-                        TextTexture {
-                            placement: image.placement,
-                            texture,
-                        }
+                        self.text_textures.insert(image).unwrap()
                     });
 
                 let x = (physical_glyph.x + texture.placement.left) as f32 + offset.x;
                 let y = (run.line_y as i32 + physical_glyph.y - texture.placement.top) as f32
                     + offset.y;
 
-                if (x + texture.placement.width as f32) <= 0.0 {
-                    continue;
-                }
-                if x >= size.x {
-                    break;
-                }
+                // if (x + texture.placement.width as f32) <= 0.0 {
+                //     continue;
+                // }
+                // if x >= size.x {
+                //     break;
+                // }
 
                 let sx = (-x).max(0.0);
                 let sy = (-y).max(0.0);
@@ -832,12 +921,27 @@ impl Renderer {
                 let y = location.y + y as f32 + sy;
 
                 unsafe {
-                    SDL_SetTextureColorMod(texture.texture, color.r, color.g, color.b);
+                    SDL_SetTextureColorMod(
+                        self.text_textures.texture.ptr(),
+                        color.r,
+                        color.g,
+                        color.b,
+                    );
                     SDL_RenderTexture(
                         self.renderer,
-                        texture.texture,
-                        &SDL_FRect { x: sx, y: sy, w, h },
-                        &SDL_FRect { x, y, w, h },
+                        self.text_textures.texture.ptr(),
+                        &SDL_FRect {
+                            x: texture.location.x + sx,
+                            y: texture.location.y + sy,
+                            w,
+                            h,
+                        },
+                        &SDL_FRect {
+                            x: location.x + (x - location.x) / dpr,
+                            y: location.y + (y - location.y) / dpr,
+                            w: w / dpr,
+                            h: h / dpr,
+                        },
                     )
                 };
             }
@@ -908,27 +1012,5 @@ impl Renderer {
             Some(size),
             SDL_FLIP_NONE,
         );
-    }
-
-    pub fn clip(&self, rect: Option<(Vec2, Vec2)>) {
-        if let Some((position, size)) = rect {
-            let position = position + self.translate;
-            unsafe {
-                SDL_RenderClipEnabled(self.renderer);
-                SDL_SetRenderClipRect(
-                    self.renderer,
-                    &SDL_Rect {
-                        x: position.x as i32,
-                        y: position.y as i32,
-                        w: size.x as i32,
-                        h: size.y as i32,
-                    },
-                );
-            }
-        } else {
-            unsafe {
-                SDL_SetRenderClipRect(self.renderer, std::ptr::null());
-            }
-        }
     }
 }

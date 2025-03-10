@@ -9,6 +9,7 @@ use crate::sdl::Renderer;
 use crate::style::dimension::length;
 use crate::style::{compute_layout, Cursor, StyleComputeContext, Styleable};
 use crate::view_id::ViewId;
+use crate::widget::focus_trap::FocusTrap;
 use crate::widget::view::View;
 use crate::{fragment, input, Bounds, Drawable, Interactive};
 use glam::{vec2, Vec2};
@@ -16,7 +17,7 @@ use peniko::Color;
 use reactive::{provide_context, RwSignal, Scope, SignalGet, SignalUpdate};
 use sdl3_sys::everything::*;
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::mem;
 use std::rc::Rc;
 use taffy::{prelude::TaffyMaxContent, Point, Size};
@@ -24,10 +25,10 @@ use taffy::{prelude::TaffyMaxContent, Point, Size};
 #[derive(Default, Clone)]
 pub struct EventDispatcher {
     hovered: Rc<RefCell<HashSet<ViewId>>>,
-    focused: Rc<RefCell<Option<ViewId>>>,
+    pub focused: Rc<RefCell<Option<ViewId>>>,
     disposed: Rc<RefCell<Vec<Scope>>>,
-    mounted: Rc<RefCell<Vec<ViewId>>>,
-    unmounted: Rc<RefCell<Vec<ViewId>>>,
+    mounted: Rc<RefCell<Vec<(ViewId, ViewId)>>>,
+    unmounted: Rc<RefCell<Vec<(ViewId, ViewId)>>>,
     queue: Rc<RefCell<Vec<Event>>>,
 }
 
@@ -110,6 +111,12 @@ impl EventDispatcher {
                 let mut event = Event::Mouse(event);
                 target.dispatch_event(&mut event, true);
                 self.focus(target);
+            } else if event.r#type == MouseEventType::MouseUp {
+                let mut event = Event::Mouse(event);
+                target.dispatch_event(&mut event, true);
+            } else if event.r#type == MouseEventType::MouseWheel {
+                let mut event = Event::Mouse(event);
+                target.dispatch_event(&mut event, true);
             }
         } else if let Event::Keyboard(mut event) = event {
             let id = self.focused.borrow().unwrap_or(root);
@@ -124,12 +131,12 @@ impl EventDispatcher {
         }
     }
 
-    pub fn mount(&self, view: ViewId) {
-        self.mounted.borrow_mut().push(view);
+    pub fn mount(&self, id: ViewId, parent: ViewId) {
+        self.mounted.borrow_mut().push((id, parent));
     }
 
-    pub fn unmount(&self, view: ViewId) {
-        self.unmounted.borrow_mut().push(view);
+    pub fn unmount(&self, id: ViewId, parent: ViewId) {
+        self.unmounted.borrow_mut().push((id, parent));
     }
 
     pub fn dispose(&self, scope: Scope) {
@@ -137,7 +144,7 @@ impl EventDispatcher {
     }
 
     pub fn perform_attach(&self) {
-        for id in mem::take(&mut *self.mounted.borrow_mut()) {
+        for (id, _) in mem::take(&mut *self.mounted.borrow_mut()) {
             id.dispatch_event(
                 &mut Event::Lifecycle(LifecycleEvent {
                     r#type: LifecycleEventType::Attach,
@@ -150,7 +157,7 @@ impl EventDispatcher {
     pub fn perform_detach(&self) {
         let focused = mem::take(&mut *self.focused.borrow_mut());
         let mut focused = HashSet::<ViewId>::from_iter(focused.into_iter());
-        for id in self.unmounted.borrow().iter() {
+        for (id, _) in self.unmounted.borrow().iter() {
             self.hovered.borrow_mut().remove(&id);
             if focused.remove(id) {
                 id.dispatch_event(
@@ -166,7 +173,7 @@ impl EventDispatcher {
             let _ = self.focused.borrow_mut().insert(item);
         }
 
-        for id in self.unmounted.borrow().iter() {
+        for (id, _) in self.unmounted.borrow().iter() {
             id.dispatch_event(
                 &mut Event::Lifecycle(LifecycleEvent {
                     r#type: LifecycleEventType::Detach,
@@ -180,6 +187,7 @@ impl EventDispatcher {
         }
 
         self.unmounted.borrow_mut().clear();
+        self.disposed.borrow_mut().clear();
     }
 
     pub fn queue(&self, event: Event) {
@@ -248,7 +256,7 @@ impl Drawable for CursorElement {
         Vec2::ZERO
     }
 
-    fn update(&mut self, delta: f32) {
+    fn update(&mut self, delta: f32) -> bool {
         let position = input::mouse_position();
 
         let mut target = self.root;
@@ -289,11 +297,11 @@ impl Drawable for CursorElement {
             });
             image.update(delta);
         }
+        true
     }
 }
 
 pub struct Root {
-    view: View,
     size: RwSignal<Vec2>,
     painter: Renderer,
     renderer: *mut SDL_Renderer,
@@ -308,7 +316,7 @@ impl Root {
     pub fn new<F, E>(f: F, renderer: *mut SDL_Renderer) -> Self
     where
         F: 'static + Fn() -> E,
-        E: IntoElement,
+        E: IntoElement + 'static,
     {
         let window = unsafe { SDL_GetRenderWindow(renderer) };
         let size = RwSignal::new(unsafe {
@@ -318,7 +326,8 @@ impl Root {
             vec2(x as f32, y as f32)
         });
 
-        let id = ViewId::new();
+        let view = FocusTrap::new();
+        let id = view.id();
         id.state().borrow_mut().mounted = true;
 
         let event_manager: EventDispatcher = Default::default();
@@ -330,8 +339,9 @@ impl Root {
 
         let cursor_element = CursorElement::new(id);
 
-        let view = View::new(id, fragment(f()))
-            .style(move |s| s.width(length(size.get().x)).height(length(size.get().y)));
+        let view = view
+            .style(move |s| s.width(length(size.get().x)).height(length(size.get().y)))
+            .children(f);
 
         view.into_element();
 
@@ -339,7 +349,6 @@ impl Root {
 
         Self {
             id,
-            view,
             size,
             painter: Renderer::new(renderer, dpr, size.get_untracked()),
             renderer,
@@ -369,7 +378,7 @@ impl Root {
             }
         }
 
-        if let Ok(event) = Event::try_from((event, self.view.id())) {
+        if let Ok(event) = Event::try_from((event, self.id)) {
             self.handle_event(event)
         }
     }
@@ -380,13 +389,12 @@ impl Root {
         } else if event.is_mouse_leave().is_some() {
             self.cursor_element.cursor_visible = false;
         }
-        self.event_dispatcher.dispatch(event, self.view.id());
+        self.event_dispatcher.dispatch(event, self.id);
     }
 
-    // TODO: need to optimize performance
     pub fn compute_style(&self) {
         let mut ctx = StyleComputeContext::new();
-        self.view.id().compute_style(&mut ctx);
+        self.id.compute_style(&mut ctx);
     }
 
     pub fn compute_layout(&self) {
@@ -394,7 +402,7 @@ impl Root {
         taffy
             .borrow_mut()
             .compute_layout_with_measure(
-                self.view.id().node(),
+                self.id.node(),
                 Size::MAX_CONTENT,
                 move |known_dimensions, available_space, id, _, _| {
                     if let Size {
@@ -414,11 +422,11 @@ impl Root {
             )
             .unwrap();
 
-        compute_layout(&mut taffy.borrow_mut(), self.view.id().node(), Point::ZERO);
+        compute_layout(&mut taffy.borrow_mut(), self.id.node(), Point::ZERO);
     }
 
     pub fn paint(&mut self) {
-        self.view.id().paint(&mut self.painter);
+        self.id.paint(&mut self.painter);
         self.cursor_element.draw(&mut self.painter);
     }
 
@@ -439,7 +447,7 @@ impl Root {
             while !exited {
                 Resource::try_recv();
 
-                self.event_dispatcher.process_queue(self.view.id());
+                self.event_dispatcher.process_queue(self.id);
 
                 for event in &mut events {
                     self.dispatch_event(event);
@@ -470,7 +478,73 @@ impl Root {
                     *s.animation_frame_callbacks.borrow_mut() = vec;
                 });
 
-                self.view.id().update(delta);
+                self.id.update(delta);
+
+                if self.event_dispatcher.mounted.borrow().len() > 0
+                    || self.event_dispatcher.unmounted.borrow().len() > 0
+                {
+                    let observers = RUNTIME.with_borrow(|r| {
+                        let mut values = r
+                            .mutation_observers
+                            .borrow()
+                            .values()
+                            .cloned()
+                            .collect::<Vec<_>>();
+
+                        let observers = values
+                            .chunk_by(|a, b| a.0 == b.0)
+                            .map(|v| {
+                                (
+                                    v[0].0,
+                                    v.into_iter().map(|(_, v)| v.clone()).collect::<Vec<_>>(),
+                                )
+                            })
+                            .collect::<HashMap<_, _>>();
+
+                        observers
+                    });
+
+                    let mut nodes = HashSet::new();
+                    let mut parents = HashMap::new();
+                    let mut has_children = HashSet::new();
+                    let mut stack = VecDeque::new();
+                    let mut added = HashSet::new();
+
+                    for (id, parent) in self
+                        .event_dispatcher
+                        .mounted
+                        .borrow()
+                        .iter()
+                        .chain(self.event_dispatcher.unmounted.borrow().iter())
+                    {
+                        nodes.insert(*id);
+                        parents.insert(*id, *parent);
+                        has_children.insert(*parent);
+                    }
+
+                    for id in &nodes {
+                        if has_children.contains(id) {
+                            continue;
+                        }
+                        stack.push_back(*id);
+                    }
+
+                    while stack.len() > 0 {
+                        let id = stack.pop_back().unwrap();
+                        let parent = parents.get(&id).cloned().or_else(|| id.parent());
+                        if let Some(parent) = parent {
+                            if !added.contains(&parent) {
+                                added.insert(parent);
+                                stack.push_front(parent);
+                            }
+                        }
+                        if let Some(callbacks) = observers.get(&id) {
+                            for callback in callbacks {
+                                callback();
+                            }
+                        }
+                    }
+                }
 
                 self.event_dispatcher.perform_detach();
 
@@ -487,7 +561,6 @@ impl Root {
                 SDL_RenderPresent(renderer);
 
                 self.event_dispatcher.perform_attach();
-                // SDL_Delay(16);
             }
         }
     }

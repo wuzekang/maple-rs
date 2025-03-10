@@ -14,6 +14,8 @@ use taffy::{AvailableSpace, Size};
 pub trait Element: Any {
     fn id(&self) -> ViewId;
 
+    fn name(&self) -> String;
+
     fn update(&mut self, delta: f32) {}
 
     fn event(&mut self, event: &mut Event) {}
@@ -99,13 +101,19 @@ impl IntoElement for i32 {
     }
 }
 
-impl IntoElement for &str {
+impl IntoElement for String {
     fn into_element(self) -> Node {
-        let content = Rc::new(self.to_string());
+        let content = Rc::new(self);
         Text::new({
             let content = content.clone();
             move || content.clone()
         })
         .into_element()
+    }
+}
+
+impl IntoElement for &str {
+    fn into_element(self) -> Node {
+        self.to_string().into_element()
     }
 }

@@ -26,8 +26,8 @@ pub(crate) struct Runtime {
     pub(crate) children: RefCell<HashMap<Id, HashSet<Id>>>,
     pub(crate) signals: RefCell<HashMap<Id, Signal>>,
     pub(crate) references: RefCell<HashMap<Id, Reference>>,
-    pub(crate) cleanups: RefCell<HashMap<Id, Vec<Box<dyn Fn()>>>>,
-    pub(crate) contexts: RefCell<HashMap<TypeId, Box<dyn Any>>>,
+    pub(crate) cleanups: RefCell<HashMap<Id, Vec<Box<dyn FnOnce()>>>>,
+    pub(crate) contexts: RefCell<HashMap<Id, HashMap<TypeId, Rc<dyn Any>>>>,
     pub(crate) batching: Cell<bool>,
     pub(crate) pending_effects: RefCell<SmallVec<[Rc<dyn EffectTrait>; 10]>>,
 }

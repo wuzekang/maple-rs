@@ -1,15 +1,14 @@
 use crate::character::Character;
 use crate::character::ZMap;
 use crate::map;
-use crate::geometry;
 use crate::sprite::SpriteRenderer;
 use crate::wz;
 use glam::{vec2, Vec2};
-use sdl3_sys::everything::{SDL_GetWindowSize, SDLK_T};
-use sdl3_sys::everything::{SDL_Renderer, SDL_Scancode, SDL_Window};
+use sdl3_sys::everything::*;
 use std::sync::Arc;
 use ui::element::Node;
 use ui::event::{use_key, Event};
+use ui::geometry;
 use ui::peniko::Color;
 use ui::reactive::{create_rw_signal, use_context, RwSignal, SignalGet, SignalUpdate};
 use ui::style::dimension::length;
@@ -99,12 +98,7 @@ impl MainScene {
         let window = use_context().unwrap();
         let renderer = use_context().unwrap();
 
-        let size = unsafe {
-            let mut x = 0;
-            let mut y = 0;
-            SDL_GetWindowSize(window, &mut x, &mut y);
-            vec2(x as f32, y as f32)
-        };
+        let size = vec2(800.0, 600.0);
 
         let mut texts = vec![];
         for layer in &map.layers {
@@ -133,20 +127,21 @@ impl MainScene {
             ..Default::default()
         };
 
-        let id = view((dynamic({
-            move || {
-                if text_visible.get() {
-                    texts.clone()
-                } else {
-                    Node::Fragment(vec![])
+        let id = view()
+            .style(move |s| {
+                let camera = camera_signal.get();
+                s.absolute().w_full().h_full().left(0).top(0)
+            })
+            .children(view().composite().children((dynamic({
+                move || {
+                    if text_visible.get() {
+                        texts.clone()
+                    } else {
+                        Node::Fragment(vec![])
+                    }
                 }
-            }
-        }),))
-        .style(move |s| {
-            let camera = camera_signal.get();
-            s.absolute().w_full().h_full().left(0).top(0)
-        })
-        .id();
+            }),)))
+            .id();
 
         Self {
             id,
@@ -180,7 +175,13 @@ impl Element for MainScene {
         self.id
     }
 
+    fn name(&self) -> String {
+        "MainScene".to_string()
+    }
+
     fn update(&mut self, delta: f32) {
+        self.id.request_repaint();
+
         player_move(self, delta);
 
         {
@@ -197,13 +198,8 @@ impl Element for MainScene {
 
             let camera_position = camera.position;
 
-            let scale = if true {
-                1.0
-            } else {
-                (size.x / 800.0).max(size.y / 600.0)
-            };
             for item in &mut map.backgrounds {
-                update_back(delta, camera_position, *size, item, scale);
+                update_back(delta, camera_position, *size, item);
             }
         }
 
@@ -287,23 +283,14 @@ impl Element for MainScene {
             ..
         } = self;
 
-        let world_size = *size;
-
         let sprite_renderer = &mut SpriteRenderer::new(renderer);
         let camera_position = camera.position;
 
-        let scale = if true {
-            1.0
-        } else {
-            (size.x / 800.0).max(size.y / 600.0)
-        };
-        sprite_renderer.scale(scale);
         for item in &map.backgrounds {
             if !item.front {
-                draw_back(camera_position, *size, sprite_renderer, item, scale);
+                draw_back(camera_position, *size, sprite_renderer, item);
             }
         }
-        sprite_renderer.scale(1.0);
 
         for layer in &map.layers {
             for item in &layer.objects {
@@ -450,25 +437,19 @@ fn player_move(context: &mut MainScene, delta: f32) {
     }
 }
 
-fn update_back(
-    delta: f32,
-    camera_position: Vec2,
-    size: Vec2,
-    item: &mut map::MapBackground,
-    scale: f32,
-) {
-    let camera_position = camera_position / scale;
-    let size = size / scale;
+fn update_back(delta: f32, camera_position: Vec2, size: Vec2, item: &mut map::MapBackground) {
+    let camera_position = camera_position;
+    let size = size;
     let offset = camera_position + size / 2.0;
 
     match item.r#type {
         4 | 6 => {
-            item.offset_x += item.rx as f32 * 5.0 * delta / 1000.0 / scale;
+            item.offset_x += item.rx as f32 * 5.0 * delta / 1000.0;
             item.offset_y = item.y + offset.y * (item.ry + 100) as f32 / 100.0;
         }
         5 | 7 => {
             item.offset_x = item.x + offset.x * (item.rx + 100) as f32 / 100.0;
-            item.offset_y += item.ry as f32 * 5.0 * delta / 1000.0 / scale;
+            item.offset_y += item.ry as f32 * 5.0 * delta / 1000.0;
         }
         _ => {
             item.offset_x = item.x + offset.x * (item.rx + 100) as f32 / 100.0;
@@ -489,10 +470,8 @@ fn draw_back(
     size: Vec2,
     sprite_renderer: &mut SpriteRenderer,
     item: &map::MapBackground,
-    scale: f32,
 ) {
-    let camera_position = camera_position / scale;
-    let size = size / scale;
+    let camera_position = camera_position;
 
     let sprite = item.sprite.current_frame();
     let w = sprite.image.width() as f32;

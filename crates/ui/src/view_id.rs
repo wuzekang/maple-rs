@@ -2,35 +2,30 @@ use crate::event::Event;
 use crate::style::{compute_style_recursive, PointerEvents, StyleComputeContext};
 use crate::view_state::Layer;
 use crate::{element::Element, runtime::RUNTIME, view_state::ViewState, Renderer};
-use glam::{vec2, Vec2};
+use glam::{vec2, Vec2, Vec4};
 use reactive::on_cleanup;
 use sdl3_sys::everything::*;
-use std::cmp::PartialEq;
+use slotmap::DefaultKey;
+use std::cmp::{Ordering, PartialEq};
 use std::mem::MaybeUninit;
 use std::{cell::RefCell, rc::Rc};
-use taffy::Overflow::Hidden;
 use taffy::{LengthPercentage, NodeId, Point, TaffyTree};
-
-pub struct Rect {
-    pub x: f32,
-    pub y: f32,
-    pub width: f32,
-    pub height: f32,
-}
-
-impl Rect {
-    pub fn contains(&self, point: Vec2) -> bool {
-        let Vec2 { x, y } = point;
-        let left = self.x;
-        let top = self.y;
-        let right = self.x + self.width;
-        let bottom = self.y + self.height;
-        x >= left && x < right && y >= top && y < bottom
-    }
-}
+use crate::geometry::Rect;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ViewId(pub NodeId);
+
+impl PartialOrd for ViewId {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(DefaultKey::from(self.0).cmp(&other.0.into()))
+    }
+}
+
+impl Ord for ViewId {
+    fn cmp(&self, other: &Self) -> Ordering {
+        DefaultKey::from(self.0).cmp(&other.0.into())
+    }
+}
 
 impl ViewId {
     pub fn new() -> Self {
@@ -76,6 +71,9 @@ impl ViewId {
     }
 
     pub fn set_children(&self, elements: Vec<ViewId>) {
+        for (index, child) in elements.iter().enumerate() {
+            child.state().borrow_mut().index = index;
+        }
         let children = elements.into_iter().map(|item| item.0).collect::<Vec<_>>();
         self.taffy()
             .borrow_mut()
@@ -182,16 +180,27 @@ impl ViewId {
             },
         };
 
-        ctx.translate(vec2(location.x, location.y));
-        ctx.translate(vec2(translate.x, translate.y));
+        ctx.translate(vec2(location.x, location.y) + vec2(translate.x, translate.y));
 
-        if overflow.x == Hidden || overflow.y == Hidden {
-            ctx.clip(Some((Vec2::ZERO, size)));
+        let clip_x = overflow.x == taffy::Overflow::Hidden || overflow.x == taffy::Overflow::Clip;
+        let clip_y = overflow.y == taffy::Overflow::Hidden || overflow.y == taffy::Overflow::Clip;
+        if clip_x || clip_y {
+            ctx.clip(&crate::geometry::Rect {
+                x: if clip_x { 0.0 } else { f32::NEG_INFINITY },
+                y: if clip_y { 0.0 } else { f32::NEG_INFINITY },
+                width: if clip_x { size.x } else { f32::INFINITY },
+                height: if clip_y { size.y } else { f32::INFINITY },
+            });
         }
 
-        if opacity < 1.0 {
-            let layer = self.state().borrow().layer.clone();
-            if layer.is_none() {
+        if opacity < 1.0 || self.state().borrow().composite || self.state().borrow().layer.is_none() {
+
+
+
+
+            if self.state().borrow().repaint {
+                self.state().borrow_mut().repaint = false;
+
                 let mode = unsafe {
                     SDL_ComposeCustomBlendMode(
                         SDL_BlendFactor::ONE,
@@ -204,7 +213,7 @@ impl ViewId {
                 };
 
                 let texture = Rc::new(
-                    ctx.create_texture(size)
+                    ctx.create_texture(size*2.0)
                         .blend_mode(mode)
                         .scale_mode_nearest(),
                 );
@@ -222,67 +231,68 @@ impl ViewId {
 
                 let blend_texture =
                     Rc::new(ctx.create_streaming_texture(Vec2::ONE).blend_mode(mode));
-                self.state().borrow_mut().layer = Some(Layer {
-                    texture,
-                    blend_texture,
+
+
+                ctx.with_target(&texture.clone(), |ctx| {
+                    ctx.save();
+                    ctx.reset();
+
+                    self.element().borrow().paint(ctx);
+                    for child in self.children() {
+                        child.paint(ctx);
+                    }
+
+                    unsafe {
+                        let mut surface = MaybeUninit::uninit();
+
+                        SDL_LockTextureToSurface(
+                            blend_texture.ptr(),
+                            &SDL_Rect {
+                                x: 0,
+                                y: 0,
+                                w: 1,
+                                h: 1,
+                            },
+                            surface.as_mut_ptr(),
+                        );
+
+                        let surface = surface.assume_init();
+
+                        SDL_WriteSurfacePixel(surface, 0, 0, 0, 0, 0, (opacity * 255.0) as u8);
+
+                        SDL_UnlockTexture(blend_texture.ptr());
+
+                        SDL_DestroySurface(surface);
+                    }
+
+                    ctx.render_texture(
+                        &blend_texture,
+                        Vec2::ZERO,
+                        Vec2::ZERO,
+                        255,
+                        Some(size),
+                        SDL_FLIP_NONE,
+                    );
+
+                    ctx.restore();
+
+                    self.state().borrow_mut().layer = Some(Layer {
+                        texture,
+                        blend_texture,
+                    });
                 });
             }
 
             let Layer {
                 texture,
-                blend_texture,
+                ..
             } = self.state().borrow().layer.clone().unwrap();
 
-            ctx.with_target(&texture, |ctx| {
-                ctx.save();
-                ctx.reset();
-
-                ctx.clear_texture(size);
-                self.element().borrow().paint(ctx);
-                for child in self.children() {
-                    child.paint(ctx);
-                }
-
-                unsafe {
-                    let mut surface = MaybeUninit::uninit();
-
-                    SDL_LockTextureToSurface(
-                        blend_texture.ptr(),
-                        &SDL_Rect {
-                            x: 0,
-                            y: 0,
-                            w: 1,
-                            h: 1,
-                        },
-                        surface.as_mut_ptr(),
-                    );
-
-                    let surface = surface.assume_init();
-
-                    SDL_WriteSurfacePixel(surface, 0, 0, 0, 0, 0, (opacity * 255.0) as u8);
-
-                    SDL_UnlockTexture(blend_texture.ptr());
-
-                    SDL_DestroySurface(surface);
-                }
-
-                ctx.render_texture(
-                    &blend_texture,
-                    Vec2::ZERO,
-                    Vec2::ZERO,
-                    255,
-                    Some(size),
-                    SDL_FLIP_NONE,
-                );
-
-                ctx.restore();
-            });
-
-            ctx.render_texture(
+            ctx.render_texture_rotated(
                 &texture,
-                Vec2::ZERO,
-                Vec2::ZERO,
-                255,
+                Rect::from((Vec2::ZERO, texture.size)),
+                Rect::from((Vec2::ZERO, texture.size/2.0)),
+                0.0,
                 None,
                 SDL_FlipMode::NONE,
             );
@@ -308,5 +318,28 @@ impl ViewId {
             width: size.width,
             height: size.height,
         }
+    }
+
+    pub fn index_path(&self, root: ViewId) -> Vec<usize> {
+        let mut path = vec![];
+        let mut current = *self;
+        while (current != root) {
+            path.push(current.state().borrow().index);
+            current = current.parent().unwrap();
+        }
+        path.reverse();
+        path
+    }
+
+    pub fn request_repaint(&self) {
+        let mut current = *self;
+        while current.state().borrow().layer.is_none() {
+            current.state().borrow_mut().repaint = true;
+            if current.parent().is_none() {
+                return;
+            }
+            current = current.parent().unwrap();
+        }
+        current.state().borrow_mut().repaint = true;
     }
 }

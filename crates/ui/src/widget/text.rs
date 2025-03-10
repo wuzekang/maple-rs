@@ -8,7 +8,7 @@ use sdl3_sys::everything::SDL_FlipMode;
 use std::fmt::Display;
 use std::mem;
 use taffy::{AvailableSpace, Point, Size};
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct Text {
     id: ViewId,
     buffer: Ref<cosmic_text::Buffer>,
@@ -121,50 +121,65 @@ pub fn text_measure(
 pub fn fill_text(
     ctx: &mut Renderer,
     buffer: &cosmic_text::Buffer,
-    cache: Ref<(Option<Texture>, Option<Texture>)>,
     style: Style,
     location: Vec2,
     size: Vec2,
     offset: Vec2,
 ) {
-    cache.with_mut(|(a, b)| {
-        if let Some(texture) = b {
-            ctx.render_texture_flip(texture, SDL_FlipMode::NONE, location, size, Vec2::ZERO);
-        } else if let Some(texture) = a {
-            ctx.render_texture_flip(texture, SDL_FlipMode::NONE, location, size, Vec2::ZERO);
-        }
-
-        if a.is_none() {
-            *a = mem::take(b);
-        }
-        if b.is_none() {
-            let texture = ctx.create_texture(size * 2.0);
-            RUNTIME.with_borrow_mut(|s| {
-                ctx.with_target(&texture, |ctx| {
-                    ctx.save();
-                    ctx.reset();
-                    ctx.clear();
-                    ctx.fill_text(
-                        style.color(),
-                        Vec2::ZERO,
-                        size * 2.0,
-                        offset,
-                        &mut s.swash_cache,
-                        &mut s.font_system,
-                        buffer,
-                    );
-                    ctx.restore();
-                });
-            });
-
-            *b = Some(texture);
-        }
+    RUNTIME.with_borrow_mut(|s| {
+        ctx.fill_text(
+            style.color(),
+            location,
+            size*2.0,
+            offset,
+            &mut s.swash_cache,
+            &mut s.font_system,
+            buffer,
+        )
     });
+    return;
+    // cache.with_mut(|(a, b)| {
+    //     if let Some(texture) = b {
+    //         ctx.render_texture_flip(texture, SDL_FlipMode::NONE, location, size, Vec2::ZERO);
+    //     } else if let Some(texture) = a {
+    //         ctx.render_texture_flip(texture, SDL_FlipMode::NONE, location, size, Vec2::ZERO);
+    //     }
+    //
+    //     if a.is_none() {
+    //         *a = mem::take(b);
+    //     }
+    //     if b.is_none() {
+    //         let texture = ctx.create_texture(size * 2.0);
+    //         RUNTIME.with_borrow_mut(|s| {
+    //             ctx.with_target(&texture, |ctx| {
+    //                 ctx.save();
+    //                 ctx.reset();
+    //                 ctx.clear();
+    //                 ctx.fill_text(
+    //                     style.color(),
+    //                     Vec2::ZERO,
+    //                     size * 2.0,
+    //                     offset,
+    //                     &mut s.swash_cache,
+    //                     &mut s.font_system,
+    //                     buffer,
+    //                 );
+    //                 ctx.restore();
+    //             });
+    //         });
+    //
+    //         *b = Some(texture);
+    //     }
+    // });
 }
 
 impl Element for Text {
     fn id(&self) -> ViewId {
         self.id
+    }
+
+    fn name(&self) -> String {
+        "Text".to_string()
     }
 
     fn paint(&self, ctx: &mut Renderer) {
@@ -176,18 +191,14 @@ impl Element for Text {
         let size = layout.size;
 
         if style.background != Color::TRANSPARENT {
-            ctx.fill_rect(
-                style.background,
-                Vec2::ZERO,
-                vec2(size.width, size.height),
-            );
+            ctx.fill_rect(style.background, Vec2::ZERO, vec2(size.width, size.height));
         }
 
         self.buffer.with(|buffer| {
             fill_text(
                 ctx,
                 buffer,
-                self.cache,
+                // self.cache,
                 style,
                 Vec2::ZERO,
                 vec2(size.width, size.height),

@@ -46,7 +46,7 @@ impl<'a> Iterator for &'a mut EventIterator {
     }
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum MouseEventType {
     MouseEnter,
     MouseLeave,
@@ -72,10 +72,11 @@ impl TryFrom<SDL_EventType> for MouseEventType {
     }
 }
 
+#[derive(Debug)]
 pub struct MouseEvent {
     pub r#type: MouseEventType,
     pub motion: Vec2,
-
+    pub wheel: Vec2,
     pub target: ViewId,
     pub current: Option<ViewId>,
     pub propagation: bool,
@@ -189,11 +190,20 @@ impl TryFrom<(&SDL_Event, ViewId)> for Event {
         unsafe {
             if let Ok(r#type) = MouseEventType::try_from(event_type) {
                 Ok(Event::Mouse(MouseEvent {
-                    r#type,
                     target: id,
                     current: None,
                     propagation: true,
-                    motion: vec2(event.motion.x, event.motion.y),
+                    motion: if r#type == MouseEventType::MouseWheel {
+                        vec2(event.wheel.mouse_x, event.wheel.mouse_y)
+                    } else {
+                        vec2(event.motion.x, event.motion.y)
+                    },
+                    wheel: if r#type == MouseEventType::MouseWheel {
+                        vec2(event.wheel.x, event.wheel.y)
+                    } else {
+                        Vec2::ZERO
+                    },
+                    r#type,
                 }))
             } else if let Ok(r#type) = KeyboardEventType::try_from(event_type) {
                 Ok(Event::Keyboard(KeyboardEvent {
@@ -376,6 +386,11 @@ pub trait Interactive: Sized + Element {
         self
     }
 
+    fn tab_index(self, value: i32) -> Self {
+        self.id().state().borrow_mut().tab_index = Some(value);
+        self
+    }
+
     fn focus(&self) {
         let ctx: EventDispatcher = use_context().unwrap();
         ctx.queue(Event::Focus(FocusEvent {
@@ -441,6 +456,31 @@ pub trait Interactive: Sized + Element {
         self.on_mouse_event(MouseEventType::MouseLeave, move |event| {
             f(event);
         })
+    }
+
+    fn on_mouse_down<F>(self, f: F) -> Self
+    where
+        F: (Fn(&MouseEvent) -> ()) + 'static,
+    {
+        self.on_mouse_event(MouseEventType::MouseDown, move |event| {
+            f(event);
+        })
+    }
+
+    fn on_mouse_up<F>(self, f: F) -> Self
+    where
+        F: (Fn(&MouseEvent) -> ()) + 'static,
+    {
+        self.on_mouse_event(MouseEventType::MouseUp, move |event| {
+            f(event);
+        })
+    }
+
+    fn on_mouse_wheel<F>(self, f: F) -> Self
+    where
+        F: (Fn(&MouseEvent) -> ()) + 'static,
+    {
+        self.on_mouse_event(MouseEventType::MouseWheel, move |event| f(event))
     }
 
     fn on_focus<F>(self, f: F) -> Self

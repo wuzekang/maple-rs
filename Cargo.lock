@@ -3567,12 +3567,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
 
 [[package]]
-name = "rpkg-config"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a2d2f3481209a6b42eec2fbb49063fb4e8d35b57023401495d4fe0f85c817f0"
-
-[[package]]
 name = "rustc-demangle"
 version = "0.1.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3690,21 +3684,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "sdl3-src"
-version = "3.2.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0f784160e154c2750a9ea52906aa0d2c88afcd1b71c8960ed049f20fbc8cf0f"
-
-[[package]]
 name = "sdl3-sys"
 version = "0.4.6+SDL3-3.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13aa26235cbf336f5b273dc18a873142285529e4fef503882e05a6f986466939"
-dependencies = [
- "cmake",
- "rpkg-config",
- "sdl3-src",
-]
 
 [[package]]
 name = "self_cell"

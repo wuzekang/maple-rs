@@ -239,6 +239,8 @@ impl StyleProperty {
 pub enum TaffyStyleProperty {
     Display(Display),
     Overflow(Point<Overflow>),
+    OverflowX(Overflow),
+    OverflowY(Overflow),
     ScrollbarWidth(f32),
     Position(Position),
     Inset(Rect<LengthPercentageAuto>),
@@ -291,6 +293,8 @@ pub enum TaffyStyleProperty {
 pub enum TaffyStylePropertyKey {
     Display,
     Overflow,
+    OverflowX,
+    OverflowY,
     ScrollbarWidth,
     Position,
     Inset,
@@ -347,6 +351,12 @@ impl TaffyStyleProperty {
             }
             Self::Overflow(value) => {
                 style.overflow = value;
+            }
+            Self::OverflowX(value) => {
+                style.overflow.x = value;
+            }
+            Self::OverflowY(value) => {
+                style.overflow.y = value;
             }
             Self::ScrollbarWidth(value) => {
                 style.scrollbar_width = value;
@@ -529,6 +539,22 @@ impl StyleBuilder {
         self.taffy_style_props.push((
             TaffyStylePropertyKey::Overflow,
             TaffyStyleProperty::Overflow(value),
+        ));
+        self
+    }
+
+    pub fn overflow_x(mut self, value: Overflow) -> Self {
+        self.taffy_style_props.push((
+            TaffyStylePropertyKey::OverflowX,
+            TaffyStyleProperty::OverflowX(value),
+        ));
+        self
+    }
+
+    pub fn overflow_y(mut self, value: Overflow) -> Self {
+        self.taffy_style_props.push((
+            TaffyStylePropertyKey::OverflowY,
+            TaffyStyleProperty::OverflowY(value),
         ));
         self
     }
@@ -975,6 +1001,60 @@ impl StyleBuilder {
     }
 
     #[inline]
+    pub fn overflow_hidden(mut self) -> Self {
+        self.overflow(Point {
+            x: Overflow::Hidden,
+            y: Overflow::Hidden,
+        })
+    }
+
+    #[inline]
+    pub fn overflow_clip(mut self) -> Self {
+        self.overflow(Point {
+            x: Overflow::Clip,
+            y: Overflow::Clip,
+        })
+    }
+
+    #[inline]
+    pub fn overflow_scroll(mut self) -> Self {
+        self.overflow(Point {
+            x: Overflow::Scroll,
+            y: Overflow::Scroll,
+        })
+    }
+
+    #[inline]
+    pub fn overflow_x_hidden(mut self) -> Self {
+        self.overflow_x(Overflow::Hidden)
+    }
+
+    #[inline]
+    pub fn overflow_x_clip(mut self) -> Self {
+        self.overflow_x(Overflow::Clip)
+    }
+
+    #[inline]
+    pub fn overflow_x_scroll(mut self) -> Self {
+        self.overflow_x(Overflow::Scroll)
+    }
+
+    #[inline]
+    pub fn overflow_y_hidden(mut self) -> Self {
+        self.overflow_y(Overflow::Hidden)
+    }
+
+    #[inline]
+    pub fn overflow_y_clip(mut self) -> Self {
+        self.overflow_y(Overflow::Clip)
+    }
+
+    #[inline]
+    pub fn overflow_y_scroll(mut self) -> Self {
+        self.overflow_y(Overflow::Scroll)
+    }
+
+    #[inline]
     pub fn size_full(mut self) -> Self {
         self.w_full().h_full()
     }
@@ -1150,27 +1230,28 @@ impl Default for Cursor {
 }
 
 pub struct StyleComputeContext {
+    pub stack: Vec<(HashMap<StylePropertyKey, StyleProperty>, bool)>,
     pub style: HashMap<StylePropertyKey, StyleProperty>,
-    pub stack: Vec<HashMap<StylePropertyKey, StyleProperty>>,
     pub dirty: bool,
 }
 
 impl StyleComputeContext {
     pub fn new() -> Self {
         Self {
-            style: StyleProperty::initial(),
             stack: Vec::new(),
+            style: StyleProperty::initial(),
             dirty: false,
         }
     }
 
     pub fn push(&mut self) {
-        self.stack.push(self.style.clone());
+        self.stack.push((self.style.clone(), self.dirty));
     }
 
     pub fn pop(&mut self) {
-        if let Some(style) = self.stack.pop() {
+        if let Some((style, dirty)) = self.stack.pop() {
             self.style = style;
+            self.dirty = dirty;
         }
     }
 }
@@ -1183,30 +1264,41 @@ pub trait Styleable: Sized + Element {
         state.borrow_mut().styles.push(None);
 
         create_effect(move |_| {
-            let state = id.state();
-            let prev = mem::take(&mut state.borrow_mut().styles[index]);
-            let next = Some(f(StyleBuilder::default()));
-            let style_dirty = prev != next;
-            let inherited_style_dirty = style_dirty && {
-                let prev = prev
-                    .map(|v| v.style_props)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .collect::<HashMap<_, _>>();
-                let next = next
-                    .clone()
-                    .map(|v| v.style_props)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .collect::<HashMap<_, _>>();
-                let keys = prev.keys().chain(next.keys()).collect::<HashSet<_>>();
-                keys.into_iter()
-                    .any(|k| k.inherited() && prev.get(k) != next.get(k))
+            let style_dirty = {
+                let state = id.state();
+                let prev = mem::take(&mut state.borrow_mut().styles[index]);
+                let next = Some(f(StyleBuilder::default()));
+                let style_dirty = prev != next;
+                let inherited_style_dirty = style_dirty && {
+                    let prev = prev
+                        .map(|v| v.style_props)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .collect::<HashMap<_, _>>();
+                    let next = next
+                        .clone()
+                        .map(|v| v.style_props)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .collect::<HashMap<_, _>>();
+                    let keys = prev.keys().chain(next.keys()).collect::<HashSet<_>>();
+                    keys.into_iter()
+                        .any(|k| k.inherited() && prev.get(k) != next.get(k))
+                };
+                let mut state = state.borrow_mut();
+                state.style_dirty = style_dirty;
+                state.style_inherited_dirty = inherited_style_dirty;
+                if style_dirty {
+                    state.style_cache = None;
+                }
+                state.styles[index] = next;
+                style_dirty
             };
-            let mut state = state.borrow_mut();
-            state.style_dirty = style_dirty;
-            state.inherited_style_dirty = inherited_style_dirty;
-            state.styles[index] = next;
+            {
+                if style_dirty {
+                    id.request_repaint();
+                }
+            }
         });
         self
     }
@@ -1287,11 +1379,17 @@ pub fn compute_style_recursive(id: ViewId, ctx: &mut StyleComputeContext) {
     ctx.push();
 
     let state = id.state();
-    ctx.dirty = ctx.dirty || state.borrow().inherited_style_dirty || true;
+    ctx.dirty = ctx.dirty || state.borrow().style_inherited_dirty;
     if ctx.dirty || state.borrow().style_dirty {
         compute_style(id, ctx);
-        state.borrow_mut().style_dirty = false;
-        state.borrow_mut().inherited_style_dirty = false;
+        let mut state = state.borrow_mut();
+        state.style_dirty = false;
+        state.style_inherited_dirty = false;
+        state.style_cache = Some(ctx.style.clone());
+    } else {
+        if let Some(style) = state.borrow().style_cache.clone() {
+            ctx.style = style;
+        }
     }
 
     for child in id.children() {
