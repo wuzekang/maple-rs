@@ -3,14 +3,15 @@ use crate::{element::Element, runtime::RUNTIME, sdl::Renderer, view_id::ViewId, 
 use cosmic_text::{Attrs, Family, Metrics};
 use glam::{vec2, Vec2};
 use peniko::Color;
-use reactive::{create_effect, create_ref, Ref, SignalWith};
-use sdl3_sys::everything::SDL_FlipMode;
+use reactive::{create_effect, create_ref, use_context, Ref, SignalWith};
+use sdl3_sys::everything::{SDL_FlipMode, SDL_GetWindowPixelDensity};
 use std::fmt::Display;
 use std::mem;
 use taffy::{AvailableSpace, Point, Size};
 #[derive(Debug, Copy, Clone)]
 pub struct Text {
     id: ViewId,
+    dpr: f32,
     buffer: Ref<cosmic_text::Buffer>,
     cache: Ref<(Option<Texture>, Option<Texture>)>,
 }
@@ -19,7 +20,7 @@ impl Text {
     where
         S: Display + 'static,
     {
-        let dpr = 2.0f32;
+        let dpr = unsafe { SDL_GetWindowPixelDensity(use_context().unwrap()) };
         let id = ViewId::new();
         let buffer = create_ref({
             RUNTIME.with_borrow_mut(|s| {
@@ -50,7 +51,7 @@ impl Text {
             });
             id.taffy().borrow_mut().mark_dirty(id.0).unwrap();
         });
-        Self { id, buffer, cache }
+        Self { id, buffer, cache, dpr }
     }
 }
 
@@ -60,8 +61,9 @@ pub fn text_measure(
     known_dimensions: Size<Option<f32>>,
     available_space: Size<AvailableSpace>,
     prune: bool,
+    dpr: f32,
 ) -> Size<f32> {
-    let dpr = 2.0f32;
+
     let width_constraint = known_dimensions.width.or(match available_space.width {
         AvailableSpace::MinContent => Some(0.0),
         AvailableSpace::MaxContent => None,
@@ -244,7 +246,7 @@ impl Element for Text {
         available_space: Size<AvailableSpace>,
     ) -> Size<f32> {
         self.buffer.with_mut(|buffer| {
-            text_measure(self.id, buffer, known_dimensions, available_space, false)
+            text_measure(self.id, buffer, known_dimensions, available_space, false, self.dpr)
         })
     }
 }

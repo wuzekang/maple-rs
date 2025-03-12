@@ -504,7 +504,7 @@ struct RendererState {
 }
 
 pub struct Renderer {
-    dpr: f32,
+    pub dpr: f32,
     scale: f32,
     pub renderer: *mut SDL_Renderer,
     text_locations: HashMap<cosmic_text::CacheKey, TextLocation>,
@@ -572,14 +572,14 @@ impl Renderer {
 
     fn set_clip(&self) {
         unsafe {
-            SDL_SetRenderClipRect(
-                self.renderer,
-                if let Some(clip) = self.clip.as_ref() {
-                    &(*clip + self.translate).into()
-                } else {
-                    std::ptr::null()
-                },
-            );
+            // SDL_SetRenderClipRect(
+            //     self.renderer,
+            //     if let Some(clip) = self.clip.as_ref() {
+            //         &(*clip + self.translate).into()
+            //     } else {
+            //         std::ptr::null()
+            //     },
+            // );
         }
     }
 
@@ -856,9 +856,7 @@ impl Renderer {
             SDL_SetRenderScale(self.renderer, self.dpr, self.dpr);
         };
 
-        // self.texture_blend_mode = SDL_BLENDMODE_NONE;
         f(self);
-        // self.texture_blend_mode = SDL_BLENDMODE_BLEND;
         unsafe { SDL_SetRenderTarget(self.renderer, prev) };
     }
 
@@ -878,7 +876,7 @@ impl Renderer {
         font_system: &mut FontSystem,
         buffer: &cosmic_text::Buffer,
     ) {
-        let dpr = 2.0;
+        let dpr = self.dpr;
         let location = location + self.translate;
         for run in buffer.layout_runs() {
             // self.line(0.0, location.y + run.line_top, 1000.0, location.y + run.line_top);

@@ -7,7 +7,7 @@ edition = "2021"
 cosmic-text = {version = "0.12.1", features = ["default"]}
 glam = "0.29.2"
 image = "0.25.5"
-sdl3-sys = { version = "0.4.6", features = [] }
+sdl3-sys = { version = "0.4.6", features = ["build-from-source"] }
 slotmap = "1.0.7"
 taffy = "0.5.2"
 peniko = "0.2.0"

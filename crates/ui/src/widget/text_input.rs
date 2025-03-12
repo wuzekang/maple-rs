@@ -10,7 +10,6 @@ use peniko::Color;
 use reactive::{create_ref, use_context, Ref, SignalUpdate};
 use sdl3_sys::everything::*;
 use std::fmt::Display;
-use log::trace;
 use taffy::{AlignItems, AvailableSpace, JustifyContent, Point, Size};
 
 pub struct OffsetEditor {
@@ -77,7 +76,7 @@ impl OffsetEditor {
             (width, height)
         });
 
-        let dpr = 2.0f32;
+        let dpr = unsafe { SDL_GetWindowPixelDensity(use_context().unwrap()) };
         if let Some((x, y)) = self.editor.cursor_position() {
             let x = x as f32;
             let y = y as f32;
@@ -125,16 +124,19 @@ struct TextView {
     focused: Ref<bool>,
     editor: Ref<OffsetEditor>,
     cache: Ref<(Option<Texture>, Option<Texture>)>,
+    dpr: f32,
 }
 
 impl TextView {
     fn new(focused: Ref<bool>) -> Self {
         let id = ViewId::new();
+        let dpr = unsafe { SDL_GetWindowPixelDensity(use_context().unwrap()) };
         Self {
             id,
             focused,
             editor: create_ref(OffsetEditor::new(id)),
             cache: create_ref((None, None)),
+            dpr,
         }
     }
 
@@ -174,7 +176,7 @@ impl Element for TextView {
             ctx.fill_rect(style.background, Vec2::ZERO, vec2(size.width, size.height));
         }
 
-        let dpr = 2.0f32;
+        let dpr = self.dpr;
 
         self.editor.with_mut(|editor| {
             let offset = editor.offset;
@@ -221,7 +223,14 @@ impl Element for TextView {
     ) -> Size<f32> {
         self.editor.with_mut(|editor| {
             editor.editor.with_buffer_mut(|buffer| {
-                text_measure(self.id, buffer, known_dimensions, available_space, true)
+                text_measure(
+                    self.id,
+                    buffer,
+                    known_dimensions,
+                    available_space,
+                    true,
+                    self.dpr,
+                )
             })
         })
     }
@@ -298,7 +307,6 @@ impl TextInput {
                     .padding_left(4)
                     .padding_right(4)
             });
-
 
         Self { id: element.id() }
     }

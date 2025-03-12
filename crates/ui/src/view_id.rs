@@ -1,4 +1,5 @@
 use crate::event::Event;
+use crate::geometry::Rect;
 use crate::style::{compute_style_recursive, PointerEvents, StyleComputeContext};
 use crate::view_state::Layer;
 use crate::{element::Element, runtime::RUNTIME, view_state::ViewState, Renderer};
@@ -10,7 +11,6 @@ use std::cmp::{Ordering, PartialEq};
 use std::mem::MaybeUninit;
 use std::{cell::RefCell, rc::Rc};
 use taffy::{LengthPercentage, NodeId, Point, TaffyTree};
-use crate::geometry::Rect;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ViewId(pub NodeId);
@@ -185,7 +185,7 @@ impl ViewId {
         let clip_x = overflow.x == taffy::Overflow::Hidden || overflow.x == taffy::Overflow::Clip;
         let clip_y = overflow.y == taffy::Overflow::Hidden || overflow.y == taffy::Overflow::Clip;
         if clip_x || clip_y {
-            ctx.clip(&crate::geometry::Rect {
+            ctx.clip(&Rect {
                 x: if clip_x { 0.0 } else { f32::NEG_INFINITY },
                 y: if clip_y { 0.0 } else { f32::NEG_INFINITY },
                 width: if clip_x { size.x } else { f32::INFINITY },
@@ -193,10 +193,7 @@ impl ViewId {
             });
         }
 
-        if opacity < 1.0 || self.state().borrow().composite || self.state().borrow().layer.is_none() {
-
-
-
+        if opacity < 1.0 {
 
             if self.state().borrow().repaint {
                 self.state().borrow_mut().repaint = false;
@@ -213,7 +210,7 @@ impl ViewId {
                 };
 
                 let texture = Rc::new(
-                    ctx.create_texture(size*2.0)
+                    ctx.create_texture(size * ctx.dpr)
                         .blend_mode(mode)
                         .scale_mode_nearest(),
                 );
@@ -229,14 +226,12 @@ impl ViewId {
                     )
                 };
 
-                let blend_texture =
-                    Rc::new(ctx.create_streaming_texture(Vec2::ONE).blend_mode(mode));
-
+                let blend_texture = Rc::new(ctx.create_streaming_texture(size * ctx.dpr).blend_mode(mode));
 
                 ctx.with_target(&texture.clone(), |ctx| {
                     ctx.save();
                     ctx.reset();
-
+                    ctx.clear_texture(texture.size);
                     self.element().borrow().paint(ctx);
                     for child in self.children() {
                         child.paint(ctx);
@@ -265,13 +260,13 @@ impl ViewId {
                         SDL_DestroySurface(surface);
                     }
 
-                    ctx.render_texture(
+                    ctx.render_texture_rotated(
                         &blend_texture,
-                        Vec2::ZERO,
-                        Vec2::ZERO,
-                        255,
-                        Some(size),
-                        SDL_FLIP_NONE,
+                        Rect::from((Vec2::ZERO, Vec2::ONE)),
+                        Rect::from((Vec2::ZERO, texture.size)),
+                        0.0,
+                        None,
+                        SDL_FlipMode::NONE,
                     );
 
                     ctx.restore();
@@ -285,13 +280,13 @@ impl ViewId {
 
             let Layer {
                 texture,
-                ..
+                blend_texture,
             } = self.state().borrow().layer.clone().unwrap();
 
             ctx.render_texture_rotated(
                 &texture,
                 Rect::from((Vec2::ZERO, texture.size)),
-                Rect::from((Vec2::ZERO, texture.size/2.0)),
+                Rect::from((Vec2::ZERO, texture.size / ctx.dpr)),
                 0.0,
                 None,
                 SDL_FlipMode::NONE,

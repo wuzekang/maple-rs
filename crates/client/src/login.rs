@@ -213,7 +213,7 @@ pub fn world_select_view(on_enter: impl Fn() + 'static) -> impl IntoElement {
                                 .unwrap();
 
                             let delay = 350.0;
-                            let duration = 250.0;
+                            let duration = 9500.0;
                             let mut elapsed = Rc::new(RefCell::new(0.0));
                             let alpha = create_rw_signal(0.0);
                             use_raf(move |delta| {
@@ -229,6 +229,7 @@ pub fn world_select_view(on_enter: impl Fn() + 'static) -> impl IntoElement {
 
                             fragment((view()
                                 .style(|s| s.absolute().left(38).top(133).width(449).height(268))
+                                          .composite()
                                 .style(move |s| s.opacity(alpha.get()))
                                 .children((
                                     Image::new(title).style(|s| s.absolute().left(33).top(8)),
@@ -1019,7 +1020,7 @@ pub fn login_scene(on_enter: impl Fn() + 'static) -> View {
     let frame: Arc<::image::DynamicImage> =
         img.at_path("Common/frame").unwrap().try_into().unwrap();
 
-    let step = create_rw_signal(LoginStep::Title.into());
+    let step: RwSignal<usize> = create_rw_signal(LoginStep::Title.into());
 
     let ctx = LoginContext {
         step,
