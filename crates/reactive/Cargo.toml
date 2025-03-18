@@ -5,3 +5,6 @@ description = "A native Rust UI library with fine-grained reactivity"
 
 [dependencies]
 smallvec = "1.10.0"
+slab = "0.4.9"
+slotmap = "1.0.7"
+log = "0.4.26"

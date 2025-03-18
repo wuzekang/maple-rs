@@ -1,82 +1,52 @@
-use std::sync::atomic::AtomicU64;
-
-use crate::reference::Reference;
-use crate::{effect::observer_clean_up, runtime::RUNTIME, signal::Signal, Scope};
+use slotmap::DefaultKey;
+use crate::runtime::{Node, Runtime, RUNTIME};
+use crate::signal::Signal;
 
 /// An internal id which can reference a Signal/Effect/Scope.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Hash)]
-pub struct Id(u64);
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Hash)]
+pub struct Id(pub DefaultKey);
+
+impl Into<DefaultKey> for Id {
+    fn into(self) -> DefaultKey {
+        self.0
+    }
+}
+
+impl From<DefaultKey> for Id {
+    fn from(id: DefaultKey) -> Id {
+        Id(id)
+    }
+}
+
+// impl Into<usize> for Id {
+//     fn into(self) -> usize {
+//         self.0
+//     }
+// }
+//
+// impl From<usize> for Id {
+//     fn from(id: usize) -> Id {
+//         Id(id)
+//     }
+// }
+
 
 impl Id {
-    /// Create a new Id that's next in order
     pub(crate) fn next() -> Id {
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        Id(COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
-    }
-
-    /// Try to get the Signal that links with this Id
-    pub(crate) fn signal(&self) -> Option<Signal> {
-        RUNTIME.with(|runtime| runtime.signals.borrow().get(self).cloned())
-    }
-
-    /// Try to set the Signal to be linking with this Id
-    pub(crate) fn add_signal(&self, signal: Signal) {
-        RUNTIME.with(|runtime| runtime.signals.borrow_mut().insert(*self, signal));
-    }
-
-    pub(crate) fn reference(&self) -> Option<Reference> {
-        RUNTIME.with(|runtime| runtime.references.borrow().get(self).cloned())
-    }
-
-    pub(crate) fn add_reference(&self, reference: Reference) {
-        RUNTIME.with(|runtime| runtime.references.borrow_mut().insert(*self, reference));
-    }
-
-    pub(crate) fn add_cleanup(&self, f: impl FnOnce() + 'static) {
-        RUNTIME.with(|runtime| {
-            runtime
-                .cleanups
-                .borrow_mut()
-                .entry(*self)
-                .or_default()
-                .push(Box::new(f))
-        });
-    }
-
-    /// Make this Id a child of the current Scope
-    pub(crate) fn set_scope(&self) {
-        Scope::current().add_child(*self);
+        RUNTIME.with(|r| r.next())
     }
 
     /// Dispose the relevant resources that's linking to this Id, and the all the children
     /// and grandchildren.
     pub(crate) fn dispose(&self) {
-        if let Ok((children, signal, cleanup, _, _)) = RUNTIME.try_with(|runtime| {
-            (
-                runtime.children.borrow_mut().remove(self),
-                runtime.signals.borrow_mut().remove(self),
-                runtime.cleanups.borrow_mut().remove(self),
-                runtime.contexts.borrow_mut().remove(self),
-                runtime.references.borrow_mut().remove(self),
-            )
-        }) {
-            if let Some(children) = children {
-                for child in children {
-                    child.dispose();
-                }
-            }
+        RUNTIME.with(|r| r.remove(*self));
+    }
 
-            if let Some(signal) = signal {
-                for (_, effect) in signal.subscribers() {
-                    observer_clean_up(&effect);
-                }
-            }
-
-            if let Some(cleanup) = cleanup {
-                for callback in cleanup {
-                    callback();
-                }
-            }
-        }
+    pub(crate) fn signal(&self) -> Option<Signal> {
+        let id = *self;
+        Some(Signal {
+            value: RUNTIME.with(|r| r.nodes.borrow()[id.into()].value.clone().unwrap()),
+            id,
+        })
     }
 }

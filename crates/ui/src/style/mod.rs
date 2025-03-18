@@ -1,6 +1,8 @@
+mod compute;
 pub mod dimension;
 
 use crate::{Drawable, Element, ViewId};
+use bumpalo::Bump;
 use cosmic_text::{Align, Wrap};
 use peniko::Color;
 use reactive::create_effect;
@@ -1229,33 +1231,6 @@ impl Default for Cursor {
     }
 }
 
-pub struct StyleComputeContext {
-    pub stack: Vec<(HashMap<StylePropertyKey, StyleProperty>, bool)>,
-    pub style: HashMap<StylePropertyKey, StyleProperty>,
-    pub dirty: bool,
-}
-
-impl StyleComputeContext {
-    pub fn new() -> Self {
-        Self {
-            stack: Vec::new(),
-            style: StyleProperty::initial(),
-            dirty: false,
-        }
-    }
-
-    pub fn push(&mut self) {
-        self.stack.push((self.style.clone(), self.dirty));
-    }
-
-    pub fn pop(&mut self) {
-        if let Some((style, dirty)) = self.stack.pop() {
-            self.style = style;
-            self.dirty = dirty;
-        }
-    }
-}
-
 pub trait Styleable: Sized + Element {
     fn style<F: Fn(StyleBuilder) -> StyleBuilder + 'static>(self, f: F) -> Self {
         let id = self.id();
@@ -1269,160 +1244,35 @@ pub trait Styleable: Sized + Element {
                 let prev = mem::take(&mut state.borrow_mut().styles[index]);
                 let next = Some(f(StyleBuilder::default()));
                 let style_dirty = prev != next;
-                let inherited_style_dirty = style_dirty && {
-                    let prev = prev
-                        .map(|v| v.style_props)
-                        .unwrap_or_default()
-                        .into_iter()
-                        .collect::<HashMap<_, _>>();
-                    let next = next
-                        .clone()
-                        .map(|v| v.style_props)
-                        .unwrap_or_default()
-                        .into_iter()
-                        .collect::<HashMap<_, _>>();
-                    let keys = prev.keys().chain(next.keys()).collect::<HashSet<_>>();
-                    keys.into_iter()
-                        .any(|k| k.inherited() && prev.get(k) != next.get(k))
-                };
+                // let inherited_style_dirty = style_dirty && {
+                //     let prev = prev
+                //         .map(|v| v.style_props)
+                //         .unwrap_or_default()
+                //         .into_iter()
+                //         .collect::<HashMap<_, _>>();
+                //     let next = next
+                //         .clone()
+                //         .map(|v| v.style_props)
+                //         .unwrap_or_default()
+                //         .into_iter()
+                //         .collect::<HashMap<_, _>>();
+                //     let keys = prev.keys().chain(next.keys()).collect::<HashSet<_>>();
+                //     keys.into_iter()
+                //         .any(|k| k.inherited() && prev.get(k) != next.get(k))
+                // };
                 let mut state = state.borrow_mut();
                 state.style_dirty = style_dirty;
-                state.style_inherited_dirty = inherited_style_dirty;
-                if style_dirty {
-                    state.style_cache = None;
-                }
                 state.styles[index] = next;
                 style_dirty
             };
-            {
-                if style_dirty {
-                    id.request_repaint();
-                }
-            }
+            // {
+            //     if style_dirty {
+            //         id.request_repaint();
+            //     }
+            // }
         });
         self
     }
 }
 
-fn compute_style(id: ViewId, ctx: &mut StyleComputeContext) {
-    let state = id.state();
-    let node = id.node();
-
-    let mut style_props = HashMap::<StylePropertyKey, StyleProperty>::new();
-    let mut taffy_style_props = HashMap::<TaffyStylePropertyKey, TaffyStyleProperty>::new();
-
-    let styles = state.borrow().styles.clone();
-    for style_builder in styles.into_iter().rev() {
-        if let Some(style_builder) = style_builder {
-            for (key, value) in style_builder.taffy_style_props.into_iter().rev() {
-                if !taffy_style_props.contains_key(&key) {
-                    taffy_style_props.insert(key, value);
-                }
-            }
-            for (key, value) in style_builder.style_props.into_iter().rev() {
-                if !style_props.contains_key(&key) {
-                    style_props.insert(key, value);
-                }
-            }
-        }
-    }
-
-    for (key, value) in TaffyStyleProperty::initial() {
-        if !taffy_style_props.contains_key(&key) {
-            taffy_style_props.insert(key, value);
-        }
-    }
-
-    let mut taffy_style = taffy::Style::default();
-    for (_, value) in taffy_style_props {
-        value.assign_to(&mut taffy_style);
-    }
-
-    if *id.taffy().borrow().style(node).unwrap() != taffy_style {
-        id.taffy()
-            .borrow_mut()
-            .set_style(node, taffy_style)
-            .unwrap();
-    }
-
-    let mut style = Style::default();
-
-    for (key, value) in StyleProperty::initial() {
-        if !style_props.contains_key(&key) {
-            value.assign_to(&mut style);
-        }
-    }
-
-    for (key, value) in ctx.style.iter() {
-        if !style_props.contains_key(key) && key.inherited() {
-            value.assign_to(&mut style);
-        }
-    }
-
-    for (_, value) in style_props.iter() {
-        value.assign_to(&mut style);
-    }
-
-    state.borrow_mut().style = style;
-
-    for (key, value) in style_props {
-        if key.inherited() {
-            if ctx.style.contains_key(&key) {
-                ctx.style.remove(&key);
-            }
-            ctx.style.insert(key, value);
-        }
-    }
-}
-
-pub fn compute_style_recursive(id: ViewId, ctx: &mut StyleComputeContext) {
-    ctx.push();
-
-    let state = id.state();
-    ctx.dirty = ctx.dirty || state.borrow().style_inherited_dirty;
-    if ctx.dirty || state.borrow().style_dirty {
-        compute_style(id, ctx);
-        let mut state = state.borrow_mut();
-        state.style_dirty = false;
-        state.style_inherited_dirty = false;
-        state.style_cache = Some(ctx.style.clone());
-    } else {
-        if let Some(style) = state.borrow().style_cache.clone() {
-            ctx.style = style;
-        }
-    }
-
-    for child in id.children() {
-        compute_style_recursive(child, ctx);
-    }
-
-    ctx.pop();
-}
-
-pub fn compute_layout(taffy: &mut TaffyTree, parent: NodeId, viewport: Point<f32>) {
-    let children = taffy.children(parent).unwrap();
-    for child in children {
-        let id = ViewId(child);
-        let state = id.state();
-        state.borrow_mut().viewport = viewport;
-        let layout = taffy.layout(child).unwrap();
-        let size = layout.size;
-        let location = layout.location;
-
-        let translate = match state.borrow().style.translate {
-            Point { x, y } => Point {
-                x: match x {
-                    LengthPercentage::Length(value) => value,
-                    LengthPercentage::Percent(value) => value * size.width,
-                },
-                y: match y {
-                    LengthPercentage::Length(value) => value,
-                    LengthPercentage::Percent(value) => value * size.height,
-                },
-            },
-        };
-
-        let viewport = viewport + location + translate;
-        compute_layout(taffy, child, viewport);
-    }
-}
+pub use compute::*;

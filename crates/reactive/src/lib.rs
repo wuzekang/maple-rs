@@ -6,7 +6,6 @@
 
 mod base;
 mod context;
-mod derived;
 mod effect;
 mod id;
 mod impls;
@@ -21,10 +20,7 @@ mod write;
 
 pub use base::{create_base_signal, BaseSignal};
 pub use context::{provide_context, use_context};
-pub use derived::{create_derived_rw_signal, DerivedRwSignal};
-pub use effect::{
-    batch, create_effect, create_stateful_updater, create_updater, on_cleanup, untrack,
-};
+pub use effect::{batch, create_effect, on_cleanup, untrack};
 pub use memo::{create_computed, create_memo, Memo};
 pub use read::{ReadSignalValue, SignalGet, SignalRead, SignalTrack, SignalWith};
 pub use reference::{create_ref, Ref};

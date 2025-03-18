@@ -155,7 +155,7 @@ impl FocusTrapContext {
 
     pub fn reset_sequence(&mut self, root: ViewId) {
         let mut sequence: BTreeMap<(i32, Vec<usize>), ViewId> = Default::default();
-        self.update_sequence(root, &vec![], &mut sequence);
+        self.update_sequence(&root, &vec![], &mut sequence);
         self.sequence = sequence.values().cloned().collect();
         self.index = self
             .sequence
@@ -167,16 +167,16 @@ impl FocusTrapContext {
 
     fn update_sequence(
         &mut self,
-        node: ViewId,
+        node: &ViewId,
         path: &Vec<usize>,
         sequence: &mut BTreeMap<(i32, Vec<usize>), ViewId>,
     ) {
         let mut path = path.clone();
         path.push(node.state().borrow().index);
         if let Some(tab_index) = node.state().borrow().tab_index {
-            sequence.insert((tab_index, path.clone()), node);
+            sequence.insert((tab_index, path.clone()), *node);
         }
-        for child in node.children() {
+        for child in node.children().iter() {
             self.update_sequence(child, &path, sequence);
         }
     }

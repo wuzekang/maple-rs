@@ -1,7 +1,7 @@
 use std::{any::Any, cell::RefCell, collections::HashMap, fmt, rc::Rc};
 
 use crate::{
-    create_effect, create_updater,
+    create_effect,
     id::Id,
     memo::{create_memo, Memo},
     runtime::RUNTIME,
@@ -40,26 +40,13 @@ impl Scope {
     /// The current Scope in the Runtime. Any Signal/Effect/Memo created with
     /// implicitly Scope will be under this Scope
     pub fn current() -> Scope {
-        RUNTIME.with(|runtime| Scope(*runtime.current_scope.borrow()))
+        RUNTIME.with(|runtime| Scope(runtime.current_scope.borrow().clone()))
     }
 
     /// Create a child Scope of this Scope
     pub fn create_child(&self) -> Scope {
         let child = Id::next();
-        self.add_child(child);
         Scope(child)
-    }
-
-    pub fn add_child(&self, child: Id) {
-        RUNTIME.with(|runtime| {
-            let mut children = runtime.children.borrow_mut();
-            let children = children.entry(self.0).or_default();
-            children.insert(child);
-            let contexts = runtime.contexts.borrow().get(&self.0).cloned();
-            if let Some(contexts) = contexts {
-                runtime.contexts.borrow_mut().insert(child, contexts);
-            }
-        });
     }
 
     /// Create a new Signal under this Scope
@@ -99,35 +86,6 @@ impl Scope {
         with_scope(self, || create_effect(f))
     }
 
-    /// Create updater under this Scope
-    pub fn create_updater<R>(
-        self,
-        compute: impl Fn() -> R + 'static,
-        on_change: impl Fn(R) + 'static,
-    ) -> R
-    where
-        R: 'static,
-    {
-        with_scope(self, || create_updater(compute, on_change))
-    }
-
-    /// This is normally used in create_effect, and it will bind the effect's lifetime
-    /// to this scope
-    pub fn track(&self) {
-        let tracker = if let Some(signal) = self.0.signal() {
-            signal
-        } else {
-            let signal = Signal {
-                id: self.0,
-                subscribers: Rc::new(RefCell::new(HashMap::new())),
-                value: Rc::new(RefCell::new(())),
-            };
-            self.0.add_signal(signal.clone());
-            signal
-        };
-        tracker.subscribe();
-    }
-
     /// Dispose this Scope, and it will cleanup all the Signals and child Scope
     /// of this Scope.
     pub fn dispose(&self) {
@@ -140,20 +98,7 @@ pub fn with_scope<T>(scope: Scope, f: impl FnOnce() -> T) -> T
 where
     T: 'static,
 {
-    let prev_scope = RUNTIME.with(|runtime| {
-        let mut current_scope = runtime.current_scope.borrow_mut();
-        let prev_scope = *current_scope;
-        *current_scope = scope.0;
-        prev_scope
-    });
-
-    let result = f();
-
-    RUNTIME.with(|runtime| {
-        *runtime.current_scope.borrow_mut() = prev_scope;
-    });
-
-    result
+    RUNTIME.with(|runtime| runtime.with_scope(scope, f))
 }
 
 /// Wrap the closure so that whenever the closure runs, it will be under a child Scope
@@ -166,7 +111,7 @@ where
     move |t| {
         let scope = current_scope.create_child();
         let prev_scope = RUNTIME.with(|runtime| {
-            let mut current_scope = runtime.current_scope.borrow_mut();
+            let mut current_scope = &mut *runtime.current_scope.borrow_mut();
             let prev_scope = *current_scope;
             *current_scope = scope.0;
             prev_scope

@@ -1,14 +1,13 @@
 use std::{
     any::Any,
     cell::{Ref, RefCell},
-    collections::HashMap,
     fmt,
     marker::PhantomData,
     rc::Rc,
 };
 
+use crate::runtime::EffectTrait;
 use crate::{
-    effect::{run_effect, EffectTrait},
     id::Id,
     read::{SignalRead, SignalTrack, SignalWith},
     runtime::RUNTIME,
@@ -85,7 +84,6 @@ where
     T: Any + 'static,
 {
     let id = Signal::create(value);
-    id.set_scope();
     RwSignal {
         id,
         ty: PhantomData,
@@ -154,7 +152,6 @@ where
 pub(crate) struct Signal {
     pub(crate) id: Id,
     pub(crate) value: Rc<dyn Any>,
-    pub(crate) subscribers: Rc<RefCell<HashMap<Id, Rc<dyn EffectTrait>>>>,
 }
 
 impl Signal {
@@ -162,15 +159,8 @@ impl Signal {
     where
         T: Any + 'static,
     {
-        let id = Id::next();
         let value = RefCell::new(value);
-        let signal = Signal {
-            id,
-            subscribers: Rc::new(RefCell::new(HashMap::new())),
-            value: Rc::new(value),
-        };
-        id.add_signal(signal);
-        id
+        RUNTIME.with({ |r| r.add_signal(Rc::new(value)) })
     }
 
     pub fn borrow<T: 'static>(&self) -> Ref<'_, T> {
@@ -201,7 +191,7 @@ impl Signal {
         self.with_untracked(f)
     }
 
-     pub(crate) fn update_value<U, T: 'static>(&self, f: impl FnOnce(&mut T) -> U) -> U {
+    pub(crate) fn update_value<U, T: 'static>(&self, f: impl FnOnce(&mut T) -> U) -> U {
         let result = self
             .value
             .downcast_ref::<RefCell<T>>()
@@ -211,35 +201,12 @@ impl Signal {
         result
     }
 
-    pub(crate) fn subscribers(&self) -> HashMap<Id, Rc<dyn EffectTrait>> {
-        self.subscribers.borrow().clone()
-    }
-
     pub(crate) fn run_effects(&self) {
-        // If we are batching then add it as a pending effect
-        if RUNTIME.with(|r| r.batching.get()) {
-            RUNTIME.with(|r| {
-                for (_, subscriber) in self.subscribers() {
-                    r.add_pending_effect(subscriber);
-                }
-            });
-            return;
-        }
-
-        for (_, subscriber) in self.subscribers() {
-            run_effect(subscriber);
-        }
+        RUNTIME.with(|r| r.run_effects(self.id));
     }
 
     pub(crate) fn subscribe(&self) {
-        RUNTIME.with(|runtime| {
-            if let Some(effect) = runtime.current_effect.borrow().as_ref() {
-                self.subscribers
-                    .borrow_mut()
-                    .insert(effect.id(), effect.clone());
-                effect.add_observer(self.id);
-            }
-        });
+        RUNTIME.with(|r| r.subscribe(self.id));
     }
 }
 

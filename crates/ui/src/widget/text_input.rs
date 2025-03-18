@@ -202,6 +202,7 @@ impl Element for TextView {
                     editor,
                     dpr,
                 );
+
                 if let Some((x, y)) = editor.editor.cursor_position() {
                     let x = x as f32 / dpr;
                     let y = y as f32 / dpr;

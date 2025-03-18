@@ -13,6 +13,7 @@ use std::any::TypeId;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
+use std::time::SystemTime;
 
 fn fps_text() -> Text {
     let signal = create_rw_signal(0.0);
@@ -81,7 +82,9 @@ pub fn node_view(id: ViewId) -> Fragment {
     fragment(
         view().style(|s| s.flex_col()).children((
             view()
-                .children((text(move || format!("{}", id.element().borrow().name()))))
+                .children((
+                    text(move || format!("{}", id.element().borrow().name()))
+                ))
                 .style(|s| s.height(20).items_center()),
             view().style(|s| s.margin_left(8).flex_col()).children(
                 id.children()
@@ -99,7 +102,9 @@ pub fn debug() -> View {
     let root: ViewId = use_context().unwrap();
     let mutation = create_rw_signal(false);
     let observer = MutationObserver::new(move || {
+        let now = SystemTime::now();
         mutation.set(true);
+        dbg!(SystemTime::now().duration_since(now).unwrap().as_millis());
     });
     observer.observe(root);
     on_cleanup(move || {

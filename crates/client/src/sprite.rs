@@ -26,7 +26,7 @@ impl<'a> SpriteRenderer<'a> {
 
     pub fn draw_flip(&mut self, sprite: &Sprite, position: Vec2, flip: bool) {
         let texture = self.renderer.texture(&sprite.image);
-        self.renderer.render_texture(
+        self.renderer.render_texture_alpha(
             &texture,
             position,
             sprite.origin,
@@ -40,10 +40,10 @@ impl<'a> SpriteRenderer<'a> {
         )
     }
 
-    pub fn draw_flip_once(&self, sprite: &ASprite, position: Vec2, flip: bool) {
+    pub fn draw_flip_once(&mut self, sprite: &ASprite, position: Vec2, flip: bool) {
         let image: Arc<DynamicImage> = sprite.node.clone().try_into().unwrap();
         let texture = Texture::from_image(&image, self.renderer.renderer);
-        self.renderer.render_texture(
+        self.renderer.render_texture_alpha(
             &texture,
             position,
             sprite.origin,

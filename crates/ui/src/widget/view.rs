@@ -140,8 +140,8 @@ fn mount(id: ViewId, parent: ViewId, ctx: &EventDispatcher) {
     }
     ctx.mount(id, parent);
     id.state().borrow_mut().mounted = true;
-    for child in id.children() {
-        mount(child, parent, ctx);
+    for child in id.children().iter() {
+        mount(*child, parent, ctx);
     }
 }
 
@@ -151,7 +151,7 @@ fn unmount(id: ViewId, parent: ViewId, ctx: &EventDispatcher) {
     }
     ctx.unmount(id, parent);
     id.state().borrow_mut().mounted = false;
-    for child in id.children() {
-        unmount(child, parent, ctx);
+    for child in id.children().iter() {
+        unmount(*child, parent, ctx);
     }
 }

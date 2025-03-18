@@ -20,6 +20,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::mem;
 use std::rc::Rc;
+use bumpalo::Bump;
 use taffy::{prelude::TaffyMaxContent, Point, Size};
 
 #[derive(Default, Clone)]
@@ -393,7 +394,8 @@ impl Root {
     }
 
     pub fn compute_style(&self) {
-        let mut ctx = StyleComputeContext::new();
+        let bump = Bump::new();
+        let mut ctx = StyleComputeContext::new(&bump);
         self.id.compute_style(&mut ctx);
     }
 
@@ -426,6 +428,7 @@ impl Root {
     }
 
     pub fn paint(&mut self) {
+
         self.id.paint(&mut self.painter);
         self.cursor_element.draw(&mut self.painter);
     }
@@ -558,7 +561,9 @@ impl Root {
 
                 self.paint();
 
-                SDL_RenderPresent(renderer);
+                self.painter.present();
+
+                dbg!(self.painter._draw_calls);
 
                 self.event_dispatcher.perform_attach();
             }

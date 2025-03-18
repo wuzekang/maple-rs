@@ -1,6 +1,7 @@
 use crate::runtime::RUNTIME;
 use std::any::{Any, TypeId};
 use std::rc::Rc;
+use log::debug;
 
 /// Try to retrieve a stored Context value in the reactive system.
 /// You can store a Context value anywhere, and retrieve it from anywhere afterwards.
@@ -25,9 +26,11 @@ where
 {
     let ty = TypeId::of::<T>();
     RUNTIME.with(|runtime| {
-        let contexts = runtime.contexts.borrow();
-        let context = contexts
-            .get(&runtime.current_scope.borrow())?
+        let context = runtime
+            .nodes
+            .borrow()
+            .get(runtime.current_scope.borrow().0)?
+            .contexts
             .get(&ty)?
             .downcast_ref::<T>()
             .cloned();
@@ -57,12 +60,10 @@ where
     T: Clone + 'static,
 {
     let id = value.type_id();
-
     RUNTIME.with(|runtime| {
-        let mut contexts = runtime.contexts.borrow_mut();
-        contexts
-            .entry(*runtime.current_scope.borrow())
-            .or_insert_with(Default::default)
+        runtime.nodes.borrow_mut()[runtime.current_scope.borrow().0]
+            .contexts
+            .to_mut()
             .insert(id, Rc::new(value) as Rc<dyn Any>);
     });
 }

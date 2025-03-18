@@ -106,16 +106,20 @@ impl MainScene {
                 for sprite in &item.sprites {
                     let path = sprite.path.clone();
                     let position = item.position;
-                    texts.push(ui::text({ move || path.clone() }).style(move |s| {
-                        let camera_position = camera_signal.get().position;
-                        s.position(Position::Absolute)
-                            .left(length(position.x - camera_position.x))
-                            .top(length(position.y - camera_position.y))
-                            .font_size(12.0)
-                            .line_height(14.0)
-                            .background(Color::WHITE)
-                            .color(Color::RED)
-                    }));
+                    texts.push(
+                        view()
+                            .composite()
+                            .style(move |s| {
+                                s.absolute()
+                                    .left(position.x)
+                                    .top(position.y)
+                                    .font_size(12.0)
+                                    .line_height(14.0)
+                                    .background(Color::WHITE)
+                                    .color(Color::RED)
+                            })
+                            .children(ui::text({ move || path.clone() })),
+                    );
                 }
             }
         }
@@ -127,20 +131,39 @@ impl MainScene {
             ..Default::default()
         };
 
+        let t = map.info.vr_top.unwrap() as f32;
+        let b = map.info.vr_bottom.unwrap() as f32;
+        let l = map.info.vr_left.unwrap() as f32;
+        let r = map.info.vr_right.unwrap() as f32;
+        let vr_size = vec2(r - l, b - t);
+
         let id = view()
-            .style(move |s| {
-                let camera = camera_signal.get();
-                s.absolute().w_full().h_full().left(0).top(0)
-            })
-            .children(view().composite().children((dynamic({
-                move || {
-                    if text_visible.get() {
-                        texts.clone()
-                    } else {
-                        Node::Fragment(vec![])
-                    }
-                }
-            }),)))
+            .style(move |s| s.absolute().w_full().h_full().overflow_clip())
+            .children(
+                view()
+                    .composite()
+                    .style(move |s| s.absolute().width(vr_size.x).height(vr_size.y))
+                    .children(
+                        view()
+                            .style(move |s| {
+                                let camera = camera_signal.get();
+                                s.absolute()
+                                    .width(vr_size.x)
+                                    .height(vr_size.y)
+                                    .translate_x(-camera.position.x)
+                                    .translate_y(-camera.position.y)
+                            })
+                            .children((dynamic({
+                                move || {
+                                    if text_visible.get() {
+                                        texts.clone()
+                                    } else {
+                                        Node::Fragment(vec![])
+                                    }
+                                }
+                            }),)),
+                    ),
+            )
             .id();
 
         Self {
@@ -192,9 +215,6 @@ impl Element for MainScene {
                 size,
                 ..
             } = self;
-            // if camera.position != camera_signal.get().position {
-            //     camera_signal.set(camera.clone());
-            // }
 
             let camera_position = camera.position;
 
@@ -370,6 +390,7 @@ fn player_move(context: &mut MainScene, delta: f32) {
         player,
         size,
         camera,
+        camera_signal,
         map,
         ..
     } = context;
@@ -434,6 +455,9 @@ fn player_move(context: &mut MainScene, delta: f32) {
         camera.position.y = (player.position.y - world_size.y + 240.0)
             .max(vr_top)
             .min(vr_bottom - world_size.y);
+    }
+    if camera.position != camera_signal.get().position {
+        camera_signal.set(camera.clone());
     }
 }
 

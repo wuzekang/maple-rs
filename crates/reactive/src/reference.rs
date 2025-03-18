@@ -1,11 +1,12 @@
+use crate::runtime::RUNTIME;
 use crate::{
-    effect::EffectTrait,
     id::Id,
     read::{SignalRead, SignalTrack, SignalWith},
     write::SignalWrite,
     SignalGet, SignalUpdate,
 };
-use std::{any::Any, cell, cell::RefCell, fmt, marker::PhantomData, rc::Rc};
+use std::cell::RefCell;
+use std::{any::Any, fmt, marker::PhantomData, rc::Rc};
 
 pub struct Ref<T> {
     pub(crate) id: Id,
@@ -42,14 +43,14 @@ impl<T> Ref<T> {
     where
         T: 'static,
     {
-        self.id.reference().unwrap().with(f)
+        RUNTIME.with(|r| r.with(self.id, f))
     }
 
     pub fn with_mut<O>(&self, f: impl FnOnce(&mut T) -> O) -> O
     where
         T: 'static,
     {
-        self.id.reference().unwrap().with_mut(f)
+        RUNTIME.with(|r| r.with_mut(self.id, f))
     }
 }
 
@@ -62,59 +63,8 @@ pub fn create_ref<T>(value: T) -> Ref<T>
 where
     T: Any + 'static,
 {
-    let id = Reference::create(value);
-    id.set_scope();
     Ref {
-        id,
+        id: RUNTIME.with(|r| r.add_reference(Rc::new(RefCell::new(value)))),
         ty: PhantomData,
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct Reference {
-    pub(crate) id: Id,
-    pub(crate) value: Rc<dyn Any>,
-}
-
-impl Reference {
-    pub fn create<T>(value: T) -> Id
-    where
-        T: Any + 'static,
-    {
-        let id = Id::next();
-        let value = RefCell::new(value);
-        let reference = Self {
-            id,
-            value: Rc::new(value),
-        };
-        id.add_reference(reference);
-        id
-    }
-
-    pub fn borrow<T: 'static>(&self) -> cell::Ref<'_, T> {
-        let value = self
-            .value
-            .downcast_ref::<RefCell<T>>()
-            .expect("to downcast ref type");
-        value.borrow()
-    }
-
-    pub(crate) fn get<T: Clone + 'static>(&self) -> T {
-        let value = self.borrow::<T>();
-        value.clone()
-    }
-
-    pub(crate) fn with<O, T: 'static>(&self, f: impl FnOnce(&T) -> O) -> O {
-        let value = self.borrow::<T>();
-        f(&value)
-    }
-
-    pub(crate) fn with_mut<U, T: 'static>(&self, f: impl FnOnce(&mut T) -> U) -> U {
-        let result = self
-            .value
-            .downcast_ref::<RefCell<T>>()
-            .expect("to downcast signal type");
-        let result = f(&mut result.borrow_mut());
-        result
     }
 }

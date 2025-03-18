@@ -55,7 +55,7 @@ where
     let reader = getter.read_untracked();
 
     create_effect(move |_| {
-        cx.track();
+        // cx.track();
         let (is_different, new_value) = {
             let last_value = reader.borrow();
             let new_value = f(Some(&last_value));

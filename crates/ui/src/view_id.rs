@@ -58,22 +58,15 @@ impl ViewId {
         RUNTIME.with_borrow(|r| r.taffy.borrow().parent(self.0).map(|item| ViewId(item)))
     }
 
-    pub fn children(&self) -> Vec<ViewId> {
-        RUNTIME.with_borrow(|r| {
-            r.taffy
-                .borrow()
-                .children(self.0)
-                .unwrap_or_default()
-                .into_iter()
-                .map(|item| ViewId(item))
-                .collect::<Vec<_>>()
-        })
+    pub fn children(&self) -> Rc<Vec<ViewId>> {
+        self.state().borrow().children.clone()
     }
 
     pub fn set_children(&self, elements: Vec<ViewId>) {
         for (index, child) in elements.iter().enumerate() {
             child.state().borrow_mut().index = index;
         }
+        self.state().borrow_mut().children = Rc::new(elements.clone());
         let children = elements.into_iter().map(|item| item.0).collect::<Vec<_>>();
         self.taffy()
             .borrow_mut()
@@ -124,7 +117,7 @@ impl ViewId {
         {
             *target = *self;
         }
-        for child in self.children() {
+        for child in self.children().iter() {
             child.event_capture(location, target);
         }
     }
@@ -149,13 +142,13 @@ impl ViewId {
 
     pub fn update(&self, delta: f32) {
         self.element().borrow_mut().update(delta);
-        for child in self.children() {
+        for child in self.children().iter() {
             child.update(delta);
         }
     }
 
     pub fn compute_style(&self, ctx: &mut StyleComputeContext) {
-        compute_style_recursive(*self, ctx);
+        compute_style_recursive(self, ctx);
     }
 
     pub fn paint(&self, ctx: &mut Renderer) {
@@ -193,8 +186,7 @@ impl ViewId {
             });
         }
 
-        if opacity < 1.0 {
-
+        if opacity < 1.0 || self.state().borrow().composite {
             if self.state().borrow().repaint {
                 self.state().borrow_mut().repaint = false;
 
@@ -226,14 +218,17 @@ impl ViewId {
                     )
                 };
 
-                let blend_texture = Rc::new(ctx.create_streaming_texture(size * ctx.dpr).blend_mode(mode));
+                let blend_texture = Rc::new(
+                    ctx.create_streaming_texture(size * ctx.dpr)
+                        .blend_mode(mode),
+                );
 
                 ctx.with_target(&texture.clone(), |ctx| {
                     ctx.save();
                     ctx.reset();
-                    ctx.clear_texture(texture.size);
+                    ctx.clear();
                     self.element().borrow().paint(ctx);
-                    for child in self.children() {
+                    for child in self.children().iter() {
                         child.paint(ctx);
                     }
 
@@ -278,10 +273,7 @@ impl ViewId {
                 });
             }
 
-            let Layer {
-                texture,
-                blend_texture,
-            } = self.state().borrow().layer.clone().unwrap();
+            let Layer { texture, .. } = self.state().borrow().layer.clone().unwrap();
 
             ctx.render_texture_rotated(
                 &texture,
@@ -293,7 +285,7 @@ impl ViewId {
             );
         } else {
             self.element().borrow().paint(ctx);
-            for child in self.children() {
+            for child in self.children().iter() {
                 child.paint(ctx);
             }
         }
