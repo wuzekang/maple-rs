@@ -37,6 +37,8 @@ enum Stage {
 }
 
 pub fn app() -> impl IntoElement {
+    // return fragment(text(|| "aa".to_string()).style(|s| s.block().width(100).height(100).bg_white()));
+
     let stage = RwSignal::new(Stage::Logo);
     let open = RwSignal::new(true);
 
@@ -57,11 +59,18 @@ pub fn app() -> impl IntoElement {
                 Stage::Login => fragment((login_scene(move || stage.set(Stage::Main)))),
                 Stage::Main => fragment((
                     map_scene(current_map),
-                    status_bar(),
+                    status_bar().composite(),
                     world_map_window(open, current_map),
                 )),
             })),
-        debug().style(|s| s.absolute().right(0).width(800).height(600).bg_white()),
+        debug().style(|s| {
+            s.absolute()
+                .top(0)
+                .right(0)
+                .width(800)
+                .height(600)
+                .background(Color::WHITE)
+        }),
     ))
 }
 
@@ -126,7 +135,6 @@ impl Drawable for SequenceAnimation {
         self.animations[self.index].set_bounds(self.bounds.clone());
 
         self.index != index || updated
-
     }
 }
 
@@ -158,7 +166,11 @@ pub fn logo_scene(on_finished: impl Fn() + 'static) -> impl IntoElement {
                 });
                 fragment(Image::new(animation).on_click(|_| {}))
             } else {
-                fragment(view().style(|s| s.background(Color::RED).width(20).height(20)))
+                fragment(view().style(|s| {
+                    s.background(Color::new([1.0, 0.0, 0.0, 1.0]))
+                        .width(20)
+                        .height(20)
+                }))
             };
 
             view()
@@ -590,7 +602,7 @@ pub fn chat_box() -> impl IntoElement {
                             .padding_left(length(8.0))
                             .width(length(568.0))
                             .height(length(24.0))
-                            .background([0x88, 0x88, 0x88].into())
+                            .background([0x88, 0x88, 0x88])
                     })
                     .children((
                         (text(|| "欢迎来到冒险岛，现在开始你的旅程吧～！".to_string())
@@ -822,6 +834,7 @@ pub fn world_map_window(open: RwSignal<bool>, current_map: RwSignal<String>) -> 
                                 .height(percent(1.0))
                         }),
                         view()
+                            .composite()
                             .style({
                                 let padding = padding.clone();
                                 move |s| s.position(Position::Relative).padding(padding)
@@ -889,14 +902,14 @@ pub fn world_map_window(open: RwSignal<bool>, current_map: RwSignal<String>) -> 
                         view()
                             .style(move |s| {
                                 s.position(Position::Absolute)
-                                    .width(percent(1.0))
-                                    .margin_top(length(5.0))
+                                    .w_full()
+                                    .height(14)
+                                    .margin_top(5)
                                     .padding_right(padding.right)
                                     .padding_left(padding.left)
-                                    .height(length(14.0))
-                                    .flex_direction(FlexDirection::Row)
-                                    .justify_content(JustifyContent::SpaceBetween)
-                                    .align_items(AlignItems::Center)
+                                    .flex_row()
+                                    .justify_between()
+                                    .items_center()
                             })
                             .children((Image::new(title.image), close_button)),
                     )),

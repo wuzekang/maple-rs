@@ -12,9 +12,12 @@ impl ScrollView {
     pub fn new<VT: ViewTuple>(children: VT) -> Self {
         let translate = create_rw_signal(Vec2::ZERO);
         let content = view()
+            .composite()
             .style(move |s| {
                 let translate = translate.get();
-                s.translate_x(translate.x).translate_y(translate.y)
+                s.translate_x(translate.x)
+                    .translate_y(translate.y)
+                    .block()
             })
             .children(children);
 
@@ -26,9 +29,11 @@ impl ScrollView {
             .on_mouse_wheel(move |event| {
                 let size = content_id.layout().size - scroll_id.layout().size;
                 let size = vec2(size.width, size.height).max(Vec2::ZERO);
-                translate
-                    .update(move |value| *value = (*value + event.wheel * 20.0).clamp(-size, Vec2::ZERO));
+                translate.update(move |value| {
+                    *value = (*value + event.wheel * 20.0).clamp(-size, Vec2::ZERO)
+                });
             })
+            .style(|s| s.block().overflow_y_scroll())
             .children(content);
         ScrollView { id: scroll.id() }
     }

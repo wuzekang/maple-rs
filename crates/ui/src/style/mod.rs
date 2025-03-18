@@ -1,17 +1,17 @@
+mod color;
 mod compute;
 pub mod dimension;
-
-use crate::{Drawable, Element, ViewId};
-use bumpalo::Bump;
+use crate::{Drawable, Element};
 use cosmic_text::{Align, Wrap};
 use peniko::Color;
-use reactive::create_effect;
+use reactive::{create_effect, use_context};
 use sdl3_sys::everything::{SDL_CreateSystemCursor, SDL_Cursor, SDL_SystemCursor};
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt::Pointer;
 use std::mem;
 use std::rc::Rc;
+use strum::EnumIter;
 use taffy::prelude::*;
 use taffy::{Overflow, Point};
 
@@ -93,11 +93,11 @@ impl Style {
     pub const DEFAULT: Self = Self {
         background: Color::TRANSPARENT,
         color: Color::BLACK,
-        line_height: None,
-        font_size: None,
+        line_height: Some(12.0),
+        font_size: Some(12.0),
         text_wrap: TextWrap::WordOrGlyph,
         text_align: TextAlign::Left,
-        cursor: Cursor::None,
+        cursor: Cursor::DEFAULT,
         pointer_events: PointerEvents::Auto,
         translate: Point {
             x: LengthPercentage::ZERO,
@@ -106,19 +106,20 @@ impl Style {
         opacity: 1.0,
         clip: false,
     };
-
-    pub fn background(self) -> Color {
-        self.background
-    }
-    pub fn color(self) -> Color {
-        self.color
-    }
 }
 
 impl Default for Style {
     fn default() -> Self {
         Self::DEFAULT
     }
+}
+
+#[derive(Clone, PartialEq, PartialOrd)]
+pub enum StyleTrigger {
+    None,
+    Composite,
+    Paint,
+    Layout,
 }
 
 #[derive(Clone, PartialEq)]
@@ -137,7 +138,7 @@ pub enum StyleProperty {
     Opacity(f32),
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(EnumIter, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum StylePropertyKey {
     Background,
     Color,
@@ -161,6 +162,40 @@ impl StylePropertyKey {
             Self::Translate | Self::TranslateX | Self::TranslateY => false,
             Self::Opacity => false,
             _ => true,
+        }
+    }
+
+    pub(crate) fn trigger(&self) -> StyleTrigger {
+        match self {
+            Self::Background => StyleTrigger::Paint,
+            Self::Color => StyleTrigger::Paint,
+            Self::LineHeight => StyleTrigger::Layout,
+            Self::FontSize => StyleTrigger::Layout,
+            Self::TextWrap => StyleTrigger::Layout,
+            Self::TextAlign => StyleTrigger::Layout,
+            Self::Cursor => StyleTrigger::None,
+            Self::PointerEvents => StyleTrigger::None,
+            Self::Translate => StyleTrigger::Composite,
+            Self::TranslateX => StyleTrigger::Composite,
+            Self::TranslateY => StyleTrigger::Composite,
+            Self::Opacity => StyleTrigger::Composite,
+        }
+    }
+
+    pub(crate) fn value(&self, style: &Style) -> StyleProperty {
+        match self {
+            Self::Background => StyleProperty::Background(style.background.clone()),
+            Self::Color => StyleProperty::Color(style.color.clone()),
+            Self::LineHeight => StyleProperty::LineHeight(style.line_height.clone()),
+            Self::FontSize => StyleProperty::FontSize(style.font_size.clone()),
+            Self::TextWrap => StyleProperty::TextWrap(style.text_wrap.clone()),
+            Self::TextAlign => StyleProperty::TextAlign(style.text_align.clone()),
+            Self::Cursor => StyleProperty::Cursor(style.cursor.clone()),
+            Self::PointerEvents => StyleProperty::PointerEvents(style.pointer_events.clone()),
+            Self::Translate => StyleProperty::Translate(style.translate.clone()),
+            Self::TranslateX => StyleProperty::TranslateX(style.translate.x.clone()),
+            Self::TranslateY => StyleProperty::TranslateY(style.translate.y.clone()),
+            Self::Opacity => StyleProperty::Opacity(style.opacity.clone()),
         }
     }
 }
@@ -207,11 +242,11 @@ impl StyleProperty {
         }
     }
 
-    pub(crate) fn initial() -> HashMap<StylePropertyKey, Self> {
-        HashMap::from([
+    pub(crate) fn initial() -> Vec<(StylePropertyKey, Self)> {
+        Vec::from([
             (
                 StylePropertyKey::Background,
-                Self::Background(Color::WHITE.multiply_alpha(0.0)),
+                Self::Background(Color::TRANSPARENT),
             ),
             (StylePropertyKey::Color, Self::Color(Color::BLACK)),
             (StylePropertyKey::FontSize, Self::FontSize(Some(12.0))),
@@ -226,7 +261,7 @@ impl StyleProperty {
             ),
             (
                 StylePropertyKey::Cursor,
-                Self::Cursor(Cursor::system_default()),
+                Self::Cursor(Cursor::DEFAULT),
             ),
             (
                 StylePropertyKey::PointerEvents,
@@ -237,7 +272,7 @@ impl StyleProperty {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq)]
 pub enum TaffyStyleProperty {
     Display(Display),
     Overflow(Point<Overflow>),
@@ -291,7 +326,7 @@ pub enum TaffyStyleProperty {
     FlexShrink(f32),
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub enum TaffyStylePropertyKey {
     Display,
     Overflow,
@@ -747,10 +782,13 @@ impl StyleBuilder {
         ));
         self
     }
-    pub fn border(mut self, value: Rect<LengthPercentage>) -> Self {
+    pub fn border(
+        mut self,
+        value: impl Into<dimension::Rect<dimension::LengthPercentage>>,
+    ) -> Self {
         self.taffy_style_props.push((
             TaffyStylePropertyKey::Border,
-            TaffyStyleProperty::Border(value),
+            TaffyStyleProperty::Border(value.into().into()),
         ));
         self
     }
@@ -896,17 +934,19 @@ impl StyleBuilder {
         self
     }
 
-    pub fn background(mut self, value: Color) -> Self {
+    pub fn background(mut self, value: impl Into<color::Color>) -> Self {
         self.style_props.push((
             StylePropertyKey::Background,
-            StyleProperty::Background(value),
+            StyleProperty::Background(value.into().into()),
         ));
         self
     }
 
-    pub fn color(mut self, value: Color) -> Self {
-        self.style_props
-            .push((StylePropertyKey::Color, StyleProperty::Color(value)));
+    pub fn color(mut self, value: impl Into<color::Color>) -> Self {
+        self.style_props.push((
+            StylePropertyKey::Color,
+            StyleProperty::Color(value.into().into()),
+        ));
         self
     }
 
@@ -1057,9 +1097,15 @@ impl StyleBuilder {
     }
 
     #[inline]
+    pub fn overflow_y_visible(mut self) -> Self {
+        self.overflow_y(Overflow::Visible)
+    }
+
+    #[inline]
     pub fn size_full(mut self) -> Self {
         self.w_full().h_full()
     }
+
 
     #[inline]
     pub fn flex_row(mut self) -> Self {
@@ -1102,6 +1148,11 @@ impl StyleBuilder {
     }
 
     #[inline]
+    pub fn justify_between(mut self) -> Self {
+        self.justify_content(JustifyContent::SpaceBetween)
+    }
+
+    #[inline]
     pub fn items_start(mut self) -> Self {
         self.align_items(AlignItems::Start)
     }
@@ -1132,6 +1183,11 @@ impl StyleBuilder {
     }
 
     #[inline]
+    pub fn text_red(mut self) -> Self {
+        self.background(Color::new([1.0, 0.0, 0.0, 1.0]))
+    }
+
+    #[inline]
     pub fn pointer_events_none(mut self) -> Self {
         self.pointer_events(PointerEvents::None)
     }
@@ -1145,25 +1201,44 @@ impl StyleBuilder {
     pub fn text_center(mut self) -> Self {
         self.text_align(TextAlign::Center)
     }
+
+    #[inline]
+    pub fn text_nowrap(mut self) -> Self {
+        self.text_wrap(TextWrap::None)
+    }
+
+    #[inline]
+    pub fn text_wrap_glyph(mut self) -> Self {
+        self.text_wrap(TextWrap::Glyph)
+    }
+
+    #[inline]
+    pub fn text_wrap_word(mut self) -> Self {
+        self.text_wrap(TextWrap::Word)
+    }
+
+    #[inline]
+    pub fn text_wrap_both(mut self) -> Self {
+        self.text_wrap(TextWrap::WordOrGlyph)
+    }
 }
 
-#[derive(Clone, PartialEq)]
-pub struct SystemCursor {
-    pub cursor: *mut SDL_Cursor,
-}
+#[derive(Copy, Clone, PartialEq)]
+pub struct SystemCursor(SDL_SystemCursor);
 
-thread_local! {
-    static SYSTEM_CURSORS: RefCell<HashMap<SDL_SystemCursor, *mut SDL_Cursor>> = Default::default();
-}
 impl SystemCursor {
     pub fn new(cursor: SDL_SystemCursor) -> Self {
-        Self {
-            cursor: SYSTEM_CURSORS.with(move |s| {
-                *s.borrow_mut()
-                    .entry(cursor)
-                    .or_insert_with(|| unsafe { SDL_CreateSystemCursor(cursor) })
-            }),
+        Self(cursor)
+    }
+    pub fn cursor(self) -> *mut SDL_Cursor {
+        thread_local! {
+            static SYSTEM_CURSORS: RefCell<HashMap<SDL_SystemCursor, *mut SDL_Cursor>> = Default::default();
         }
+        SYSTEM_CURSORS.with(move |s| {
+            *s.borrow_mut()
+                .entry(self.0)
+                .or_insert_with(|| unsafe { SDL_CreateSystemCursor(self.0) })
+        })
     }
 }
 
@@ -1173,14 +1248,6 @@ pub struct DrawableCursor(pub Rc<dyn Fn() -> Box<dyn Drawable>>);
 impl PartialEq for DrawableCursor {
     fn eq(&self, other: &Self) -> bool {
         std::ptr::addr_eq(Rc::as_ptr(&self.0), Rc::as_ptr(&other.0))
-    }
-}
-
-impl Drop for SystemCursor {
-    fn drop(&mut self) {
-        unsafe {
-            // SDL_DestroyCursor(self.cursor);
-        }
     }
 }
 
@@ -1207,15 +1274,9 @@ impl Cursor {
         }
     }
 
-    pub fn system_pointer() -> Self {
-        Cursor::System(SystemCursor::new(SDL_SystemCursor::POINTER))
-    }
-    pub fn system_default() -> Self {
-        Cursor::System(SystemCursor::new(SDL_SystemCursor::DEFAULT))
-    }
-    pub fn system_text() -> Self {
-        Cursor::System(SystemCursor::new(SDL_SystemCursor::TEXT))
-    }
+    pub const DEFAULT: Self = Self::System(SystemCursor(SDL_SystemCursor::DEFAULT));
+    pub const POINTER: Self = Self::System(SystemCursor(SDL_SystemCursor::POINTER));
+    pub const TEXT: Self = Self::System(SystemCursor(SDL_SystemCursor::TEXT));
 
     pub fn from_drawable<T>(f: T) -> Self
     where
@@ -1237,42 +1298,19 @@ pub trait Styleable: Sized + Element {
         let state = id.state();
         let index = state.borrow().styles.len();
         state.borrow_mut().styles.push(None);
-
+        let ctx: EventDispatcher = use_context().unwrap();
         create_effect(move |_| {
-            let style_dirty = {
-                let state = id.state();
-                let prev = mem::take(&mut state.borrow_mut().styles[index]);
-                let next = Some(f(StyleBuilder::default()));
-                let style_dirty = prev != next;
-                // let inherited_style_dirty = style_dirty && {
-                //     let prev = prev
-                //         .map(|v| v.style_props)
-                //         .unwrap_or_default()
-                //         .into_iter()
-                //         .collect::<HashMap<_, _>>();
-                //     let next = next
-                //         .clone()
-                //         .map(|v| v.style_props)
-                //         .unwrap_or_default()
-                //         .into_iter()
-                //         .collect::<HashMap<_, _>>();
-                //     let keys = prev.keys().chain(next.keys()).collect::<HashSet<_>>();
-                //     keys.into_iter()
-                //         .any(|k| k.inherited() && prev.get(k) != next.get(k))
-                // };
-                let mut state = state.borrow_mut();
-                state.style_dirty = style_dirty;
-                state.styles[index] = next;
-                style_dirty
-            };
-            // {
-            //     if style_dirty {
-            //         id.request_repaint();
-            //     }
-            // }
+            let state = id.state();
+            let prev = mem::take(&mut state.borrow_mut().styles[index]);
+            let next = Some(f(StyleBuilder::default()));
+            if prev != next {
+                ctx.request_style(id);
+            }
+            state.borrow_mut().styles[index] = next;
         });
         self
     }
 }
 
+use crate::root::EventDispatcher;
 pub use compute::*;

@@ -3,37 +3,52 @@ use crate::event::{
     Event, EventIterator, FocusEvent, FocusEventType, LifecycleEvent, LifecycleEventType,
     MouseEventType,
 };
+use crate::geometry::Rect;
+use crate::render::renderer::Renderer;
 use crate::resource::Resource;
 use crate::runtime::RUNTIME;
-use crate::sdl::Renderer;
-use crate::style::dimension::length;
 use crate::style::{compute_layout, Cursor, StyleComputeContext, Styleable};
 use crate::view_id::ViewId;
 use crate::widget::focus_trap::FocusTrap;
-use crate::widget::view::View;
-use crate::{fragment, input, Bounds, Drawable, Interactive};
+use crate::{input, Bounds, Drawable, Interactive};
+use bumpalo::Bump;
+use cosmic_text::ttf_parser::colr::Painter;
 use glam::{vec2, Vec2};
 use peniko::Color;
 use reactive::{provide_context, RwSignal, Scope, SignalGet, SignalUpdate};
 use sdl3_sys::everything::*;
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::mem;
 use std::rc::Rc;
-use bumpalo::Bump;
 use taffy::{prelude::TaffyMaxContent, Point, Size};
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct EventDispatcher {
+    root: ViewId,
     hovered: Rc<RefCell<HashSet<ViewId>>>,
     pub focused: Rc<RefCell<Option<ViewId>>>,
     disposed: Rc<RefCell<Vec<Scope>>>,
     mounted: Rc<RefCell<Vec<(ViewId, ViewId)>>>,
     unmounted: Rc<RefCell<Vec<(ViewId, ViewId)>>>,
     queue: Rc<RefCell<Vec<Event>>>,
+    style_dirty: Rc<RefCell<HashSet<ViewId>>>,
 }
 
 impl EventDispatcher {
+    pub fn new(root: ViewId) -> Self {
+        Self {
+            root,
+            hovered: Rc::new(RefCell::new(Default::default())),
+            focused: Rc::new(RefCell::new(None)),
+            disposed: Rc::new(RefCell::new(vec![])),
+            mounted: Rc::new(RefCell::new(vec![])),
+            unmounted: Rc::new(RefCell::new(vec![])),
+            queue: Rc::new(RefCell::new(vec![])),
+            style_dirty: Rc::new(RefCell::new(Default::default())),
+        }
+    }
+
     pub fn focus(&self, target: ViewId) {
         if let Some(focused) = self.focused.borrow().as_ref() {
             if target == *focused {
@@ -136,6 +151,13 @@ impl EventDispatcher {
         self.mounted.borrow_mut().push((id, parent));
     }
 
+    pub fn request_style(&self, id: ViewId) {
+        if !id.state().borrow().mounted {
+            return;
+        }
+        self.style_dirty.borrow_mut().insert(id);
+    }
+
     pub fn unmount(&self, id: ViewId, parent: ViewId) {
         self.unmounted.borrow_mut().push((id, parent));
     }
@@ -160,6 +182,7 @@ impl EventDispatcher {
         let mut focused = HashSet::<ViewId>::from_iter(focused.into_iter());
         for (id, _) in self.unmounted.borrow().iter() {
             self.hovered.borrow_mut().remove(&id);
+            self.style_dirty.borrow_mut().remove(&id);
             if focused.remove(id) {
                 id.dispatch_event(
                     &mut Event::Focus(FocusEvent {
@@ -217,7 +240,7 @@ impl CursorElement {
     fn new(root: ViewId) -> Self {
         Self {
             root,
-            cursor: Cursor::system_default(),
+            cursor: Cursor::DEFAULT,
             position: Default::default(),
             image: Default::default(),
             target: Default::default(),
@@ -242,7 +265,7 @@ impl Drawable for CursorElement {
                 let size = layout.size;
                 let position = vec2(location.x, location.y);
                 let size = vec2(size.width, size.height);
-                cx.fill_rect(Color::BLUE.multiply_alpha(0.5), position, size);
+                cx.fill_rect(Color::BLACK, Rect::from((position, size)));
             }
         }
 
@@ -276,7 +299,7 @@ impl Drawable for CursorElement {
                     Cursor::System(cursor) => {
                         unsafe {
                             SDL_ShowCursor();
-                            SDL_SetCursor(cursor.cursor);
+                            SDL_SetCursor(cursor.cursor());
                         };
                         self.image = None;
                     }
@@ -304,10 +327,11 @@ impl Drawable for CursorElement {
 
 pub struct Root {
     size: RwSignal<Vec2>,
-    painter: Renderer,
+    painter: Rc<RefCell<Renderer>>,
     renderer: *mut SDL_Renderer,
     window: *mut SDL_Window,
     event_dispatcher: EventDispatcher,
+    bump: Bump,
     id: ViewId,
     current_cursor: Cursor,
     cursor_element: CursorElement,
@@ -331,32 +355,39 @@ impl Root {
         let id = view.id();
         id.state().borrow_mut().mounted = true;
 
-        let event_manager: EventDispatcher = Default::default();
-
+        let dpr = unsafe { SDL_GetWindowPixelDensity(window) };
+        let event_dispatcher = EventDispatcher::new(id);
+        let painter = Rc::new(RefCell::new(Renderer::new(
+            renderer,
+            dpr,
+            size.get_untracked(),
+        )));
         provide_context(window);
         provide_context(renderer);
+        provide_context(painter.clone());
         provide_context(id);
-        provide_context(event_manager.clone());
+        provide_context(event_dispatcher.clone());
 
         let cursor_element = CursorElement::new(id);
 
         let view = view
-            .style(move |s| s.width(length(size.get().x)).height(length(size.get().y)))
+            .style(move |s| s.width(size.get().x).height(size.get().y))
             .children(f);
 
         view.into_element();
 
-        let dpr = unsafe { SDL_GetWindowPixelDensity(window) };
+        let mut bump = Bump::new();
 
         Self {
             id,
             size,
-            painter: Renderer::new(renderer, dpr, size.get_untracked()),
+            painter,
             renderer,
             window,
-            event_dispatcher: event_manager,
+            bump,
+            event_dispatcher,
             cursor_element,
-            current_cursor: Cursor::system_default(),
+            current_cursor: Cursor::DEFAULT,
         }
     }
 
@@ -393,14 +424,19 @@ impl Root {
         self.event_dispatcher.dispatch(event, self.id);
     }
 
-    pub fn compute_style(&self) {
-        let bump = Bump::new();
-        let mut ctx = StyleComputeContext::new(&bump);
-        self.id.compute_style(&mut ctx);
+    pub fn compute_style(&self, nodes: Vec<ViewId>) {
+        let mut ctx = StyleComputeContext::new(&self.bump);
+        for id in nodes.iter() {
+            if ctx.visited.contains(id) {
+                continue;
+            }
+            id.compute_style(&mut ctx);
+        }
     }
 
-    pub fn compute_layout(&self) {
+    pub fn compute_layout(&mut self) {
         let taffy = RUNTIME.with_borrow_mut(|s| s.taffy.clone());
+        let ctx = self.painter.clone();
         taffy
             .borrow_mut()
             .compute_layout_with_measure(
@@ -418,7 +454,16 @@ impl Root {
                     let element = RUNTIME.with_borrow_mut(|s| s.elements.get(id.into()).cloned());
 
                     element
-                        .map(|e| e.borrow().measure(known_dimensions, available_space))
+                        .map({
+                            let ctx = ctx.clone();
+                            move |e| {
+                                e.borrow().measure(
+                                    &mut ctx.borrow_mut(),
+                                    known_dimensions,
+                                    available_space,
+                                )
+                            }
+                        })
                         .unwrap_or_default()
                 },
             )
@@ -428,9 +473,8 @@ impl Root {
     }
 
     pub fn paint(&mut self) {
-
-        self.id.paint(&mut self.painter);
-        self.cursor_element.draw(&mut self.painter);
+        self.id.paint(&mut self.painter.borrow_mut());
+        self.cursor_element.draw(&mut self.painter.borrow_mut());
     }
 
     pub fn launch(&mut self) {
@@ -549,23 +593,42 @@ impl Root {
                     }
                 }
 
+                for (id, _) in self.event_dispatcher.mounted.borrow().iter() {
+                    self.event_dispatcher.style_dirty.borrow_mut().insert(*id);
+                }
+
                 self.event_dispatcher.perform_detach();
 
-                self.compute_style();
+                let mut nodes =
+                    Vec::with_capacity(self.event_dispatcher.style_dirty.borrow().len());
+
+                for view_id in self.event_dispatcher.style_dirty.borrow().iter() {
+                    nodes.push((view_id.index_path(self.id), *view_id))
+                }
+
+                nodes.sort_by_key(|(path, _)| path.clone());
+
+                let mut ordered = Vec::with_capacity(nodes.len());
+                for (_, view_id) in nodes {
+                    ordered.push(view_id);
+                }
+
+                self.event_dispatcher.style_dirty.borrow_mut().clear();
+
+                self.compute_style(ordered);
                 self.compute_layout();
 
                 self.cursor_element.update(delta);
+
+                self.event_dispatcher.perform_attach();
 
                 SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
                 SDL_RenderClear(renderer);
 
                 self.paint();
 
-                self.painter.present();
-
-                dbg!(self.painter._draw_calls);
-
-                self.event_dispatcher.perform_attach();
+                self.painter.borrow_mut().present();
+                self.bump.reset();
             }
         }
     }

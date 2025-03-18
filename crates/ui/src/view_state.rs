@@ -1,22 +1,17 @@
 use crate::event::Event;
+use crate::render::layer::Layer;
 use crate::style::{Style, StyleBuilder, StyleProperty, StylePropertyKey};
-use crate::{Texture, ViewId};
+use crate::ViewId;
 use slotmap::{DefaultKey, SlotMap};
 use std::collections::HashMap;
 use std::rc::Rc;
 use taffy::Point;
 
-#[derive(Clone)]
-pub struct Layer {
-    pub texture: Rc<Texture>,
-    pub blend_texture: Rc<Texture>,
-}
-
 pub struct ViewState {
     pub style: Style,
     pub styles: Vec<Option<StyleBuilder>>,
     pub style_dirty: bool,
-    pub style_cache: Option<HashMap<StylePropertyKey, StyleProperty>>,
+    pub style_cache: HashMap<StylePropertyKey, StyleProperty>,
     pub children: Rc<Vec<ViewId>>,
     pub viewport: Point<f32>,
     pub layer: Option<Layer>,
@@ -35,11 +30,11 @@ impl ViewState {
             style: Default::default(),
             styles: Default::default(),
             style_dirty: true,
-            style_cache: None,
+            style_cache: Default::default(),
             children: Default::default(),
             layer: None,
             composite: false,
-            repaint: true,
+            repaint: false,
             listeners: Default::default(),
             mounted: false,
             tab_index: None,

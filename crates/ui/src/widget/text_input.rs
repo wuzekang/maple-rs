@@ -1,9 +1,8 @@
+use crate::geometry::Rect;
+use crate::render::renderer::Renderer;
 use crate::style::dimension::percent;
-use crate::style::{Cursor, PointerEvents, Styleable, TextWrap};
-use crate::widget::text::{fill_text, text_measure};
-use crate::{
-    element::Element, runtime::RUNTIME, sdl::Renderer, view, view_id::ViewId, Interactive, Texture,
-};
+use crate::style::{Cursor, PointerEvents, StyleTrigger, Styleable, TextWrap};
+use crate::{element::Element, runtime::RUNTIME, view, view_id::ViewId, Interactive, Texture};
 use cosmic_text::{Action, Buffer, Edit, Editor, Motion, Selection};
 use glam::{vec2, Vec2};
 use peniko::Color;
@@ -115,6 +114,7 @@ impl OffsetEditor {
                 );
             }
         }
+        self.id.request_repaint(StyleTrigger::Paint);
     }
 }
 
@@ -123,7 +123,6 @@ struct TextView {
     id: ViewId,
     focused: Ref<bool>,
     editor: Ref<OffsetEditor>,
-    cache: Ref<(Option<Texture>, Option<Texture>)>,
     dpr: f32,
 }
 
@@ -135,7 +134,6 @@ impl TextView {
             id,
             focused,
             editor: create_ref(OffsetEditor::new(id)),
-            cache: create_ref((None, None)),
             dpr,
         }
     }
@@ -144,14 +142,12 @@ impl TextView {
         self.editor.with_mut(|editor| {
             editor.action(action);
         });
-        self.cache.with_mut(|(a, _)| *a = None);
     }
 
     fn insert_string(&self, data: &str) {
         self.editor.with_mut(|editor| {
             editor.insert_string(data);
         });
-        self.cache.with_mut(|(a, _)| *a = None);
     }
 }
 
@@ -173,30 +169,37 @@ impl Element for TextView {
         let size = layout.size;
 
         if style.background != Color::TRANSPARENT {
-            ctx.fill_rect(style.background, Vec2::ZERO, vec2(size.width, size.height));
+            ctx.fill_rect(
+                style.background,
+                Rect::from((Vec2::ZERO, vec2(size.width, size.height))),
+            );
         }
 
         let dpr = self.dpr;
 
         self.editor.with_mut(|editor| {
             let offset = editor.offset;
+            let color = style.color;
 
             let line_height = editor.editor.with_buffer_mut(|buffer| {
-                fill_text(
-                    ctx,
-                    buffer,
-                    // self.cache,
-                    style.clone(),
-                    Vec2::ZERO,
-                    vec2(size.width, size.height),
-                    offset,
-                );
+                RUNTIME.with_borrow_mut(|s| {
+                    ctx.fill_text(
+                        color,
+                        Vec2::ZERO,
+                        vec2(size.width, size.height) * 2.0,
+                        offset,
+                        &mut s.swash_cache,
+                        &mut s.font_system,
+                        buffer,
+                    )
+                });
+
                 buffer.metrics().line_height
             }) / dpr;
 
             if self.focused.with(|v| *v) {
                 ctx.fill_selection(
-                    Color::BLUE.multiply_alpha(0.5),
+                    Color::BLACK.multiply_alpha(0.5),
                     Vec2::ZERO,
                     vec2(size.width, size.height),
                     editor,
@@ -210,8 +213,11 @@ impl Element for TextView {
                         x: offset.x / dpr,
                         y: offset.y / dpr,
                     };
-                    ctx.set_color(style.color);
-                    ctx.line(vec2(p.x + x, p.y + y), vec2(p.x + x, p.y + y + line_height))
+                    ctx.line(
+                        color,
+                        vec2(p.x + x, p.y + y),
+                        vec2(p.x + x, p.y + y + line_height),
+                    )
                 }
             }
         });
@@ -219,19 +225,13 @@ impl Element for TextView {
 
     fn measure(
         &self,
+        ctx: &mut Renderer,
         known_dimensions: Size<Option<f32>>,
         available_space: Size<AvailableSpace>,
     ) -> Size<f32> {
         self.editor.with_mut(|editor| {
             editor.editor.with_buffer_mut(|buffer| {
-                text_measure(
-                    self.id,
-                    buffer,
-                    known_dimensions,
-                    available_space,
-                    true,
-                    self.dpr,
-                )
+                ctx.measure_text(self.id, buffer, known_dimensions, available_space, false)
             })
         })
     }
@@ -302,7 +302,7 @@ impl TextInput {
                 text_view.insert_string(text);
             })
             .style(|s| {
-                s.cursor(Cursor::system_text())
+                s.cursor(Cursor::TEXT)
                     .align_items(AlignItems::Center)
                     .justify_content(JustifyContent::Stretch)
                     .padding_left(4)

@@ -1,31 +1,20 @@
 use crate::geometry::Rect;
-use crate::OffsetEditor;
-use cosmic_text::{Edit, FontSystem, Placement, SwashCache};
-use glam::{vec2, Vec2, Vec4, Vec4Swizzles};
+use crate::render::command::{
+    Command, LineCommand, RectCommand, RenderTextureCommand, RenderTextureNineGridCommand,
+    RenderTextureRotatedCommand,
+};
+use crate::render::layer::{Layer, Tile};
+use crate::runtime::RUNTIME;
+use crate::{OffsetEditor, ViewId};
+use cosmic_text::{Edit, FontSystem, Metrics, Placement, SwashCache};
+use glam::{vec2, Vec2, Vec4Swizzles};
 use image::DynamicImage;
 use peniko::Color;
-use sdl3_sys::{
-    blendmode::SDL_BLENDMODE_BLEND,
-    everything::*,
-    pixels::SDL_PixelFormat,
-    rect::{SDL_FRect, SDL_Rect},
-    render::{
-        SDL_CreateTexture, SDL_CreateTextureFromSurface, SDL_DestroyTexture, SDL_RenderFillRect,
-        SDL_RenderTexture, SDL_RenderTexture9Grid, SDL_RenderTextureRotated, SDL_Renderer,
-        SDL_SetRenderDrawBlendMode, SDL_SetRenderDrawColor, SDL_SetTextureAlphaMod,
-        SDL_SetTextureBlendMode, SDL_SetTextureColorMod, SDL_SetTextureScaleMode, SDL_Texture,
-        SDL_TextureAccess, SDL_UpdateTexture,
-    },
-    surface::{
-        SDL_BlitSurface, SDL_CreateSurface, SDL_CreateSurfaceFrom, SDL_DestroySurface,
-        SDL_FlipMode, SDL_ScaleMode, SDL_Surface,
-    },
-};
-use std::ops::SubAssign;
+use sdl3_sys::everything::*;
 use std::rc::Rc;
 use std::{cmp, collections::HashMap, sync::Arc};
 use taffy::prelude::length;
-use taffy::LengthPercentage;
+use taffy::{AvailableSpace, LengthPercentage, Size};
 use unicode_segmentation::UnicodeSegmentation;
 
 pub struct Surface {
@@ -71,14 +60,9 @@ impl Surface {
     }
 
     pub fn clear(&self, color: Color) {
+        let [r, g, b, a] = color.components;
         unsafe {
-            SDL_ClearSurface(
-                self.surface,
-                color.r as f32 / 255.0,
-                color.g as f32 / 255.0,
-                color.b as f32 / 255.0,
-                color.a as f32 / 255.0,
-            );
+            SDL_ClearSurface(self.surface, r, g, b, a);
         }
     }
 }
@@ -194,34 +178,11 @@ impl NineGridTexture {
             bottom: length(self.bottom_height as f32),
         }
     }
-
-    pub fn render(&self, painter: &Renderer, position: Vec2, size: Option<Vec2>) {
-        let size = size.unwrap_or(self.texture.size);
-        let position = position + painter.translate;
-        unsafe {
-            SDL_RenderTexture9Grid(
-                painter.renderer,
-                self.ptr(),
-                std::ptr::null(),
-                self.left_width as f32,
-                self.right_width as f32,
-                self.top_height as f32,
-                self.bottom_height as f32,
-                1.0,
-                &SDL_FRect {
-                    x: position.x,
-                    y: position.y,
-                    w: size.x,
-                    h: size.y,
-                },
-            );
-        }
-    }
 }
 
 impl Drawable for NineGridTexture {
     fn draw(&self, painter: &mut Renderer) {
-        self.render(painter, self.bounds.position, Some(self.bounds.size));
+        painter.render_texture_nine_grid(&self, self.bounds.position, Some(self.bounds.size));
     }
 
     fn size(&self) -> Vec2 {
@@ -455,13 +416,14 @@ impl Texture {
         }
     }
 
-    pub fn alpha(&self, alpha: u8) -> &Self {
-        unsafe { SDL_SetTextureAlphaMod(self.texture, alpha) };
+    pub fn alpha(&self, alpha: f32) -> &Self {
+        unsafe { SDL_SetTextureAlphaModFloat(self.texture, alpha) };
         self
     }
 
     pub fn color(&self, color: Color) -> &Self {
-        unsafe { SDL_SetTextureColorMod(self.texture, color.r, color.g, color.b) };
+        let [r, g, b, _] = color.components;
+        unsafe { SDL_SetTextureColorModFloat(self.texture, r, g, b) };
         self
     }
 
@@ -509,6 +471,7 @@ struct RendererState {
     translate: Vec2,
     alpha: f32,
     clip: Rect,
+    layer: Option<Layer>,
 }
 
 pub struct Renderer {
@@ -518,15 +481,16 @@ pub struct Renderer {
     text_locations: HashMap<cosmic_text::CacheKey, TextLocation>,
     text_textures: TextTexture,
     textures: HashMap<*const DynamicImage, Arc<Texture>>,
-    translate: Vec2,
-    clip: Rect,
+    pub(crate) translate: Vec2,
+    pub(crate) clip: Rect,
+    pub(crate) layer: Option<Layer>,
     size: Vec2,
     pub texture_blend_mode: SDL_BlendMode,
     states: Vec<RendererState>,
     transparent: Texture,
     pub alpha: f32,
-    pub draw_calls: usize,
-    pub _draw_calls: usize,
+    pub draw_calls: (usize, usize),
+    pub draw_tiles: (usize, usize),
 }
 
 impl Renderer {
@@ -546,7 +510,7 @@ impl Renderer {
         };
 
         let surface = Surface::new(1, 1);
-        surface.clear(Color::rgba8(0, 0, 0, 0));
+        surface.clear(Color::TRANSPARENT);
         let transparent = Texture::from_surface(&surface, renderer).blend_mode_none();
 
         Self {
@@ -558,13 +522,14 @@ impl Renderer {
             textures: Default::default(),
             translate: Vec2::ZERO,
             clip: Rect::INFINITY,
+            layer: None,
             size,
             texture_blend_mode: SDL_BLENDMODE_BLEND,
             states: Default::default(),
             transparent,
             alpha: 1.0,
-            draw_calls: 0,
-            _draw_calls: 0,
+            draw_calls: (0, 0),
+            draw_tiles: (0, 0),
         }
     }
 
@@ -577,11 +542,25 @@ impl Renderer {
         self.clip = self.clip.intersect_rect(rect);
     }
 
+    pub fn layer(&mut self, layer: &Layer) {
+        self.layer = Some(layer.clone());
+    }
+
+    fn command(&mut self, command: impl Command + 'static) {
+        if let Some(layer) = self.layer.as_ref() {
+            layer.command(Box::new(command));
+        } else {
+            command.execute(self);
+            self.draw_calls.0 += 1;
+        }
+    }
+
     pub fn save(&mut self) {
         self.states.push(RendererState {
             translate: self.translate,
             alpha: self.alpha,
             clip: self.clip,
+            layer: self.layer.clone(),
         });
     }
 
@@ -590,6 +569,7 @@ impl Renderer {
             self.translate = state.translate;
             self.alpha = state.alpha;
             self.clip = state.clip;
+            self.layer = state.layer;
         }
     }
 
@@ -597,6 +577,7 @@ impl Renderer {
         self.translate = vec2(0.0, 0.0);
         self.alpha = 1.0;
         self.clip = Rect::INFINITY;
+        self.layer = None;
     }
 
     pub fn blend_mode_blend(&self) {
@@ -619,44 +600,24 @@ impl Renderer {
         self.texture_blend_mode = SDL_BLENDMODE_NONE;
     }
 
-    pub fn fill_rect(&mut self, color: Color, location: Vec2, size: Vec2) {
-        let rect = Rect::from((location, size));
-        if let Some((_, rect)) = self.clip_rect(rect, rect) {
-            unsafe {
-                SDL_SetRenderDrawColor(self.renderer, color.r, color.g, color.b, color.a);
-                SDL_RenderFillRect(self.renderer, &rect.into())
-            };
-            self.draw_calls += 1;
-        }
-    }
+    // pub fn set_color(&self, color: Color) {
+    //     unsafe {
+    //         SDL_SetRenderDrawColor(self.renderer, color.r, color.g, color.b, color.a);
+    //     }
+    // }
 
-    pub fn set_color(&self, color: Color) {
-        unsafe {
-            SDL_SetRenderDrawColor(self.renderer, color.r, color.g, color.b, color.a);
-        }
-    }
-
-    pub fn line(&mut self, p1: Vec2, p2: Vec2) {
-        let p1 = p1 + self.translate;
-        let p2 = p2 + self.translate;
-        unsafe {
-            SDL_RenderLine(self.renderer, p1.x, p1.y, p2.x, p2.y);
-            self.draw_calls += 1;
-        }
-    }
-
-    pub fn lines(&mut self, points: &[Vec2]) {
-        let count = points.len() as i32;
-        let points = points
-            .iter()
-            .map(|p| {
-                let p = p + self.translate;
-                SDL_FPoint { x: p.x, y: p.y }
-            })
-            .collect::<Vec<_>>();
-        unsafe { SDL_RenderLines(self.renderer, points.as_ptr(), count) };
-        self.draw_calls += 1;
-    }
+    // pub fn lines(&mut self, points: &[Vec2]) {
+    //     let count = points.len() as i32;
+    //     let points = points
+    //         .iter()
+    //         .map(|p| {
+    //             let p = p + self.translate;
+    //             SDL_FPoint { x: p.x, y: p.y }
+    //         })
+    //         .collect::<Vec<_>>();
+    //     unsafe { SDL_RenderLines(self.renderer, points.as_ptr(), count) };
+    //     self.draw_calls += 1;
+    // }
 
     pub fn fill_selection(
         &mut self,
@@ -687,8 +648,10 @@ impl Renderer {
             }
             self.fill_rect(
                 color,
-                vec2(location.x + x / dpr, location.y + y / dpr),
-                vec2(w, h) / dpr,
+                Rect::from((
+                    vec2(location.x + x / dpr, location.y + y / dpr),
+                    vec2(w, h) / dpr,
+                )),
             );
         };
         let selection_bounds = editor.editor.selection_bounds();
@@ -777,6 +740,72 @@ impl Renderer {
         self
     }
 
+    pub fn measure_text(
+        &self,
+        id: ViewId,
+        buffer: &mut cosmic_text::Buffer,
+        known_dimensions: Size<Option<f32>>,
+        available_space: Size<AvailableSpace>,
+        prune: bool,
+    ) -> Size<f32> {
+        let dpr = self.dpr;
+
+        let width_constraint = known_dimensions.width.or(match available_space.width {
+            AvailableSpace::MinContent => Some(0.0),
+            AvailableSpace::MaxContent => None,
+            AvailableSpace::Definite(width) => Some(width * dpr),
+        });
+
+        let height_constraint = known_dimensions.height.or(match available_space.height {
+            AvailableSpace::MinContent => Some(0.0),
+            AvailableSpace::MaxContent => None,
+            AvailableSpace::Definite(width) => Some(width * dpr),
+        });
+
+        let style = id.state().borrow().style.clone();
+        let metrics = Metrics::new(
+            style.font_size.unwrap_or(20.0) * dpr,
+            style.line_height.unwrap_or(24.0) * dpr,
+        );
+
+        RUNTIME.with_borrow_mut(|s| {
+            buffer.set_metrics_and_size(
+                &mut s.font_system,
+                metrics,
+                width_constraint,
+                height_constraint,
+            );
+            buffer.set_wrap(&mut s.font_system, style.text_wrap.into());
+            buffer.shape_until_scroll(&mut s.font_system, prune);
+        });
+
+        let (width, total_lines) = buffer
+            .layout_runs()
+            .fold((0.0, 0usize), |(width, total_lines), run| {
+                (run.line_w.max(width), total_lines + 1)
+            });
+
+        let height = total_lines as f32 * buffer.metrics().line_height;
+
+        let size = Size {
+            width: if let Some(max_width) = width_constraint {
+                max_width.min(width)
+            } else {
+                width
+            },
+            height: if let Some(max_height) = height_constraint {
+                max_height.min(height)
+            } else {
+                height
+            },
+        };
+
+        Size {
+            width: size.width / dpr,
+            height: size.height / dpr,
+        }
+    }
+
     pub fn fill_text(
         &mut self,
         color: Color,
@@ -831,11 +860,11 @@ impl Renderer {
                 let y = y + sy;
 
                 let src_rect = Rect::from((texture.location + vec2(sx, sy), vec2(w, h)));
-                let texture = { self.text_textures.texture.color(color).ptr() };
                 self.render_texture(
-                    texture,
+                    self.text_textures.texture.ptr(),
                     src_rect,
                     Rect::from((location + vec2(x, y) / dpr, vec2(w, h) / dpr)),
+                    Some(color),
                 );
             }
         }
@@ -901,12 +930,46 @@ impl Renderer {
         );
     }
 
-    pub fn render_texture(&mut self, texture: *mut SDL_Texture, src_rect: Rect, dst_rect: Rect) {
-        if let Some((src_rect, dst_rect)) = self.clip_rect(src_rect, dst_rect) {
-            unsafe {
-                SDL_RenderTexture(self.renderer, texture, &src_rect.into(), &dst_rect.into());
-                self.draw_calls += 1;
-            }
+    pub fn fill_rect(&mut self, color: Color, rect: Rect) {
+        if !rect.intersect(&self.clip) {
+            return;
+        }
+        let rect = rect.intersect_rect(&self.clip) + self.translate;
+        self.command(RectCommand::new(rect).fill(color));
+    }
+
+    pub fn stroke_rect(&mut self, color: Color, rect: Rect) {
+        if !rect.intersect(&self.clip) {
+            return;
+        }
+        let rect = rect.intersect_rect(&self.clip) + self.translate;
+        self.command(RectCommand::new(rect).stroke(color));
+    }
+
+    pub fn line(&mut self, color: Color, p1: Vec2, p2: Vec2) {
+        let p1 = p1 + self.translate;
+        let p2 = p2 + self.translate;
+        self.command(LineCommand {
+            color,
+            from: p1,
+            to: p2,
+        });
+    }
+
+    pub fn render_texture(
+        &mut self,
+        texture: *mut SDL_Texture,
+        src_rect: Rect,
+        dst_rect: Rect,
+        color: Option<Color>,
+    ) {
+        if let Some((src_rect, dst_rect)) = self.clip_rect(src_rect, dst_rect, SDL_FlipMode::NONE) {
+            self.command(RenderTextureCommand {
+                texture,
+                src_rect,
+                dst_rect,
+                color,
+            });
         }
     }
 
@@ -919,38 +982,60 @@ impl Renderer {
         center: Option<Vec2>,
         flip: SDL_FlipMode,
     ) {
-        if let Some((src_rect, dst_rect)) = self.clip_rect(src_rect, dst_rect) {
-            unsafe {
-                SDL_RenderTextureRotated(
-                    self.renderer,
-                    texture.ptr(),
-                    &src_rect.into(),
-                    &dst_rect.into(),
-                    angle,
-                    if let Some(center) = center {
-                        &SDL_FPoint {
-                            x: center.x,
-                            y: center.y,
-                        }
-                    } else {
-                        std::ptr::null()
-                    },
-                    flip,
-                );
-                self.draw_calls += 1;
-            }
+        if let Some((src_rect, dst_rect)) = self.clip_rect(src_rect, dst_rect, flip) {
+            self.command(RenderTextureRotatedCommand {
+                texture: texture.ptr(),
+                src_rect,
+                dst_rect,
+                angle,
+                center,
+                flip,
+            });
         }
     }
 
-    fn clip_rect(&self, mut src_rect: Rect, dst_rect: Rect) -> Option<(Rect, Rect)> {
+    pub fn render_texture_nine_grid(
+        &mut self,
+        texture: &NineGridTexture,
+        position: Vec2,
+        size: Option<Vec2>,
+    ) {
+        let size = size.unwrap_or(texture.texture.size);
+        let position = position + self.translate;
+        self.command(RenderTextureNineGridCommand {
+            texture: texture.ptr(),
+            src_rect: Rect::from((Vec2::ZERO, texture.texture.size)),
+            dst_rect: Rect::from((position, size)),
+            left: texture.left_width as f32,
+            right: texture.right_width as f32,
+            top: texture.top_height as f32,
+            bottom: texture.bottom_height as f32,
+            scale: 1.0,
+        });
+    }
+
+    fn clip_rect(
+        &self,
+        mut src_rect: Rect,
+        dst_rect: Rect,
+        flip: SDL_FlipMode,
+    ) -> Option<(Rect, Rect)> {
         if !self.clip.intersect(&dst_rect) {
             return None;
         }
         let rect = self.clip.intersect_rect(&dst_rect);
+        let origin_rect = src_rect;
+
         src_rect.x += (rect.x - dst_rect.x) / dst_rect.width * src_rect.width;
         src_rect.y += (rect.y - dst_rect.y) / dst_rect.height * src_rect.height;
         src_rect.width *= (rect.width / dst_rect.width);
         src_rect.height *= (rect.height / dst_rect.height);
+        if flip == SDL_FlipMode::HORIZONTAL {
+            src_rect.x = origin_rect.width - src_rect.x - src_rect.width;
+        }
+        if flip == SDL_FlipMode::VERTICAL {
+            src_rect.y = origin_rect.height - src_rect.y - src_rect.height;
+        }
         Some((src_rect, rect + self.translate))
     }
 
@@ -982,8 +1067,12 @@ impl Renderer {
     }
 
     pub fn present(&mut self) {
-        self._draw_calls = self.draw_calls;
-        self.draw_calls = 0;
+        self.draw_calls.1 = self.draw_calls.0;
+        self.draw_calls.0 = 0;
+
+        self.draw_tiles.1 = self.draw_tiles.0;
+        self.draw_tiles.0 = 0;
+
         unsafe {
             SDL_RenderPresent(self.renderer);
         }

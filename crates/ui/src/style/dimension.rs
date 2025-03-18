@@ -85,7 +85,6 @@ impl From<taffy::LengthPercentageAuto> for LengthPercentageAuto {
     }
 }
 
-
 pub struct LengthPercentage(taffy::LengthPercentage);
 
 impl From<Length> for LengthPercentage {
@@ -121,5 +120,34 @@ impl From<taffy::LengthPercentage> for LengthPercentage {
 impl Into<taffy::LengthPercentage> for LengthPercentage {
     fn into(self) -> taffy::LengthPercentage {
         self.0
+    }
+}
+
+pub struct Rect<T> {
+    pub left: T,
+    pub top: T,
+    pub right: T,
+    pub bottom: T,
+}
+
+impl<U: Copy, T: From<U>> From<U> for Rect<T> {
+    fn from(value: U) -> Self {
+        Self {
+            left: value.into(),
+            top: value.into(),
+            right: value.into(),
+            bottom: value.into(),
+        }
+    }
+}
+
+impl<U, T: Into<U>> Into<taffy::Rect<U>> for Rect<T> {
+    fn into(self) -> taffy::Rect<U> {
+        taffy::Rect {
+            left: self.left.into(),
+            top: self.top.into(),
+            right: self.right.into(),
+            bottom: self.bottom.into(),
+        }
     }
 }

@@ -1,19 +1,19 @@
 use crate::animation::use_raf;
 use crate::event::Interactive;
-use crate::sdl::{Bounds, Drawable};
-use crate::style::Styleable;
+use crate::render::renderer::{Bounds, Drawable};
+use crate::style::{StyleTrigger, Styleable};
 use crate::{
     element::Element,
-    sdl::{DynamicImageDrawable, Renderer},
     view_id::ViewId,
 };
 use glam::{vec2, Vec2};
 use image::DynamicImage;
-use reactive::{create_effect, use_context};
+use reactive::create_effect;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 use taffy::{AvailableSpace, Size};
+use crate::render::renderer::{DynamicImageDrawable, Renderer};
 
 enum ImageState {
     None,
@@ -64,7 +64,7 @@ impl Image {
             move |delta| {
                 if let Some(drawable) = drawable.borrow_mut().as_mut() {
                     if (drawable.update(delta)) {
-                        id.request_repaint();
+                        id.request_repaint(StyleTrigger::Paint);
                     }
                 }
             }
@@ -82,7 +82,7 @@ impl Image {
         create_effect({
             let drawable = drawable.clone();
             move |_| {
-                id.request_repaint();
+                id.request_repaint(StyleTrigger::Paint);
                 *drawable.borrow_mut() = f().map(IntoDrawable::into_drawable)
             }
         });
@@ -91,7 +91,7 @@ impl Image {
             move |delta| {
                 if let Some(drawable) = drawable.borrow_mut().as_mut() {
                      if (drawable.update(delta)) {
-                         id.request_repaint();
+                         id.request_repaint(StyleTrigger::Paint);
                      }
                 }
             }
@@ -128,6 +128,7 @@ impl Element for Image {
 
     fn measure(
         &self,
+        ctx: &mut Renderer,
         known_dimensions: Size<Option<f32>>,
         available_space: Size<AvailableSpace>,
     ) -> Size<f32> {

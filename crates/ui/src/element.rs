@@ -1,7 +1,8 @@
 use crate::event::Event;
+use crate::geometry::Rect;
+use crate::render::renderer::Renderer;
 use crate::{
-    sdl::Renderer, view_id::ViewId, widget::dynamic::Dynamic, widget::fragment::Fragment,
-    widget::text::Text,
+    view_id::ViewId, widget::dynamic::Dynamic, widget::fragment::Fragment, widget::text::Text,
 };
 use glam::{vec2, Vec2};
 use peniko::Color;
@@ -9,6 +10,7 @@ use reactive::{Scope, SignalGet};
 use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
+use taffy::prelude::TaffyZero;
 use taffy::{AvailableSpace, Size};
 
 pub trait Element: Any {
@@ -27,13 +29,25 @@ pub trait Element: Any {
         let layout = id.layout();
         let size = layout.size;
 
+        if layout.border.left > 0.0 {
+            dbg!(layout.border.left);
+            ctx.stroke_rect(
+                Color::BLACK,
+                Rect::from((Vec2::ZERO, vec2(size.width, size.height))),
+            )
+        }
+
         if style.background != Color::TRANSPARENT {
-            ctx.fill_rect(style.background, Vec2::ZERO, vec2(size.width, size.height));
+            ctx.fill_rect(
+                style.background,
+                Rect::from((Vec2::ZERO, vec2(size.width, size.height))),
+            );
         }
     }
 
     fn measure(
         &self,
+        ctx: &mut Renderer,
         known_dimensions: Size<Option<f32>>,
         available_space: Size<AvailableSpace>,
     ) -> Size<f32> {

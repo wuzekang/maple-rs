@@ -213,7 +213,7 @@ pub fn world_select_view(on_enter: impl Fn() + 'static) -> impl IntoElement {
                                 .unwrap();
 
                             let delay = 350.0;
-                            let duration = 9500.0;
+                            let duration = 500.0;
                             let mut elapsed = Rc::new(RefCell::new(0.0));
                             let alpha = create_rw_signal(0.0);
                             use_raf(move |delta| {

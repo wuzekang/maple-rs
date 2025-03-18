@@ -4,17 +4,20 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-cosmic-text = {version = "0.12.1", features = ["default"]}
+cosmic-text = { version = "0.12.1", features = ["default"] }
 glam = "0.29.2"
 image = "0.25.5"
 sdl3-sys = { version = "0.4.6", features = [] }
 slotmap = "1.0.7"
-taffy = "0.5.2"
-peniko = "0.2.0"
+taffy = "0.7.6"
+peniko = { version = "0.3.1" }
+parley = { version = "0.3.0" }
+swash = { version = "0.2.1" }
 reactive = { path = "../reactive" }
 log = "0.4.22"
 unicode-segmentation = "1.11.0"
 tokio = { version = "1", features = ["full"] }
 futures = "0.3.31"
-bumpalo = {  version = "3.17.0", features = ["allocator-api2", "collections"] }
-hashbrown = {version = "0.15.2", features = ["allocator-api2"]}
+bumpalo = { version = "3.17.0", features = ["allocator-api2", "collections"] }
+hashbrown = { version = "0.15.2", features = ["allocator-api2"] }
+strum = { version = "0.27", features = ["derive"] }

@@ -1,14 +1,12 @@
 use crate::event::Event;
 use crate::geometry::Rect;
-use crate::style::{compute_style_recursive, PointerEvents, StyleComputeContext};
-use crate::view_state::Layer;
+use crate::render::layer::Layer;
+use crate::style::{compute_style_recursive, PointerEvents, StyleComputeContext, StyleTrigger};
 use crate::{element::Element, runtime::RUNTIME, view_state::ViewState, Renderer};
-use glam::{vec2, Vec2, Vec4};
+use glam::{vec2, Vec2};
 use reactive::on_cleanup;
-use sdl3_sys::everything::*;
 use slotmap::DefaultKey;
 use std::cmp::{Ordering, PartialEq};
-use std::mem::MaybeUninit;
 use std::{cell::RefCell, rc::Rc};
 use taffy::{LengthPercentage, NodeId, Point, TaffyTree};
 
@@ -175,115 +173,48 @@ impl ViewId {
 
         ctx.translate(vec2(location.x, location.y) + vec2(translate.x, translate.y));
 
-        let clip_x = overflow.x == taffy::Overflow::Hidden || overflow.x == taffy::Overflow::Clip;
-        let clip_y = overflow.y == taffy::Overflow::Hidden || overflow.y == taffy::Overflow::Clip;
-        if clip_x || clip_y {
-            ctx.clip(&Rect {
-                x: if clip_x { 0.0 } else { f32::NEG_INFINITY },
-                y: if clip_y { 0.0 } else { f32::NEG_INFINITY },
-                width: if clip_x { size.x } else { f32::INFINITY },
-                height: if clip_y { size.y } else { f32::INFINITY },
-            });
-        }
+        let clip_x = overflow.x == taffy::Overflow::Hidden
+            || overflow.x == taffy::Overflow::Clip
+            || overflow.x == taffy::Overflow::Scroll;
+        let clip_y = overflow.y == taffy::Overflow::Hidden
+            || overflow.y == taffy::Overflow::Clip
+            || overflow.y == taffy::Overflow::Scroll;
+        let clip_rect = Rect {
+            x: if clip_x { 0.0 } else { f32::NEG_INFINITY },
+            y: if clip_y { 0.0 } else { f32::NEG_INFINITY },
+            width: if clip_x { size.x } else { f32::INFINITY },
+            height: if clip_y { size.y } else { f32::INFINITY },
+        };
 
         if opacity < 1.0 || self.state().borrow().composite {
             if self.state().borrow().repaint {
                 self.state().borrow_mut().repaint = false;
 
-                let mode = unsafe {
-                    SDL_ComposeCustomBlendMode(
-                        SDL_BlendFactor::ONE,
-                        SDL_BlendFactor::ONE_MINUS_SRC_ALPHA,
-                        SDL_BlendOperation::ADD,
-                        SDL_BlendFactor::ONE,
-                        SDL_BlendFactor::ONE_MINUS_SRC_ALPHA,
-                        SDL_BlendOperation::ADD,
-                    )
-                };
+                let layer = Layer::new(Rect::from((ctx.translate, size)));
 
-                let texture = Rc::new(
-                    ctx.create_texture(size * ctx.dpr)
-                        .blend_mode(mode)
-                        .scale_mode_nearest(),
-                );
+                ctx.save();
+                ctx.clip = Rect::INFINITY;
+                ctx.clip(&clip_rect);
+                ctx.layer(&layer);
+                self.element().borrow().paint(ctx);
+                for child in self.children().iter() {
+                    child.paint(ctx);
+                }
+                ctx.restore();
 
-                let mode = unsafe {
-                    SDL_ComposeCustomBlendMode(
-                        SDL_BlendFactor::ZERO,
-                        SDL_BlendFactor::SRC_ALPHA,
-                        SDL_BlendOperation::ADD,
-                        SDL_BlendFactor::ZERO,
-                        SDL_BlendFactor::SRC_ALPHA,
-                        SDL_BlendOperation::ADD,
-                    )
-                };
-
-                let blend_texture = Rc::new(
-                    ctx.create_streaming_texture(size * ctx.dpr)
-                        .blend_mode(mode),
-                );
-
-                ctx.with_target(&texture.clone(), |ctx| {
-                    ctx.save();
-                    ctx.reset();
-                    ctx.clear();
-                    self.element().borrow().paint(ctx);
-                    for child in self.children().iter() {
-                        child.paint(ctx);
-                    }
-
-                    unsafe {
-                        let mut surface = MaybeUninit::uninit();
-
-                        SDL_LockTextureToSurface(
-                            blend_texture.ptr(),
-                            &SDL_Rect {
-                                x: 0,
-                                y: 0,
-                                w: 1,
-                                h: 1,
-                            },
-                            surface.as_mut_ptr(),
-                        );
-
-                        let surface = surface.assume_init();
-
-                        SDL_WriteSurfacePixel(surface, 0, 0, 0, 0, 0, (opacity * 255.0) as u8);
-
-                        SDL_UnlockTexture(blend_texture.ptr());
-
-                        SDL_DestroySurface(surface);
-                    }
-
-                    ctx.render_texture_rotated(
-                        &blend_texture,
-                        Rect::from((Vec2::ZERO, Vec2::ONE)),
-                        Rect::from((Vec2::ZERO, texture.size)),
-                        0.0,
-                        None,
-                        SDL_FlipMode::NONE,
-                    );
-
-                    ctx.restore();
-
-                    self.state().borrow_mut().layer = Some(Layer {
-                        texture,
-                        blend_texture,
-                    });
-                });
+                self.state().borrow_mut().layer = Some(layer);
             }
 
-            let Layer { texture, .. } = self.state().borrow().layer.clone().unwrap();
-
-            ctx.render_texture_rotated(
-                &texture,
-                Rect::from((Vec2::ZERO, texture.size)),
-                Rect::from((Vec2::ZERO, texture.size / ctx.dpr)),
-                0.0,
-                None,
-                SDL_FlipMode::NONE,
-            );
+            ctx.clip(&clip_rect);
+            self.state()
+                .borrow()
+                .layer
+                .as_ref()
+                .unwrap()
+                .render(ctx, opacity);
         } else {
+            self.state().borrow_mut().repaint = false;
+            ctx.clip(&clip_rect);
             self.element().borrow().paint(ctx);
             for child in self.children().iter() {
                 child.paint(ctx);
@@ -318,9 +249,27 @@ impl ViewId {
         path
     }
 
-    pub fn request_repaint(&self) {
-        let mut current = *self;
+    pub fn request_repaint(&self, trigger: StyleTrigger) {
+        if trigger == StyleTrigger::None {
+            return;
+        }
+        if !self.state().borrow().mounted {
+            return;
+        }
+        let current = if trigger == StyleTrigger::Composite {
+            self.parent()
+        } else {
+            Some(*self)
+        };
+        if current.is_none() {
+            return;
+        }
+
+        let mut current = current.unwrap();
         while current.state().borrow().layer.is_none() {
+            if current.state().borrow_mut().repaint {
+                return;
+            }
             current.state().borrow_mut().repaint = true;
             if current.parent().is_none() {
                 return;

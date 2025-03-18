@@ -12,7 +12,7 @@ use ui::geometry;
 use ui::peniko::Color;
 use ui::reactive::{create_rw_signal, use_context, RwSignal, SignalGet, SignalUpdate};
 use ui::style::dimension::length;
-use ui::style::Styleable;
+use ui::style::{StyleTrigger, Styleable};
 use ui::taffy::Position;
 use ui::{dynamic, fragment, input, view, Drawable, Element, IntoElement, Renderer, ViewId};
 
@@ -100,6 +100,12 @@ impl MainScene {
 
         let size = vec2(800.0, 600.0);
 
+        let t = map.info.vr_top.unwrap() as f32;
+        let b = map.info.vr_bottom.unwrap() as f32;
+        let l = map.info.vr_left.unwrap() as f32;
+        let r = map.info.vr_right.unwrap() as f32;
+        let vr_size = vec2(r - l, b - t);
+
         let mut texts = vec![];
         for layer in &map.layers {
             for item in &layer.objects {
@@ -108,15 +114,14 @@ impl MainScene {
                     let position = item.position;
                     texts.push(
                         view()
-                            .composite()
+                            // .composite()
                             .style(move |s| {
                                 s.absolute()
-                                    .left(position.x)
-                                    .top(position.y)
+                                    .left(position.x - l)
+                                    .top(position.y - t)
                                     .font_size(12.0)
                                     .line_height(14.0)
-                                    .background(Color::WHITE)
-                                    .color(Color::RED)
+                                    .bg_white()
                             })
                             .children(ui::text({ move || path.clone() })),
                     );
@@ -131,38 +136,36 @@ impl MainScene {
             ..Default::default()
         };
 
-        let t = map.info.vr_top.unwrap() as f32;
-        let b = map.info.vr_bottom.unwrap() as f32;
-        let l = map.info.vr_left.unwrap() as f32;
-        let r = map.info.vr_right.unwrap() as f32;
-        let vr_size = vec2(r - l, b - t);
-
         let id = view()
-            .style(move |s| s.absolute().w_full().h_full().overflow_clip())
+            .style(move |s| {
+                s.absolute()
+                    .left(0)
+                    .top(0)
+                    .width(vr_size.x)
+                    .height(vr_size.y)
+            })
             .children(
                 view()
+                    .style(move |s| {
+                        let camera = camera_signal.get();
+                        s.absolute()
+                            .left(0)
+                            .top(0)
+                            .width(vr_size.x)
+                            .height(vr_size.y)
+                            .translate_x(-camera.position.x + l)
+                            .translate_y(-camera.position.y + t)
+                    })
                     .composite()
-                    .style(move |s| s.absolute().width(vr_size.x).height(vr_size.y))
-                    .children(
-                        view()
-                            .style(move |s| {
-                                let camera = camera_signal.get();
-                                s.absolute()
-                                    .width(vr_size.x)
-                                    .height(vr_size.y)
-                                    .translate_x(-camera.position.x)
-                                    .translate_y(-camera.position.y)
-                            })
-                            .children((dynamic({
-                                move || {
-                                    if text_visible.get() {
-                                        texts.clone()
-                                    } else {
-                                        Node::Fragment(vec![])
-                                    }
-                                }
-                            }),)),
-                    ),
+                    .children((dynamic({
+                        move || {
+                            if text_visible.get() {
+                                texts.clone()
+                            } else {
+                                Node::Fragment(vec![])
+                            }
+                        }
+                    }),)),
             )
             .id();
 
@@ -203,7 +206,7 @@ impl Element for MainScene {
     }
 
     fn update(&mut self, delta: f32) {
-        self.id.request_repaint();
+        // self.id.request_repaint(StyleTrigger::Paint);
 
         player_move(self, delta);
 

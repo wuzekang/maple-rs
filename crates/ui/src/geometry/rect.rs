@@ -30,14 +30,30 @@ impl Rect {
     pub fn intersect_rect(&self, rhs: &Self) -> Rect {
         // 计算两个矩形的左右上下边界
         let left_lhs = self.x;
-        let right_lhs = self.x + self.width;
+        let right_lhs = if self.width == f32::INFINITY {
+            f32::INFINITY
+        } else {
+            self.x + self.width
+        };
         let top_lhs = self.y;
-        let bottom_lhs = self.y + self.height;
+        let bottom_lhs = if self.height == f32::INFINITY {
+            f32::INFINITY
+        } else {
+            self.y + self.height
+        };
 
         let left_b = rhs.x;
-        let right_b = rhs.x + rhs.width;
+        let right_b = if rhs.width == f32::INFINITY {
+            f32::INFINITY
+        } else {
+            rhs.x + rhs.width
+        };
         let top_b = rhs.y;
-        let bottom_b = rhs.y + rhs.height;
+        let bottom_b = if rhs.height == f32::INFINITY {
+            f32::INFINITY
+        } else {
+            rhs.y + rhs.height
+        };
 
         // 计算相交区域的边界
         let left = left_lhs.max(left_b);
@@ -46,8 +62,16 @@ impl Rect {
         let bottom = bottom_lhs.min(bottom_b);
 
         // 计算宽度和高度，并确保非负
-        let width = (right - left).max(0.0);
-        let height = (bottom - top).max(0.0);
+        let width = if right == f32::INFINITY {
+            f32::INFINITY
+        } else {
+            (right - left).max(0.0)
+        };
+        let height = if bottom == f32::INFINITY {
+            f32::INFINITY
+        } else {
+            (bottom - top).max(0.0)
+        };
 
         Rect {
             x: left,
@@ -64,6 +88,10 @@ impl Rect {
 
     pub fn location(&self) -> Vec2 {
         vec2(self.x, self.y)
+    }
+
+    pub fn size(&self) -> Vec2 {
+        vec2(self.width, self.height)
     }
 
     pub fn contains(&self, point: Vec2) -> bool {

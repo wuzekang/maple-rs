@@ -1,7 +1,7 @@
 use crate::element::Node;
 use crate::event::Interactive;
 use crate::root::EventDispatcher;
-use crate::style::Styleable;
+use crate::style::{StyleTrigger, Styleable};
 use crate::{element::Element, view_id::ViewId, view_tuple::ViewTuple};
 use reactive::{create_effect, use_context, Scope};
 
@@ -21,7 +21,11 @@ impl Element for View {
     }
 
     fn name(&self) -> String {
-        "View".to_string()
+        format!(
+            "View layer={} repaint={}",
+            self.id.state().borrow().layer.is_some(),
+            self.id.state().borrow().repaint
+        )
     }
 }
 
@@ -44,7 +48,6 @@ impl View {
         subscribe(id, &children, ctx.clone());
         create_effect(move |_| {
             id.set_children(flatten(&children));
-            id.request_repaint();
         });
         self
     }
@@ -140,6 +143,8 @@ fn mount(id: ViewId, parent: ViewId, ctx: &EventDispatcher) {
     }
     ctx.mount(id, parent);
     id.state().borrow_mut().mounted = true;
+    parent.request_repaint(StyleTrigger::Layout);
+    ctx.request_style(id);
     for child in id.children().iter() {
         mount(*child, parent, ctx);
     }
@@ -150,6 +155,7 @@ fn unmount(id: ViewId, parent: ViewId, ctx: &EventDispatcher) {
         return;
     }
     ctx.unmount(id, parent);
+    parent.request_repaint(StyleTrigger::Layout);
     id.state().borrow_mut().mounted = false;
     for child in id.children().iter() {
         unmount(*child, parent, ctx);
