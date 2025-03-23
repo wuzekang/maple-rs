@@ -15,3 +15,4 @@ tokio = { version = "1", features = ["full"] }
 sdl3-sys = { version = "0.4.6", features = [] }
 hecs = "0.10.5"
 log = "0.4.22"
+symphonia = { version = "0.5.4", features = ["mp3"], default-features = false }

@@ -22,37 +22,44 @@ use eframe::{
 use font_kit::{
     family_name::FamilyName, handle::Handle, properties::Properties, source::SystemSource,
 };
+use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
+use std::io::Cursor;
+use std::time::Duration;
 
 fn load_system_font(ctx: &Context) {
-    // let mut fonts = FontDefinitions::empty();
+    let mut fonts = FontDefinitions::empty();
 
-    // const FONT_NAME: &'static str = "PingFang SC";
+    const FONT_NAME: &'static str = "PingFang SC";
 
-    // let handle = SystemSource::new()
-    //     .select_best_match(
-    //         &[FamilyName::Title(FONT_NAME.to_string())],
-    //         &Properties::new(),
-    //     )
-    //     .unwrap();
+    let handle = SystemSource::new()
+        .select_best_match(
+            &[
+                FamilyName::Title("PingFang SC".to_string()),
+                FamilyName::Title("SimSun".to_string()),
+                FamilyName::SansSerif,
+            ],
+            &Properties::new(),
+        )
+        .unwrap();
 
-    // let buf: Vec<u8> = match handle {
-    //     Handle::Memory { bytes, .. } => bytes.to_vec(),
-    //     Handle::Path { path, .. } => read(path).unwrap(),
-    // };
+    let buf: Vec<u8> = match handle {
+        Handle::Memory { bytes, .. } => bytes.to_vec(),
+        Handle::Path { path, .. } => read(path).unwrap(),
+    };
 
-    // fonts
-    //     .font_data
-    //     .insert(FONT_NAME.to_owned(), FontData::from_owned(buf));
+    fonts
+        .font_data
+        .insert(FONT_NAME.to_owned(), FontData::from_owned(buf));
 
-    // if let Some(vec) = fonts.families.get_mut(&FontFamily::Proportional) {
-    //     vec.push(FONT_NAME.to_owned());
-    // }
+    if let Some(vec) = fonts.families.get_mut(&FontFamily::Proportional) {
+        vec.push(FONT_NAME.to_owned());
+    }
 
-    // if let Some(vec) = fonts.families.get_mut(&FontFamily::Monospace) {
-    //     vec.push(FONT_NAME.to_owned());
-    // }
+    if let Some(vec) = fonts.families.get_mut(&FontFamily::Monospace) {
+        vec.push(FONT_NAME.to_owned());
+    }
 
-    // ctx.set_fonts(fonts);
+    ctx.set_fonts(fonts);
 }
 
 fn walk_node_and_to_json(node_arc: &WzNodeArc, json: &mut Map<String, Value>) {
@@ -95,13 +102,14 @@ struct Tree {
 }
 
 impl Tree {
-    pub fn ui(&mut self, ui: &mut Ui, node: &WzNodeArc) {
+    pub fn ui(&mut self, ui: &mut Ui, node: &WzNodeArc) -> bool {
         self.children_ui(ui, node)
     }
 }
 
 impl Tree {
-    fn ui_impl(&mut self, ui: &mut Ui, name: &str, node: &WzNodeArc) {
+    fn ui_impl(&mut self, ui: &mut Ui, name: &str, node: &WzNodeArc) -> bool {
+        let mut changed = false;
         if name.ends_with(".img") || node.read().unwrap().children.len() > 0 {
             let id = ui.make_persistent_id(
                 "my_collapsing_header".to_string() + &node.read().unwrap().get_full_path(),
@@ -114,6 +122,7 @@ impl Tree {
                     }
                     if ui.button(text).clicked() {
                         self.selected = Some(node.clone());
+                        changed = true;
                     }
                 })
                 .body(|ui| self.children_ui(ui, node));
@@ -123,16 +132,20 @@ impl Tree {
         } else {
             if ui.button(name).clicked() {
                 self.selected = Some(node.clone());
+                changed = true;
             };
         }
+        changed
     }
 
-    fn children_ui(&mut self, ui: &mut Ui, node: &WzNodeArc) {
+    fn children_ui(&mut self, ui: &mut Ui, node: &WzNodeArc) -> bool {
         let binding = node.read().unwrap();
         let children = binding.children.iter().collect::<Vec<_>>();
+        let mut changed = false;
         for (name, node) in children {
-            self.ui_impl(ui, name.as_str(), &node);
+            changed = changed || self.ui_impl(ui, name.as_str(), &node);
         }
+        changed
     }
 }
 
@@ -155,6 +168,7 @@ struct MyApp {
     tree: Tree,
     node: WzNodeArc,
     clipboard: clipboard_rs::ClipboardContext,
+    stream: Option<(OutputStream, OutputStreamHandle, Sink)>,
 }
 
 impl Default for MyApp {
@@ -163,6 +177,7 @@ impl Default for MyApp {
             node: resolve_base("./Data/Base.wz", None).unwrap(),
             tree: Tree::default(),
             clipboard: clipboard_rs::ClipboardContext::new().unwrap(),
+            stream: None,
         }
     }
 }
@@ -179,7 +194,13 @@ impl eframe::App for MyApp {
             .width_range(80.0..=200.0)
             .show(ctx, |ui| {
                 ui.text_edit_singleline(&mut self.tree.search);
-                egui::ScrollArea::vertical().show(ui, |ui| self.tree.ui(ui, &self.node));
+                let response =
+                    egui::ScrollArea::vertical().show(ui, |ui| self.tree.ui(ui, &self.node));
+                if response.inner {
+                    if let Some((_, _, sink)) = &self.stream {
+                        sink.stop();
+                    }
+                }
             });
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -196,7 +217,21 @@ impl eframe::App for MyApp {
                         WzObjectType::Directory(_) => {}
                         WzObjectType::Property(v) => match v {
                             WzSubProperty::Convex => {}
-                            WzSubProperty::Sound(_) => {}
+                            WzSubProperty::Sound(sound) => {
+                                ui.label(format!(
+                                    "{:?} {:?}",
+                                    sound.sound_type,
+                                    Duration::from_millis(sound.duration as u64)
+                                ));
+                                if ui.button("Play").clicked() {
+                                    let source =
+                                        Decoder::new(Cursor::new(sound.get_buffer())).unwrap();
+                                    let (stream, handle) = OutputStream::try_default().unwrap();
+                                    let sink = Sink::try_new(&handle).unwrap();
+                                    sink.append(source);
+                                    self.stream = Some((stream, handle, sink));
+                                }
+                            }
                             WzSubProperty::PNG(v) => {
                                 let image = v.extract_png().unwrap();
                                 let color_image = match image.clone() {

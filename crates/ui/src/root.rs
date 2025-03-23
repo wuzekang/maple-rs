@@ -642,5 +642,6 @@ impl Root {
                 self.bump.reset();
             }
         }
+        Scope::current().dispose()
     }
 }

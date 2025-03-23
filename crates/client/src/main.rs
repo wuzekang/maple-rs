@@ -17,6 +17,7 @@ mod login;
 mod map;
 mod npc;
 mod scene;
+mod sound;
 mod sprite;
 mod timer;
 mod wz;
@@ -29,7 +30,7 @@ struct WzBase {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     unsafe {
-        SDL_Init(SDL_INIT_VIDEO);
+        SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO);
     }
 
     // let size = vec2(1920.0, 1080.0);

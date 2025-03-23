@@ -2,6 +2,7 @@ use crate::cursor::CursorState;
 use crate::login::login_scene;
 use crate::map::world_map::WorldMap;
 use crate::scene::MainScene;
+use crate::sound::play_sound;
 use crate::sprite::{ASpriteAnimation, Sprite, SpriteAnimation};
 use crate::timer::Repeat;
 use crate::wz::Node;
@@ -37,8 +38,6 @@ enum Stage {
 }
 
 pub fn app() -> impl IntoElement {
-    // return fragment(text(|| "aa".to_string()).style(|s| s.block().width(100).height(100).bg_white()));
-
     let stage = RwSignal::new(Stage::Logo);
     let open = RwSignal::new(true);
 
@@ -72,6 +71,11 @@ pub fn app() -> impl IntoElement {
                 .background(Color::WHITE)
         }),
     ))
+}
+
+struct SoundBuffer {
+    buffer: Vec<u8>,
+    cursor: u64,
 }
 
 struct SequenceAnimation {
@@ -159,12 +163,46 @@ pub fn logo_scene(on_finished: impl Fn() + 'static) -> impl IntoElement {
             }
         },
         move |resource| {
+            #[derive(Copy, Clone)]
+            enum Step {
+                NxLogo,
+                WzLogo,
+            }
+
+            impl Step {
+                fn next(self) -> Option<Self> {
+                    match self {
+                        Step::NxLogo => Some(Step::WzLogo),
+                        Step::WzLogo => None,
+                    }
+                }
+            }
+
+            let step = create_rw_signal(Step::NxLogo);
+
             let content = if let Some((nexon, wizet)) = resource {
-                let mut animation = SequenceAnimation::new(vec![nexon, wizet]);
-                animation.on_complete(move || {
-                    on_finished.with(|f| f());
-                });
-                fragment(Image::new(animation).on_click(|_| {}))
+                fragment(dynamic(move || {
+                    Image::new({
+                        let mut animation = SequenceAnimation::new(vec![match step.get() {
+                            Step::NxLogo => {
+                                play_sound("Sound/BgmUI.img/NxLogo");
+                                nexon.clone()
+                            }
+                            Step::WzLogo => {
+                                play_sound("Sound/BgmUI.img/WzLogo");
+                                wizet.clone()
+                            }
+                        }]);
+                        animation.on_complete(move || {
+                            if let Some(next) = step.get_untracked().next() {
+                                step.set(next);
+                            } else {
+                                on_finished.with(|f| f());
+                            }
+                        });
+                        animation
+                    })
+                }))
             } else {
                 fragment(view().style(|s| {
                     s.background(Color::new([1.0, 0.0, 0.0, 1.0]))
@@ -182,7 +220,11 @@ pub fn logo_scene(on_finished: impl Fn() + 'static) -> impl IntoElement {
                         .bg_white()
                 })
                 .on_click(move |_| {
-                    on_finished.with(|f| f());
+                    if let Some(next) = step.get_untracked().next() {
+                        step.set(next);
+                    } else {
+                        on_finished.with(|f| f());
+                    }
                 })
                 .children(content)
         },
@@ -243,10 +285,14 @@ pub fn button(btn_node: Node) -> View {
                 }
             })
             .on_mouse_enter(move |_| {
+                play_sound("Sound/UI.img/BtMouseOver");
                 btn_state.set("mouseOver".to_string());
             })
             .on_mouse_leave(move |_| {
                 btn_state.set("normal".to_string());
+            })
+            .on_click(|_| {
+                play_sound("Sound/UI.img/BtMouseClick");
             })
             .style(move |s| {
                 current.track();

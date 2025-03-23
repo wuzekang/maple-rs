@@ -1,11 +1,12 @@
 use crate::app::button;
 use crate::character::{Character, ZMap};
 use crate::scene::MainScene;
+use crate::sound::play_sound;
 use crate::sprite::{Sprite, SpriteAnimation, SpriteDrawable};
 use crate::timer::Repeat;
 use crate::WzBase;
 use crate::{map, wz};
-use glam::{vec2, Vec2, Vec4};
+use glam::{vec2, Vec2};
 use image::DynamicImage;
 use sdl3_sys::everything::SDL_FlipMode;
 use std::cell::{Cell, RefCell};
@@ -229,7 +230,7 @@ pub fn world_select_view(on_enter: impl Fn() + 'static) -> impl IntoElement {
 
                             fragment((view()
                                 .style(|s| s.absolute().left(38).top(133).width(449).height(268))
-                                          .composite()
+                                .composite()
                                 .style(move |s| s.opacity(alpha.get()))
                                 .children((
                                     Image::new(title).style(|s| s.absolute().left(33).top(8)),
@@ -1015,6 +1016,8 @@ impl LoginContext {
 }
 
 pub fn login_scene(on_enter: impl Fn() + 'static) -> View {
+    play_sound("Sound/BgmUI.img/Title");
+
     let WzBase { node: base } = use_context().unwrap();
     let img = base.at_path("UI/Login.img").unwrap();
     let frame: Arc<::image::DynamicImage> =
