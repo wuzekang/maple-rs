@@ -151,6 +151,8 @@ impl Command for LineCommand {
         let from = self.from;
         let to = self.to;
         unsafe {
+            let [r, g, b, a] = self.color.components;
+            SDL_SetRenderDrawColorFloat(ctx.renderer, r, g, b, a);
             SDL_RenderLine(ctx.renderer, from.x, from.y, to.x, to.y);
         }
     }

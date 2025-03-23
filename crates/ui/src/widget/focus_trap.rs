@@ -1,6 +1,6 @@
 use crate::event::use_key_down_event;
-use crate::mutation_observer::MutationObserver;
-use crate::root::EventDispatcher;
+use crate::mutation_observer::{MutationObserver, ObserveOptions};
+use crate::root::AppContext;
 use crate::style::Styleable;
 use crate::view_tuple::ViewTuple;
 use crate::{view, Element, Interactive, View, ViewId};
@@ -54,7 +54,7 @@ impl FocusTrapContext {
     }
 
     pub fn next(&self, forward: bool) {
-        let ctx = use_context::<EventDispatcher>().unwrap();
+        let ctx = use_context::<AppContext>().unwrap();
         let focused = ctx.focused.borrow().clone();
 
         let traps = self
@@ -212,7 +212,14 @@ impl FocusTrap {
             }
         });
 
-        observer.observe(id);
+        observer.observe(
+            id,
+            ObserveOptions {
+                attributes: true,
+                child_list: true,
+                subtree: true,
+            },
+        );
 
         on_cleanup(move || {
             observer.disconnect();

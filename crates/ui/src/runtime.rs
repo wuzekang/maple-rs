@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::{cell::RefCell, rc::Rc};
 use taffy::TaffyTree;
+use crate::mutation_observer::ObserveOptions;
 
 thread_local! {
     pub static RUNTIME: RefCell<Runtime> = Default::default();
@@ -21,7 +22,7 @@ pub struct Runtime {
     pub sender: Sender<Resource>,
     pub receiver: Receiver<Resource>,
     pub resources: RefCell<SlotMap<DefaultKey, Rc<dyn Fn(Resource)>>>,
-    pub mutation_observers: RefCell<SlotMap<DefaultKey, (ViewId, Rc<dyn Fn()>)>>,
+    pub mutation_observers: RefCell<SlotMap<DefaultKey, (ViewId, Rc<dyn Fn()>, ObserveOptions)>>,
 }
 
 impl Default for Runtime {

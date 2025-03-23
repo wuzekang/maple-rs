@@ -1,4 +1,4 @@
-use crate::root::EventDispatcher;
+use crate::root::AppContext;
 use crate::runtime::RUNTIME;
 use crate::{Element, ViewId};
 use glam::{vec2, Vec2};
@@ -392,7 +392,7 @@ pub trait Interactive: Sized + Element {
     }
 
     fn focus(&self) {
-        let ctx: EventDispatcher = use_context().unwrap();
+        let ctx: AppContext = use_context().unwrap();
         ctx.queue(Event::Focus(FocusEvent {
             r#type: FocusEventType::Focus,
             target: self.id(),

@@ -89,13 +89,15 @@ impl Runtime {
             )
         };
 
-        for child in children {
-            ret.append(&mut self.dispose(child));
-        }
-
         // signal
         for (_, effect) in subscribers {
             self.observer_clean_up(effect.id());
+        }
+
+        self.observer_clean_up(id);
+
+        for child in children {
+            ret.append(&mut self.dispose(child));
         }
 
         for cleanup in cleanups {
@@ -112,6 +114,9 @@ impl Runtime {
     }
 
     pub fn observer_clean_up(&self, id: Id) {
+        if !self.nodes.borrow().contains_key(id.0) {
+            return;
+        }
         let observers = mem::take(&mut self.nodes.borrow_mut()[id.into()].observers);
         for observer in observers {
             self.nodes.borrow_mut()[observer.into()]
@@ -191,6 +196,14 @@ impl Runtime {
                 ..Default::default()
             })
             .into()
+    }
+
+    pub fn crete_child(&self, parent: Id) -> Id {
+        let id = self.next();
+        self.nodes.borrow_mut()[parent.0]
+            .children
+            .push(id);
+        id
     }
 
     pub fn create_effect<T>(&self, f: impl Fn(Option<T>) -> T + 'static)

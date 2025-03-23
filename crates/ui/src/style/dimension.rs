@@ -1,3 +1,4 @@
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Dimension(taffy::Dimension);
 
 impl From<f32> for Dimension {
@@ -47,6 +48,7 @@ pub fn percent(value: f32) -> Percent {
     Percent(value)
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct LengthPercentageAuto(taffy::LengthPercentageAuto);
 
 impl From<Length> for LengthPercentageAuto {
@@ -73,6 +75,11 @@ impl From<i32> for LengthPercentageAuto {
     }
 }
 
+impl From<usize> for LengthPercentageAuto {
+    fn from(value: usize) -> Self {
+        Self(taffy::LengthPercentageAuto::Length(value as f32))
+    }
+}
 impl Into<taffy::LengthPercentageAuto> for LengthPercentageAuto {
     fn into(self) -> taffy::LengthPercentageAuto {
         self.0
@@ -85,6 +92,7 @@ impl From<taffy::LengthPercentageAuto> for LengthPercentageAuto {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct LengthPercentage(taffy::LengthPercentage);
 
 impl From<Length> for LengthPercentage {
@@ -111,6 +119,12 @@ impl From<i32> for LengthPercentage {
     }
 }
 
+impl From<usize> for LengthPercentage {
+    fn from(value: usize) -> Self {
+        Self(taffy::LengthPercentage::Length(value as f32))
+    }
+}
+
 impl From<taffy::LengthPercentage> for LengthPercentage {
     fn from(value: taffy::LengthPercentage) -> Self {
         Self(value)
@@ -123,25 +137,70 @@ impl Into<taffy::LengthPercentage> for LengthPercentage {
     }
 }
 
-pub struct Rect<T> {
+#[derive(Clone, Copy)]
+pub struct Rect<T: Clone + Copy> {
     pub left: T,
     pub top: T,
     pub right: T,
     pub bottom: T,
 }
 
-impl<U: Copy, T: From<U>> From<U> for Rect<T> {
-    fn from(value: U) -> Self {
+impl<T: Into<Dimension> + Clone> From<T> for Rect<Dimension> {
+    fn from(value: T) -> Self {
         Self {
-            left: value.into(),
-            top: value.into(),
-            right: value.into(),
-            bottom: value.into(),
+            left: value.clone().into(),
+            top: value.clone().into(),
+            right: value.clone().into(),
+            bottom: value.clone().into(),
         }
     }
 }
 
-impl<U, T: Into<U>> Into<taffy::Rect<U>> for Rect<T> {
+impl<T: Into<LengthPercentage> + Clone> From<T> for Rect<LengthPercentage> {
+    fn from(value: T) -> Self {
+        Self {
+            left: value.clone().into(),
+            top: value.clone().into(),
+            right: value.clone().into(),
+            bottom: value.clone().into(),
+        }
+    }
+}
+
+impl<T: Into<LengthPercentage> + Clone> From<[T; 2]> for Rect<LengthPercentage> {
+    fn from([v, h]: [T; 2]) -> Self {
+        Self {
+            left: h.clone().into(),
+            top: v.clone().into(),
+            right: h.clone().into(),
+            bottom: v.clone().into(),
+        }
+    }
+}
+
+impl<T: Into<LengthPercentageAuto> + Clone> From<T> for Rect<LengthPercentageAuto> {
+    fn from(value: T) -> Self {
+        Self {
+            left: value.clone().into(),
+            top: value.clone().into(),
+            right: value.clone().into(),
+            bottom: value.clone().into(),
+        }
+    }
+}
+
+impl<T: Into<LengthPercentageAuto> + Clone> From<[T; 2]> for Rect<LengthPercentageAuto> {
+    fn from([v, h]: [T; 2]) -> Self {
+        Self {
+            left: h.clone().into(),
+            top: v.clone().into(),
+            right: h.clone().into(),
+            bottom: v.clone().into(),
+        }
+    }
+}
+
+impl<U, T: Into<U> + Clone + Copy> Into<taffy::Rect<U>> for Rect<T> {
     fn into(self) -> taffy::Rect<U> {
         taffy::Rect {
             left: self.left.into(),

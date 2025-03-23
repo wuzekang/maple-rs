@@ -1,6 +1,6 @@
 use crate::geometry::Rect;
 use crate::render::command::Command;
-use crate::{Renderer, Texture};
+use crate::{RenderFlag, Renderer, Texture};
 use glam::{vec2, Vec2};
 use peniko::Color;
 use sdl3_sys::blendmode::{SDL_BlendFactor, SDL_BlendOperation, SDL_ComposeCustomBlendMode};
@@ -61,7 +61,9 @@ impl Tile {
                 ctx.clear();
                 for command in self.commands.iter() {
                     command.execute(ctx);
-                    ctx.fill_rect(Color::BLACK.with_alpha(0.2), command.bounds())
+                    if ctx.flags.contains(&RenderFlag::LayerDebug) {
+                        ctx.fill_rect(Color::BLACK.with_alpha(0.2), command.bounds())
+                    }
                 }
                 ctx.restore();
             });
@@ -78,10 +80,12 @@ impl Tile {
 
         ctx.draw_tiles.0 += 1;
 
-        ctx.stroke_rect(
-            Color::BLACK.with_alpha(0.5),
-            Rect::from((Vec2::ZERO, texture.size / ctx.dpr)),
-        );
+        if ctx.flags.contains(&RenderFlag::LayerDebug) {
+            ctx.stroke_rect(
+                Color::BLACK.with_alpha(0.5),
+                Rect::from((Vec2::ZERO, texture.size / ctx.dpr)),
+            );
+        }
     }
 }
 
@@ -135,10 +139,12 @@ impl Layer {
 
         let mut tiles = self.tiles.borrow_mut();
 
-        ctx.stroke_rect(
-            Color::new([0.0, 0.0, 1.0, 1.0]),
-            Rect::from((Vec2::ONE, self.bounds.size() - Vec2::ONE * 2.0)),
-        );
+        if ctx.flags.contains(&RenderFlag::LayerDebug) {
+            ctx.stroke_rect(
+                Color::new([0.0, 0.0, 1.0, 1.0]),
+                Rect::from((Vec2::ONE, self.bounds.size() - Vec2::ONE * 2.0)),
+            );
+        }
 
         for (i, x, y) in self.clip_tiles(clip_rect) {
             ctx.save();
@@ -146,7 +152,6 @@ impl Layer {
             tiles[i].render(ctx, alpha);
             ctx.restore();
         }
-
     }
 
     pub fn clip_tiles(&self, clip_rect: Rect) -> TileIterator {

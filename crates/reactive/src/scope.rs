@@ -14,7 +14,7 @@ use crate::{
 /// Every Signal has a Scope created explicitly or implicitly,
 /// and when you Dispose the Scope, it will clean up all the Signals
 /// that belong to the Scope and all the child Scopes
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
 pub struct Scope(pub(crate) Id);
 
 impl Default for Scope {
@@ -45,8 +45,8 @@ impl Scope {
 
     /// Create a child Scope of this Scope
     pub fn create_child(&self) -> Scope {
-        let child = Id::next();
-        Scope(child)
+        let id = self.0;
+        Scope(RUNTIME.with(|runtime| runtime.crete_child(id)))
     }
 
     /// Create a new Signal under this Scope

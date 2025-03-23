@@ -1,9 +1,10 @@
 use crate::element::Node;
 use crate::event::Interactive;
-use crate::root::EventDispatcher;
+use crate::root::AppContext;
 use crate::style::{StyleTrigger, Styleable};
 use crate::{element::Element, view_id::ViewId, view_tuple::ViewTuple};
-use reactive::{create_effect, use_context, Scope};
+use hashbrown::HashSet;
+use reactive::{create_effect, use_context, Scope, SignalGet};
 
 pub struct View {
     id: ViewId,
@@ -44,7 +45,7 @@ impl View {
     pub fn children<VT: ViewTuple>(self, children: VT) -> Self {
         let id = self.id;
         let children = children.into_vec();
-        let ctx: EventDispatcher = use_context().unwrap();
+        let ctx: AppContext = use_context().unwrap();
         subscribe(id, &children, ctx.clone());
         create_effect(move |_| {
             id.set_children(flatten(&children));
@@ -62,7 +63,11 @@ fn flatten(item: &Node) -> Vec<ViewId> {
     match item {
         Node::Static(id) => vec![*id],
         Node::Fragment(vec) => vec.iter().flat_map(flatten).collect(),
-        Node::Dynamic(signal) => flatten(&signal.get().0),
+        Node::Dynamic(signal) => signal
+            .get()
+            .iter()
+            .flat_map(|(node, _)| flatten(node))
+            .collect(),
     }
 }
 
@@ -93,15 +98,25 @@ fn collect(item: &Node) -> (Vec<ViewId>, Vec<Scope>) {
             (views, scopes)
         }
         Node::Dynamic(signal) => {
-            let (node, scope) = signal.get_untracked();
-            let (views, mut scopes) = collect(&node);
-            scopes.push(scope);
-            (views, scopes)
+            let vec = signal.get_untracked();
+            let mut nodes = vec![];
+            let mut scopes = vec![];
+
+            for (node, scope) in vec {
+                nodes.push(node);
+                scopes.push(scope);
+            }
+
+            let mut collected = collect(&Node::Fragment(nodes));
+
+            collected.1.append(&mut scopes);
+
+            collected
         }
     }
 }
 
-fn subscribe(parent: ViewId, node: &Node, ctx: EventDispatcher) {
+fn subscribe(parent: ViewId, node: &Node, ctx: AppContext) {
     let mounted = parent.state().borrow().mounted;
     match node.clone() {
         Node::Static(id) => {
@@ -114,30 +129,43 @@ fn subscribe(parent: ViewId, node: &Node, ctx: EventDispatcher) {
                 subscribe(parent, &item, ctx.clone());
             }
         }
-        Node::Dynamic(signal) => {
-            let ctx = ctx.clone();
-            let signal = signal.clone();
-            create_effect(move |prev| {
-                if let Some((node, scope)) = prev {
+        Node::Dynamic(signal) => create_effect(move |prev| {
+            let vec = signal.get();
+
+            let mut next_scopes = HashSet::with_capacity(vec.len());
+            for (_, scope) in &vec {
+                next_scopes.insert(*scope);
+            }
+
+            if let Some(vec) = prev {
+                for (node, scope) in vec {
                     let (views, scopes) = collect(&node);
                     for child in views {
                         unmount(child, parent, &ctx);
                     }
+
+                    if next_scopes.contains(&scope) {
+                        continue;
+                    }
+
                     for scope in scopes {
                         ctx.dispose(scope);
                     }
+
                     ctx.dispose(scope);
                 }
+            }
 
-                let (node, scope) = signal.get();
-                subscribe(parent, &node, ctx.clone());
-                (node, scope)
-            });
-        }
+            for (node, _) in &vec {
+                subscribe(parent, node, ctx.clone());
+            }
+
+            vec
+        }),
     }
 }
 
-fn mount(id: ViewId, parent: ViewId, ctx: &EventDispatcher) {
+fn mount(id: ViewId, parent: ViewId, ctx: &AppContext) {
     if id.state().borrow().mounted {
         return;
     }
@@ -150,7 +178,7 @@ fn mount(id: ViewId, parent: ViewId, ctx: &EventDispatcher) {
     }
 }
 
-fn unmount(id: ViewId, parent: ViewId, ctx: &EventDispatcher) {
+fn unmount(id: ViewId, parent: ViewId, ctx: &AppContext) {
     if !id.state().borrow().mounted {
         return;
     }

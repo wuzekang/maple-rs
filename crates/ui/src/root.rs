@@ -24,7 +24,7 @@ use std::rc::Rc;
 use taffy::{prelude::TaffyMaxContent, Point, Size};
 
 #[derive(Clone)]
-pub struct EventDispatcher {
+pub struct AppContext {
     root: ViewId,
     hovered: Rc<RefCell<HashSet<ViewId>>>,
     pub focused: Rc<RefCell<Option<ViewId>>>,
@@ -33,9 +33,10 @@ pub struct EventDispatcher {
     unmounted: Rc<RefCell<Vec<(ViewId, ViewId)>>>,
     queue: Rc<RefCell<Vec<Event>>>,
     style_dirty: Rc<RefCell<HashSet<ViewId>>>,
+    pub inspect_element: RwSignal<Option<ViewId>>,
 }
 
-impl EventDispatcher {
+impl AppContext {
     pub fn new(root: ViewId) -> Self {
         Self {
             root,
@@ -46,6 +47,7 @@ impl EventDispatcher {
             unmounted: Rc::new(RefCell::new(vec![])),
             queue: Rc::new(RefCell::new(vec![])),
             style_dirty: Rc::new(RefCell::new(Default::default())),
+            inspect_element: RwSignal::new(None),
         }
     }
 
@@ -183,6 +185,9 @@ impl EventDispatcher {
         for (id, _) in self.unmounted.borrow().iter() {
             self.hovered.borrow_mut().remove(&id);
             self.style_dirty.borrow_mut().remove(&id);
+            if self.inspect_element.get_untracked() == Some(*id) {
+                self.inspect_element.set(None);
+            }
             if focused.remove(id) {
                 id.dispatch_event(
                     &mut Event::Focus(FocusEvent {
@@ -233,11 +238,12 @@ struct CursorElement {
     image: Option<Box<dyn Drawable>>,
     target: Option<ViewId>,
     pub inspect: bool,
+    pub inspect_element: RwSignal<Option<ViewId>>,
     pub cursor_visible: bool,
 }
 
 impl CursorElement {
-    fn new(root: ViewId) -> Self {
+    fn new(root: ViewId, inspect_element: RwSignal<Option<ViewId>>) -> Self {
         Self {
             root,
             cursor: Cursor::DEFAULT,
@@ -245,6 +251,7 @@ impl CursorElement {
             image: Default::default(),
             target: Default::default(),
             inspect: false,
+            inspect_element,
             cursor_visible: false,
         }
     }
@@ -256,17 +263,15 @@ impl CursorElement {
 
 impl Drawable for CursorElement {
     fn draw(&self, cx: &mut Renderer) {
-        if self.inspect {
-            if let Some(id) = self.target {
-                let layout = id.layout();
-                let state = id.state();
-                let viewport = state.borrow().viewport;
-                let location = layout.location + viewport;
-                let size = layout.size;
-                let position = vec2(location.x, location.y);
-                let size = vec2(size.width, size.height);
-                cx.fill_rect(Color::BLACK, Rect::from((position, size)));
-            }
+        if let Some(id) = self.inspect_element.get_untracked() {
+            let layout = id.layout();
+            let state = id.state();
+            let viewport = state.borrow().viewport;
+            let location = layout.location + viewport;
+            let size = layout.size;
+            let position = vec2(location.x, location.y);
+            let size = vec2(size.width, size.height);
+            cx.fill_rect(Color::BLACK.with_alpha(0.2), Rect::from((position, size)));
         }
 
         if self.cursor_visible {
@@ -330,7 +335,7 @@ pub struct Root {
     painter: Rc<RefCell<Renderer>>,
     renderer: *mut SDL_Renderer,
     window: *mut SDL_Window,
-    event_dispatcher: EventDispatcher,
+    app_context: AppContext,
     bump: Bump,
     id: ViewId,
     current_cursor: Cursor,
@@ -356,19 +361,20 @@ impl Root {
         id.state().borrow_mut().mounted = true;
 
         let dpr = unsafe { SDL_GetWindowPixelDensity(window) };
-        let event_dispatcher = EventDispatcher::new(id);
+        let app_context = AppContext::new(id);
         let painter = Rc::new(RefCell::new(Renderer::new(
             renderer,
             dpr,
             size.get_untracked(),
         )));
+
         provide_context(window);
         provide_context(renderer);
         provide_context(painter.clone());
         provide_context(id);
-        provide_context(event_dispatcher.clone());
+        provide_context(app_context.clone());
 
-        let cursor_element = CursorElement::new(id);
+        let cursor_element = CursorElement::new(id, app_context.inspect_element);
 
         let view = view
             .style(move |s| s.width(size.get().x).height(size.get().y))
@@ -385,7 +391,7 @@ impl Root {
             renderer,
             window,
             bump,
-            event_dispatcher,
+            app_context,
             cursor_element,
             current_cursor: Cursor::DEFAULT,
         }
@@ -421,7 +427,7 @@ impl Root {
         } else if event.is_mouse_leave().is_some() {
             self.cursor_element.cursor_visible = false;
         }
-        self.event_dispatcher.dispatch(event, self.id);
+        self.app_context.dispatch(event, self.id);
     }
 
     pub fn compute_style(&self, nodes: Vec<ViewId>) {
@@ -494,7 +500,7 @@ impl Root {
             while !exited {
                 Resource::try_recv();
 
-                self.event_dispatcher.process_queue(self.id);
+                self.app_context.process_queue(self.id);
 
                 for event in &mut events {
                     self.dispatch_event(event);
@@ -527,8 +533,8 @@ impl Root {
 
                 self.id.update(delta);
 
-                if self.event_dispatcher.mounted.borrow().len() > 0
-                    || self.event_dispatcher.unmounted.borrow().len() > 0
+                if self.app_context.mounted.borrow().len() > 0
+                    || self.app_context.unmounted.borrow().len() > 0
                 {
                     let observers = RUNTIME.with_borrow(|r| {
                         let mut values = r
@@ -543,7 +549,9 @@ impl Root {
                             .map(|v| {
                                 (
                                     v[0].0,
-                                    v.into_iter().map(|(_, v)| v.clone()).collect::<Vec<_>>(),
+                                    v.into_iter()
+                                        .map(|(_, v, options)| (v.clone(), options.clone()))
+                                        .collect::<Vec<_>>(),
                                 )
                             })
                             .collect::<HashMap<_, _>>();
@@ -558,11 +566,11 @@ impl Root {
                     let mut added = HashSet::new();
 
                     for (id, parent) in self
-                        .event_dispatcher
+                        .app_context
                         .mounted
                         .borrow()
                         .iter()
-                        .chain(self.event_dispatcher.unmounted.borrow().iter())
+                        .chain(self.app_context.unmounted.borrow().iter())
                     {
                         nodes.insert(*id);
                         parents.insert(*id, *parent);
@@ -586,23 +594,26 @@ impl Root {
                             }
                         }
                         if let Some(callbacks) = observers.get(&id) {
-                            for callback in callbacks {
-                                callback();
+                            for (callback, options) in callbacks {
+                                if options.child_list
+                                    && (options.subtree || has_children.contains(&id))
+                                {
+                                    callback();
+                                }
                             }
                         }
                     }
                 }
 
-                for (id, _) in self.event_dispatcher.mounted.borrow().iter() {
-                    self.event_dispatcher.style_dirty.borrow_mut().insert(*id);
+                for (id, _) in self.app_context.mounted.borrow().iter() {
+                    self.app_context.style_dirty.borrow_mut().insert(*id);
                 }
 
-                self.event_dispatcher.perform_detach();
+                self.app_context.perform_detach();
 
-                let mut nodes =
-                    Vec::with_capacity(self.event_dispatcher.style_dirty.borrow().len());
+                let mut nodes = Vec::with_capacity(self.app_context.style_dirty.borrow().len());
 
-                for view_id in self.event_dispatcher.style_dirty.borrow().iter() {
+                for view_id in self.app_context.style_dirty.borrow().iter() {
                     nodes.push((view_id.index_path(self.id), *view_id))
                 }
 
@@ -613,14 +624,14 @@ impl Root {
                     ordered.push(view_id);
                 }
 
-                self.event_dispatcher.style_dirty.borrow_mut().clear();
+                self.app_context.style_dirty.borrow_mut().clear();
 
                 self.compute_style(ordered);
                 self.compute_layout();
 
                 self.cursor_element.update(delta);
 
-                self.event_dispatcher.perform_attach();
+                self.app_context.perform_attach();
 
                 SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
                 SDL_RenderClear(renderer);

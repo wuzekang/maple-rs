@@ -1,12 +1,11 @@
 use crate::event::Event;
 use crate::geometry::Rect;
 use crate::render::renderer::Renderer;
-use crate::{
-    view_id::ViewId, widget::dynamic::Dynamic, widget::fragment::Fragment, widget::text::Text,
-};
+use crate::widget::dynamic::Dynamic;
+use crate::{view_id::ViewId, widget::fragment::Fragment, widget::text::Text};
 use glam::{vec2, Vec2};
 use peniko::Color;
-use reactive::{Scope, SignalGet};
+use reactive::{ReadSignal, Scope, SignalGet};
 use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -59,7 +58,7 @@ pub trait Element: Any {
 pub enum Node {
     Static(ViewId),
     Fragment(Vec<Node>),
-    Dynamic(Rc<dyn SignalGet<(Node, Scope)>>),
+    Dynamic(ReadSignal<Vec<(Node, Scope)>>),
 }
 
 impl Default for Node {
@@ -95,7 +94,7 @@ impl IntoElement for Fragment {
 
 impl IntoElement for Dynamic {
     fn into_element(self) -> Node {
-        Node::Dynamic(Rc::new(self.signal))
+        Node::Dynamic(self.signal)
     }
 }
 

@@ -5,9 +5,11 @@ use crate::render::command::{
 };
 use crate::render::layer::{Layer, Tile};
 use crate::runtime::RUNTIME;
+use crate::style::dimension;
 use crate::{OffsetEditor, ViewId};
 use cosmic_text::{Edit, FontSystem, Metrics, Placement, SwashCache};
 use glam::{vec2, Vec2, Vec4Swizzles};
+use hashbrown::HashSet;
 use image::DynamicImage;
 use peniko::Color;
 use sdl3_sys::everything::*;
@@ -99,6 +101,11 @@ impl Drop for Surface {
     }
 }
 
+#[derive(Hash, PartialEq, Eq, Clone, Copy)]
+pub enum RenderFlag {
+    LayerDebug,
+}
+
 #[derive(Clone)]
 pub struct NineGridTexture {
     pub texture: Rc<Texture>,
@@ -170,12 +177,12 @@ impl NineGridTexture {
         )
     }
 
-    pub fn border(&self) -> taffy::Rect<LengthPercentage> {
-        taffy::Rect {
-            left: length(self.left_width as f32),
-            right: length(self.right_width as f32),
-            top: length(self.top_height as f32),
-            bottom: length(self.bottom_height as f32),
+    pub fn border(&self) -> dimension::Rect<dimension::LengthPercentage> {
+        dimension::Rect {
+            left: dimension::length(self.left_width as f32).into(),
+            right: dimension::length(self.right_width as f32).into(),
+            top: dimension::length(self.top_height as f32).into(),
+            bottom: dimension::length(self.bottom_height as f32).into(),
         }
     }
 }
@@ -491,6 +498,7 @@ pub struct Renderer {
     pub alpha: f32,
     pub draw_calls: (usize, usize),
     pub draw_tiles: (usize, usize),
+    pub flags: HashSet<RenderFlag>,
 }
 
 impl Renderer {
@@ -530,6 +538,7 @@ impl Renderer {
             alpha: 1.0,
             draw_calls: (0, 0),
             draw_tiles: (0, 0),
+            flags: HashSet::new(),
         }
     }
 

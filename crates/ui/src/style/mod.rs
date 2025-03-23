@@ -8,14 +8,14 @@ use reactive::{create_effect, use_context};
 use sdl3_sys::everything::{SDL_CreateSystemCursor, SDL_Cursor, SDL_SystemCursor};
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::fmt::Pointer;
+use std::fmt::{Debug, Pointer};
 use std::mem;
 use std::rc::Rc;
 use strum::EnumIter;
 use taffy::prelude::*;
 use taffy::{Overflow, Point};
 
-#[derive(Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TextWrap {
     None,
     Glyph,
@@ -23,7 +23,7 @@ pub enum TextWrap {
     WordOrGlyph,
 }
 
-#[derive(Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum PointerEvents {
     #[default]
     Auto,
@@ -122,7 +122,7 @@ pub enum StyleTrigger {
     Layout,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum StyleProperty {
     Background(Color),
     Color(Color),
@@ -138,7 +138,7 @@ pub enum StyleProperty {
     Opacity(f32),
 }
 
-#[derive(EnumIter, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(EnumIter, Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum StylePropertyKey {
     Background,
     Color,
@@ -259,10 +259,7 @@ impl StyleProperty {
                 StylePropertyKey::TextAlign,
                 Self::TextAlign(TextAlign::Left),
             ),
-            (
-                StylePropertyKey::Cursor,
-                Self::Cursor(Cursor::DEFAULT),
-            ),
+            (StylePropertyKey::Cursor, Self::Cursor(Cursor::DEFAULT)),
             (
                 StylePropertyKey::PointerEvents,
                 Self::PointerEvents(PointerEvents::Auto),
@@ -272,7 +269,7 @@ impl StyleProperty {
     }
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum TaffyStyleProperty {
     Display(Display),
     Overflow(Point<Overflow>),
@@ -712,10 +709,13 @@ impl StyleBuilder {
         ));
         self
     }
-    pub fn margin(mut self, value: Rect<LengthPercentageAuto>) -> Self {
+    pub fn margin(
+        mut self,
+        value: impl Into<dimension::Rect<dimension::LengthPercentageAuto>>,
+    ) -> Self {
         self.taffy_style_props.push((
             TaffyStylePropertyKey::Margin,
-            TaffyStyleProperty::Margin(value),
+            TaffyStyleProperty::Margin(value.into().into()),
         ));
         self
     }
@@ -747,10 +747,13 @@ impl StyleBuilder {
         ));
         self
     }
-    pub fn padding(mut self, value: Rect<LengthPercentage>) -> Self {
+    pub fn padding(
+        mut self,
+        value: impl Into<dimension::Rect<dimension::LengthPercentage>>,
+    ) -> Self {
         self.taffy_style_props.push((
             TaffyStylePropertyKey::Padding,
-            TaffyStyleProperty::Padding(value),
+            TaffyStyleProperty::Padding(value.into().into()),
         ));
         self
     }
@@ -1043,6 +1046,16 @@ impl StyleBuilder {
     }
 
     #[inline]
+    pub fn flex(mut self) -> Self {
+        self.display(Display::Flex)
+    }
+
+    #[inline]
+    pub fn hidden(mut self) -> Self {
+        self.display(Display::None)
+    }
+
+    #[inline]
     pub fn overflow_hidden(mut self) -> Self {
         self.overflow(Point {
             x: Overflow::Hidden,
@@ -1105,7 +1118,6 @@ impl StyleBuilder {
     pub fn size_full(mut self) -> Self {
         self.w_full().h_full()
     }
-
 
     #[inline]
     pub fn flex_row(mut self) -> Self {
@@ -1226,6 +1238,11 @@ impl StyleBuilder {
 #[derive(Copy, Clone, PartialEq)]
 pub struct SystemCursor(SDL_SystemCursor);
 
+impl Debug for SystemCursor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SystemCursor").finish()
+    }
+}
 impl SystemCursor {
     pub fn new(cursor: SDL_SystemCursor) -> Self {
         Self(cursor)
@@ -1245,13 +1262,19 @@ impl SystemCursor {
 #[derive(Clone)]
 pub struct DrawableCursor(pub Rc<dyn Fn() -> Box<dyn Drawable>>);
 
+impl Debug for DrawableCursor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DrawableCursor").finish()
+    }
+}
+
 impl PartialEq for DrawableCursor {
     fn eq(&self, other: &Self) -> bool {
         std::ptr::addr_eq(Rc::as_ptr(&self.0), Rc::as_ptr(&other.0))
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Cursor {
     None,
     Inherit,
@@ -1298,7 +1321,7 @@ pub trait Styleable: Sized + Element {
         let state = id.state();
         let index = state.borrow().styles.len();
         state.borrow_mut().styles.push(None);
-        let ctx: EventDispatcher = use_context().unwrap();
+        let ctx: AppContext = use_context().unwrap();
         create_effect(move |_| {
             let state = id.state();
             let prev = mem::take(&mut state.borrow_mut().styles[index]);
@@ -1312,5 +1335,5 @@ pub trait Styleable: Sized + Element {
     }
 }
 
-use crate::root::EventDispatcher;
+use crate::root::AppContext;
 pub use compute::*;
