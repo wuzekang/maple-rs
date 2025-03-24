@@ -232,15 +232,23 @@ pub fn logo_scene(on_finished: impl Fn() + 'static) -> impl IntoElement {
 }
 
 pub fn button(btn_node: Node) -> View {
-    let btn_state = create_rw_signal("normal".to_string());
     let animation = Rc::new(RefCell::new(None));
     let current = create_rw_signal(0);
+    let pressed = create_rw_signal(false);
+    let hovered = create_rw_signal(false);
 
     create_effect({
         let animation = animation.clone();
         move |_| {
+            let state = if pressed.get() {
+                "pressed"
+            } else if hovered.get() {
+                "mouseOver"
+            } else {
+                "normal"
+            };
             *animation.borrow_mut() = Some(
-                SpriteAnimation::try_from(btn_node.at_path(&btn_state.get()).unwrap())
+                SpriteAnimation::try_from(btn_node.at_path(state).unwrap())
                     .unwrap()
                     .with_repeat(Repeat::Finite(1)),
             );
@@ -286,12 +294,19 @@ pub fn button(btn_node: Node) -> View {
             })
             .on_mouse_enter(move |_| {
                 play_sound("Sound/UI.img/BtMouseOver");
-                btn_state.set("mouseOver".to_string());
+                hovered.set(true);
             })
             .on_mouse_leave(move |_| {
-                btn_state.set("normal".to_string());
+                hovered.set(false);
+                pressed.set(false);
             })
-            .on_click(|_| {
+            .on_mouse_down(move |_| {
+                pressed.set(true);
+            })
+            .on_mouse_up(move |_| {
+                pressed.set(false);
+            })
+            .on_click(move |_| {
                 play_sound("Sound/UI.img/BtMouseClick");
             })
             .style(move |s| {

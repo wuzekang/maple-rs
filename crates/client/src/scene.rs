@@ -141,8 +141,8 @@ impl MainScene {
                 s.absolute()
                     .left(0)
                     .top(0)
-                    .width(vr_size.x)
-                    .height(vr_size.y)
+                    .width(size.x)
+                    .height(size.y)
             })
             .children(
                 view()
