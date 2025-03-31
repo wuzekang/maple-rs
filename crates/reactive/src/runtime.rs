@@ -1,12 +1,10 @@
 use crate::{id::Id, Scope};
-use slab::Slab;
 use slotmap::{DefaultKey, SlotMap};
 use smallvec::SmallVec;
 use std::borrow::Cow;
 use std::cell::Cell;
 use std::{
     any::{Any, TypeId},
-    cell,
     cell::RefCell,
     collections::{HashMap, HashSet},
     mem,

@@ -1,11 +1,11 @@
-use std::{any::Any, cell::RefCell, collections::HashMap, fmt, rc::Rc};
+use std::{any::Any, fmt};
 
 use crate::{
     create_effect,
     id::Id,
     memo::{create_memo, Memo},
     runtime::RUNTIME,
-    signal::{create_rw_signal, create_signal, ReadSignal, RwSignal, Signal, WriteSignal},
+    signal::{create_rw_signal, create_signal, ReadSignal, RwSignal, WriteSignal},
     trigger::{create_trigger, Trigger},
 };
 
@@ -111,7 +111,7 @@ where
     move |t| {
         let scope = current_scope.create_child();
         let prev_scope = RUNTIME.with(|runtime| {
-            let mut current_scope = &mut *runtime.current_scope.borrow_mut();
+            let current_scope = &mut *runtime.current_scope.borrow_mut();
             let prev_scope = *current_scope;
             *current_scope = scope.0;
             prev_scope

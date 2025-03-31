@@ -160,7 +160,7 @@ impl Signal {
         T: Any + 'static,
     {
         let value = RefCell::new(value);
-        RUNTIME.with({ |r| r.add_signal(Rc::new(value)) })
+        RUNTIME.with(|r| r.add_signal(Rc::new(value)))
     }
 
     pub fn borrow<T: 'static>(&self) -> Ref<'_, T> {

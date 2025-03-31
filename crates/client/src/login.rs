@@ -1016,8 +1016,6 @@ impl LoginContext {
 }
 
 pub fn login_scene(on_enter: impl Fn() + 'static) -> View {
-    play_sound("Sound/BgmUI.img/Title");
-
     let WzBase { node: base } = use_context().unwrap();
     let img = base.at_path("UI/Login.img").unwrap();
     let frame: Arc<::image::DynamicImage> =
@@ -1087,8 +1085,9 @@ pub fn login_scene(on_enter: impl Fn() + 'static) -> View {
                     .into_iter()
                     .rev()
                     .map(move |i| {
+                        let index: usize = i.into();
                         focus_trap()
-                            .active(move || step.get() == i.into())
+                            .active(move || step.get() == index)
                             .style(move |s| s.width(size.x).height(size.y))
                             .children(|| i.view())
                     })

@@ -6,7 +6,7 @@ use crate::{element::Element, runtime::RUNTIME, view, view_id::ViewId, Interacti
 use cosmic_text::{Action, Buffer, Edit, Editor, Motion, Selection};
 use glam::{vec2, Vec2};
 use peniko::Color;
-use reactive::{create_ref, use_context, Ref, SignalUpdate};
+use reactive::{create_ref, use_context, Ref};
 use sdl3_sys::everything::*;
 use std::fmt::Display;
 use taffy::{AlignItems, AvailableSpace, JustifyContent, Point, Size};

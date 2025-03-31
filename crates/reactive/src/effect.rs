@@ -1,8 +1,5 @@
 use crate::runtime::RUNTIME;
 use std::any::Any;
-use std::cell::RefCell;
-use std::collections::HashSet;
-use std::rc::Rc;
 
 pub fn on_cleanup(f: impl FnOnce() + 'static) {
     RUNTIME.with(|runtime| runtime.on_cleanup(f))

@@ -15,6 +15,7 @@ use ui::style::dimension::length;
 use ui::style::{StyleTrigger, Styleable};
 use ui::taffy::Position;
 use ui::{dynamic, fragment, input, view, Drawable, Element, IntoElement, Renderer, ViewId};
+use crate::sound::play_sound;
 
 #[derive(Default, Clone)]
 pub struct Camera {
@@ -94,6 +95,8 @@ impl MainScene {
             text_visible.set(!text_visible.get());
         });
         let camera_signal = create_rw_signal(Camera::default());
+        let bgm = map.info.bgm.split("/").collect::<Vec<_>>();
+        play_sound(&format!("Sound/{}.img/{}", bgm[0], bgm[1]));
 
         let window = use_context().unwrap();
         let renderer = use_context().unwrap();

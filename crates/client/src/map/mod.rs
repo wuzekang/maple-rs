@@ -66,6 +66,7 @@ pub struct MapInfo {
     pub vr_bottom: Option<i32>,
     pub vr_left: Option<i32>,
     pub vr_right: Option<i32>,
+    pub bgm: String,
 }
 
 impl TryFrom<Node> for MapInfo {
@@ -77,6 +78,7 @@ impl TryFrom<Node> for MapInfo {
             vr_bottom: node.try_get("VRBottom").and_then(|v| v.try_into().ok()),
             vr_left: node.try_get("VRLeft").and_then(|v| v.try_into().ok()),
             vr_right: node.try_get("VRRight").and_then(|v| v.try_into().ok()),
+            bgm: node.try_get("bgm").and_then(|v| v.try_into().ok()).unwrap(),
         })
     }
 }

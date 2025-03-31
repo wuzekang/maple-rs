@@ -32,13 +32,14 @@ use ui::{
 
 #[derive(Clone)]
 enum Stage {
+    Pause,
     Logo,
     Login,
     Main,
 }
 
 pub fn app() -> impl IntoElement {
-    let stage = RwSignal::new(Stage::Logo);
+    let stage = RwSignal::new(Stage::Pause);
     let open = RwSignal::new(true);
 
     let current_map = RwSignal::new("910000000".to_string());
@@ -54,6 +55,11 @@ pub fn app() -> impl IntoElement {
                     .bg_black()
             })
             .children(dynamic(move || match stage.get() {
+                Stage::Pause => fragment(
+                    view()
+                        .style(|s| s.w_full().h_full().bg_white())
+                        .on_click(move |_| stage.set(Stage::Logo)),
+                ),
                 Stage::Logo => fragment(logo_scene(move || stage.set(Stage::Login))),
                 Stage::Login => fragment((login_scene(move || stage.set(Stage::Main)))),
                 Stage::Main => fragment((
@@ -62,14 +68,14 @@ pub fn app() -> impl IntoElement {
                     world_map_window(open, current_map),
                 )),
             })),
-        debug().style(|s| {
-            s.absolute()
-                .top(0)
-                .right(0)
-                .width(800)
-                .height(600)
-                .background(Color::WHITE)
-        }),
+        // debug().style(|s| {
+        //     s.absolute()
+        //         .top(0)
+        //         .right(0)
+        //         .width(800)
+        //         .height(600)
+        //         .background(Color::WHITE)
+        // }),
     ))
 }
 
@@ -204,11 +210,7 @@ pub fn logo_scene(on_finished: impl Fn() + 'static) -> impl IntoElement {
                     })
                 }))
             } else {
-                fragment(view().style(|s| {
-                    s.background(Color::new([1.0, 0.0, 0.0, 1.0]))
-                        .width(20)
-                        .height(20)
-                }))
+                fragment(())
             };
 
             view()

@@ -1,7 +1,6 @@
 use crate::runtime::RUNTIME;
 use std::any::{Any, TypeId};
 use std::rc::Rc;
-use log::debug;
 
 /// Try to retrieve a stored Context value in the reactive system.
 /// You can store a Context value anywhere, and retrieve it from anywhere afterwards.

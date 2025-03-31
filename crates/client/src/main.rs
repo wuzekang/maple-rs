@@ -45,7 +45,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         vec2(w as f32, h as f32)
     };
 
-    let size = vec2(1600.0, 600.0);
+    // let size = vec2(1600.0, 600.0);
+    let size = vec2(800.0, 600.0);
     // let size = vec2(1024.0, 768.0);
     // let size = vec2(1366.0, 1024.0);
 

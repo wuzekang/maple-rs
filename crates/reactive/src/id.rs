@@ -1,5 +1,5 @@
 use slotmap::DefaultKey;
-use crate::runtime::{Node, Runtime, RUNTIME};
+use crate::runtime::RUNTIME;
 use crate::signal::Signal;
 
 /// An internal id which can reference a Signal/Effect/Scope.
