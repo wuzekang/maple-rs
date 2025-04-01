@@ -5,7 +5,7 @@ use crate::{element::Element, runtime::RUNTIME, view_id::ViewId};
 use cosmic_text::{Attrs, Family, Metrics};
 use glam::{vec2, Vec2};
 use peniko::Color;
-use reactive::{create_effect, create_ref, use_context, Ref, SignalWith};
+use reactive::{create_effect, create_ref, use_context, Ref};
 use sdl3_sys::everything::SDL_GetWindowPixelDensity;
 use std::fmt::Display;
 use taffy::{AvailableSpace, Size};
@@ -13,7 +13,6 @@ use taffy::{AvailableSpace, Size};
 #[derive(Debug, Copy, Clone)]
 pub struct Text {
     id: ViewId,
-    dpr: f32,
     buffer: Ref<cosmic_text::Buffer>,
 }
 impl Text {
@@ -58,7 +57,7 @@ impl Text {
 
             content
         });
-        Self { id, buffer, dpr }
+        Self { id, buffer }
     }
 }
 

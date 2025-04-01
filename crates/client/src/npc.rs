@@ -1,6 +1,7 @@
 use crate::{sprite::SpriteAnimation, wz::Node};
 use std::collections::HashMap;
 
+#[allow(dead_code)]
 pub struct NPCInfo {
     pub speak: Option<HashMap<String, String>>,
 }
@@ -15,6 +16,7 @@ impl TryFrom<Node> for NPCInfo {
     }
 }
 
+#[allow(dead_code)]
 pub struct Npc {
     pub info: NPCInfo,
     pub actions: HashMap<String, SpriteAnimation>,

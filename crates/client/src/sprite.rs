@@ -3,7 +3,7 @@ use crate::wz::Node;
 use glam::{vec2, Vec2};
 use image::DynamicImage;
 use sdl3_sys::surface::SDL_FlipMode;
-use std::fmt::{Debug, Pointer};
+use std::fmt::Debug;
 use std::sync::Arc;
 use ui::{Bounds, Drawable, Renderer, Texture};
 
@@ -14,10 +14,6 @@ pub struct SpriteRenderer<'a> {
 impl<'a> SpriteRenderer<'a> {
     pub fn new(renderer: &'a mut Renderer) -> Self {
         Self { renderer }
-    }
-
-    pub fn scale(&mut self, scale: f32) {
-        self.renderer.scale(scale);
     }
 
     pub fn draw(&mut self, sprite: &Sprite, position: Vec2) {
@@ -97,7 +93,7 @@ impl TryFrom<Node> for Sprite {
                 .unwrap_or(Ok(100))?,
             a0: a0.or(a1).unwrap_or(255),
             a1: a1.or(a0).unwrap_or(255),
-            alpha: 255.into(),
+            alpha: 255,
             size: vec2(image.width() as f32, image.height() as f32),
             image,
         })
@@ -131,13 +127,10 @@ impl Drawable for SpriteDrawable {
 #[derive(Clone)]
 pub struct ASprite {
     pub node: Node,
-    pub path: String,
-    pub size: Vec2,
     pub origin: Vec2,
     pub a0: i32,
     pub a1: i32,
     pub alpha: i32,
-    pub z: i32,
     pub delay: i32,
 }
 
@@ -146,13 +139,7 @@ impl TryFrom<Node> for ASprite {
     fn try_from(node: Node) -> Result<Self, Self::Error> {
         Ok(Self {
             node: node.clone(),
-            path: node.path(),
             origin: node.get("origin").try_into()?,
-            z: node
-                .try_get("z")
-                .map(TryInto::try_into)
-                .transpose()?
-                .unwrap_or(0),
             delay: node
                 .try_get("delay")
                 .map(TryInto::try_into)
@@ -166,8 +153,7 @@ impl TryFrom<Node> for ASprite {
                 .try_get("a1")
                 .map(TryInto::try_into)
                 .unwrap_or(Ok(255))?,
-            alpha: 255.into(),
-            size: Vec2::ZERO,
+            alpha: 255,
         })
     }
 }
@@ -198,14 +184,12 @@ impl TryFrom<Node> for ASpriteAnimation {
 
 impl ASpriteAnimation {
     pub fn tick(&mut self, delta: f32) {
-        if !self.complete {
-            if !self.timer.tick(delta) {
-                self.complete = true;
-            }
+        if !self.complete && !self.timer.tick(delta) {
+            self.complete = true;
         }
         let sprite = &mut self.frames[self.timer.index];
         let p = self.timer.progress();
-        sprite.alpha = (((1.0 - p) * sprite.a0 as f32 + p * sprite.a1 as f32) as i32);
+        sprite.alpha = ((1.0 - p) * sprite.a0 as f32 + p * sprite.a1 as f32) as i32;
     }
 
     pub fn current_frame(&self) -> &ASprite {
@@ -259,7 +243,7 @@ impl SpriteAnimation {
         self.timer.tick(delta);
         let sprite = &mut self.frames[self.timer.index];
         let p = self.timer.progress();
-        sprite.alpha = (((1.0 - p) * sprite.a0 as f32 + p * sprite.a1 as f32) as i32);
+        sprite.alpha = ((1.0 - p) * sprite.a0 as f32 + p * sprite.a1 as f32) as i32;
         sprite
     }
 

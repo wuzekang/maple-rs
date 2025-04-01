@@ -6,9 +6,9 @@ use crate::signal::Signal;
 #[derive(Default, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Hash)]
 pub struct Id(pub DefaultKey);
 
-impl Into<DefaultKey> for Id {
-    fn into(self) -> DefaultKey {
-        self.0
+impl From<Id> for DefaultKey {
+    fn from(val: Id) -> Self {
+        val.0
     }
 }
 

@@ -161,7 +161,7 @@ pub fn node_view(id: ViewId, depth: usize) -> Fragment {
                     hover.set(false);
                 })
                 .children(
-                    text(move || format!("{}", id.element().borrow().name()))
+                    text(move || id.element().borrow().name().to_string())
                         .style(|s| s.color(Color::BLACK)),
                 ),
             dynamic(move || {
@@ -172,14 +172,14 @@ pub fn node_view(id: ViewId, depth: usize) -> Fragment {
                         view()
                             .style(move |s| {
                                 let s = s.flex_col().w_full();
-                                let s = if visible.get() { s.flex() } else { s.hidden() };
-                                s
+                                
+                                if visible.get() { s.flex() } else { s.hidden() }
                             })
                             .children(fragment((
                                 each(
                                     move || {
                                         mutation.track();
-                                        id.children().iter().map(|id| *id).collect::<Vec<_>>()
+                                        id.children().iter().copied().collect::<Vec<_>>()
                                     },
                                     move |id| node_view(id, depth + 1),
                                 ),
@@ -305,7 +305,7 @@ pub fn attribute_view(selected: RwSignal<ViewId>) -> View {
                 margin,
                 padding,
                 border,
-                content_size,
+                
                 size,
                 ..
             } = id.layout();
@@ -394,7 +394,7 @@ pub fn debug() -> View {
     element.children(fragment((
         dynamic(move || {
             if !mutation.get() {
-                return fragment(());
+                fragment(())
             } else {
                 fragment(view().style(|s| s.w_full().h_full()).children((
                     scroll_view(node_view(root, 0)).style(|s| {

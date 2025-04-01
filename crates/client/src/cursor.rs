@@ -2,8 +2,8 @@ use crate::sprite::SpriteAnimation;
 use crate::WzBase;
 use glam::Vec2;
 use sdl3_sys::everything::*;
-use ui::reactive::{use_context, Scope};
-use ui::style::{Cursor, Styleable};
+use ui::reactive::use_context;
+use ui::style::Cursor;
 use ui::{input, Bounds, Drawable, Renderer};
 
 pub enum CursorState {
@@ -60,9 +60,9 @@ impl CursorState {
     }
 }
 
-impl Into<Cursor> for CursorState {
-    fn into(self) -> Cursor {
-        cursor(self)
+impl From<CursorState> for Cursor {
+    fn from(val: CursorState) -> Self {
+        cursor(val)
     }
 }
 

@@ -1,6 +1,7 @@
 use crate::character::Character;
 use crate::character::ZMap;
 use crate::map;
+use crate::sound::play_sound;
 use crate::sprite::SpriteRenderer;
 use crate::wz;
 use glam::{vec2, Vec2};
@@ -9,18 +10,13 @@ use std::sync::Arc;
 use ui::element::Node;
 use ui::event::{use_key, Event};
 use ui::geometry;
-use ui::peniko::Color;
-use ui::reactive::{create_rw_signal, use_context, RwSignal, SignalGet, SignalUpdate};
-use ui::style::dimension::length;
-use ui::style::{StyleTrigger, Styleable};
-use ui::taffy::Position;
-use ui::{dynamic, fragment, input, view, Drawable, Element, IntoElement, Renderer, ViewId};
-use crate::sound::play_sound;
+use ui::reactive::{create_rw_signal, RwSignal, SignalGet, SignalUpdate};
+use ui::style::Styleable;
+use ui::{dynamic, fragment, input, view, Element, IntoElement, Renderer, ViewId};
 
 #[derive(Default, Clone)]
 pub struct Camera {
     pub position: Vec2,
-    pub size: Vec2,
 }
 
 #[derive(Default)]
@@ -35,8 +31,6 @@ pub struct Player {
 
 pub struct MainScene {
     id: ViewId,
-    window: *mut SDL_Window,
-    renderer: *mut SDL_Renderer,
     size: Vec2,
     camera: Camera,
     pub camera_signal: RwSignal<Camera>,
@@ -47,7 +41,7 @@ pub struct MainScene {
 impl MainScene {
     pub fn resource(map_name: &str) -> (Player, map::Map) {
         let base = wz::resolve_base().unwrap();
-        let mut map = map::Map::new(base.clone(), map_name.to_string()).unwrap();
+        let map = map::Map::new(base.clone(), map_name.to_string()).unwrap();
         let position = map.portals.iter().fold(None, |acc: Option<Vec2>, item| {
             if item.pn != "sp" {
                 return acc;
@@ -98,9 +92,6 @@ impl MainScene {
         let bgm = map.info.bgm.split("/").collect::<Vec<_>>();
         play_sound(&format!("Sound/{}.img/{}", bgm[0], bgm[1]));
 
-        let window = use_context().unwrap();
-        let renderer = use_context().unwrap();
-
         let size = vec2(800.0, 600.0);
 
         let t = map.info.vr_top.unwrap() as f32;
@@ -126,7 +117,7 @@ impl MainScene {
                                     .line_height(14.0)
                                     .bg_white()
                             })
-                            .children(ui::text({ move || path.clone() })),
+                            .children(ui::text(move || path.clone())),
                     );
                 }
             }
@@ -135,18 +126,11 @@ impl MainScene {
         let texts = fragment(texts).into_element();
 
         let camera = Camera {
-            size,
             ..Default::default()
         };
 
         let id = view()
-            .style(move |s| {
-                s.absolute()
-                    .left(0)
-                    .top(0)
-                    .width(size.x)
-                    .height(size.y)
-            })
+            .style(move |s| s.absolute().left(0).top(0).width(size.x).height(size.y))
             .children(
                 view()
                     .style(move |s| {
@@ -175,8 +159,6 @@ impl MainScene {
         Self {
             id,
             size,
-            window,
-            renderer,
             camera,
             player: None,
             map,
@@ -186,11 +168,6 @@ impl MainScene {
 
     pub fn set_camera_position(&mut self, position: Vec2) {
         self.camera.position = position;
-        self.camera_signal.set(self.camera.clone());
-    }
-
-    pub fn move_camera_position(&mut self, offset: Vec2) {
-        self.camera.position += offset;
         self.camera_signal.set(self.camera.clone());
     }
 
@@ -215,11 +192,7 @@ impl Element for MainScene {
 
         {
             let Self {
-                camera,
-                camera_signal,
-                map,
-                size,
-                ..
+                camera, map, size, ..
             } = self;
 
             let camera_position = camera.position;
@@ -229,7 +202,7 @@ impl Element for MainScene {
             }
         }
 
-        let Self { map, player, .. } = self;
+        let Self { map, .. } = self;
 
         for layer in &mut map.layers {
             for item in &mut layer.objects {
@@ -242,7 +215,7 @@ impl Element for MainScene {
         for item in &map.life {
             if item.r#type == "n" {
                 let npc = map.npc.get_mut(&item.id).unwrap();
-                if npc.actions.len() == 0 {
+                if npc.actions.is_empty() {
                     continue;
                 }
                 let action = npc.actions.get_mut("stand").unwrap();
@@ -334,16 +307,16 @@ impl Element for MainScene {
             if item.pn == "sp" {
                 continue;
             }
-            if (item.pt != 7) {
+            if item.pt != 7 {
                 continue;
             }
-            sprite_renderer.draw(&sprite, item.position - camera_position);
+            sprite_renderer.draw(sprite, item.position - camera_position);
         }
 
         for item in &map.life {
             if item.r#type == "n" {
                 let npc = map.npc.get(&item.id).unwrap();
-                if npc.actions.len() == 0 {
+                if npc.actions.is_empty() {
                     continue;
                 }
                 let action = npc.actions.get("stand").unwrap();
@@ -362,11 +335,11 @@ impl Element for MainScene {
             }
         }
 
-        let t = map.info.vr_top.unwrap() as f32 - camera_position.y;
-        let b = map.info.vr_bottom.unwrap() as f32 - camera_position.y;
-        let l = map.info.vr_left.unwrap() as f32 - camera_position.x;
-        let r = map.info.vr_right.unwrap() as f32 - camera_position.x;
-        let vr_size = vec2(r - l, b - t);
+        // let t = map.info.vr_top.unwrap() as f32 - camera_position.y;
+        // let b = map.info.vr_bottom.unwrap() as f32 - camera_position.y;
+        // let l = map.info.vr_left.unwrap() as f32 - camera_position.x;
+        // let r = map.info.vr_right.unwrap() as f32 - camera_position.x;
+        // let vr_size = vec2(r - l, b - t);
         // renderer.set_color(Color::RED);
         // renderer.lines(&[vec2(l, t), vec2(r, t), vec2(r, b), vec2(l, b), vec2(l, t)]);
 
@@ -424,8 +397,6 @@ fn player_move(context: &mut MainScene, delta: f32) {
             }
         }
     } else {
-        let fh = map.footholds.get(&player.foothold).unwrap();
-
         if player.direction.x == 0.0 {
             player.avatar.set_action("stand1");
         } else {
@@ -487,11 +458,8 @@ fn update_back(delta: f32, camera_position: Vec2, size: Vec2, item: &mut map::Ma
         }
     }
 
-    match &mut item.sprite {
-        map::BackgroundSprite::SpriteAnimation(animation) => {
-            animation.tick(delta);
-        }
-        _ => {}
+    if let map::BackgroundSprite::SpriteAnimation(animation) = &mut item.sprite {
+        animation.tick(delta);
     };
 }
 

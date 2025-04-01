@@ -55,7 +55,7 @@ impl FocusTrapContext {
 
     pub fn next(&self, forward: bool) {
         let ctx = use_context::<AppContext>().unwrap();
-        let focused = ctx.focused.borrow().clone();
+        let focused = *ctx.focused.borrow();
 
         let traps = self
             .sorted_active_traps()
@@ -102,13 +102,11 @@ impl FocusTrapContext {
                     let next_trap = (i + 1) % traps.len();
                     traps[next_trap].sequence.first()
                 }
+            } else if seq > 0 {
+                item.sequence.get(seq - 1)
             } else {
-                if seq > 0 {
-                    item.sequence.get(seq - 1)
-                } else {
-                    let next_trap = (i + traps.len() - 1) % traps.len();
-                    traps[next_trap].sequence.last()
-                }
+                let next_trap = (i + traps.len() - 1) % traps.len();
+                traps[next_trap].sequence.last()
             }
             .cloned()
             .unwrap();
@@ -185,6 +183,12 @@ impl FocusTrapContext {
 pub struct FocusTrap {
     root: View,
     context: Rc<RefCell<FocusTrapContext>>,
+}
+
+impl Default for FocusTrap {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl FocusTrap {

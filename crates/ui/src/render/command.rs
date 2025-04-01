@@ -11,8 +11,8 @@ fn bin_clip(clip: Rect, mut src_rect: Rect, dst_rect: Rect) -> Option<(Rect, Rec
     let rect = clip.intersect_rect(&dst_rect);
     src_rect.x += (rect.x - dst_rect.x) / dst_rect.width * src_rect.width;
     src_rect.y += (rect.y - dst_rect.y) / dst_rect.height * src_rect.height;
-    src_rect.width *= (rect.width / dst_rect.width);
-    src_rect.height *= (rect.height / dst_rect.height);
+    src_rect.width *= rect.width / dst_rect.width;
+    src_rect.height *= rect.height / dst_rect.height;
     Some((src_rect, rect - clip.location()))
 }
 

@@ -15,12 +15,6 @@ use std::sync::Arc;
 use taffy::{AvailableSpace, Size};
 use crate::render::renderer::{DynamicImageDrawable, Renderer};
 
-enum ImageState {
-    None,
-    Loading(DynamicImage),
-    Loaded(DynamicImageDrawable),
-}
-
 pub trait IntoDrawable: Sized {
     fn into_drawable(self) -> Box<dyn Drawable>;
 }
@@ -63,7 +57,7 @@ impl Image {
             let drawable = drawable.clone();
             move |delta| {
                 if let Some(drawable) = drawable.borrow_mut().as_mut() {
-                    if (drawable.update(delta)) {
+                    if drawable.update(delta) {
                         id.request_repaint(StyleTrigger::Paint);
                     }
                 }
@@ -90,7 +84,7 @@ impl Image {
             let drawable = drawable.clone();
             move |delta| {
                 if let Some(drawable) = drawable.borrow_mut().as_mut() {
-                     if (drawable.update(delta)) {
+                     if drawable.update(delta) {
                          id.request_repaint(StyleTrigger::Paint);
                      }
                 }
@@ -128,9 +122,9 @@ impl Element for Image {
 
     fn measure(
         &self,
-        ctx: &mut Renderer,
+        _ctx: &mut Renderer,
         known_dimensions: Size<Option<f32>>,
-        available_space: Size<AvailableSpace>,
+        _available_space: Size<AvailableSpace>,
     ) -> Size<f32> {
         if let Some(image) = self.drawable.borrow().as_ref() {
             let image_size = image.size();

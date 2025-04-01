@@ -25,6 +25,12 @@ impl Ord for ViewId {
     }
 }
 
+impl Default for ViewId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ViewId {
     pub fn new() -> Self {
         let id = RUNTIME.with_borrow_mut(|r| {
@@ -53,7 +59,7 @@ impl ViewId {
     }
 
     pub fn parent(&self) -> Option<ViewId> {
-        RUNTIME.with_borrow(|r| r.taffy.borrow().parent(self.0).map(|item| ViewId(item)))
+        RUNTIME.with_borrow(|r| r.taffy.borrow().parent(self.0).map(ViewId))
     }
 
     pub fn children(&self) -> Rc<Vec<ViewId>> {
@@ -94,7 +100,7 @@ impl ViewId {
 
     pub fn add_event_listener(
         &self,
-        listener: Box<dyn (Fn(&mut Event) -> ()) + 'static>,
+        listener: Box<dyn (Fn(&mut Event)) + 'static>,
     ) -> Box<dyn Fn()> {
         let key = self
             .state()
@@ -241,7 +247,7 @@ impl ViewId {
     pub fn index_path(&self, root: ViewId) -> Vec<usize> {
         let mut path = vec![];
         let mut current = *self;
-        while (current != root) {
+        while current != root {
             path.push(current.state().borrow().index);
             current = current.parent().unwrap();
         }

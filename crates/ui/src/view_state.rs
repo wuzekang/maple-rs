@@ -23,6 +23,12 @@ pub struct ViewState {
     pub index: usize,
 }
 
+impl Default for ViewState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ViewState {
     pub fn new() -> Self {
         Self {

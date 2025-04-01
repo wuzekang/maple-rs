@@ -83,11 +83,9 @@ pub struct MouseEvent {
 }
 impl MouseEvent {
     pub fn client(&self) -> Vec2 {
-        unsafe {
-            Vec2 {
-                x: self.motion.x,
-                y: self.motion.y,
-            }
+        Vec2 {
+            x: self.motion.x,
+            y: self.motion.y,
         }
     }
 
@@ -103,8 +101,8 @@ impl MouseEvent {
         let layout = id.layout();
         let viewport = id.state().borrow().viewport;
 
-        let x = unsafe { self.motion.x } - viewport.x;
-        let y = unsafe { self.motion.y } - viewport.y;
+        let x = self.motion.x - viewport.x;
+        let y = self.motion.y - viewport.y;
 
         let left = layout.location.x;
         let top = layout.location.y;
@@ -218,12 +216,10 @@ impl TryFrom<(&SDL_Event, ViewId)> for Event {
             } else {
                 match event_type {
                     SDL_EventType::TEXT_INPUT => Ok(Event::TextInput(TextInputEvent {
-                        text: unsafe {
-                            CStr::from_ptr(event.text.text)
-                                .to_str()
-                                .unwrap()
-                                .to_string()
-                        },
+                        text: CStr::from_ptr(event.text.text)
+                            .to_str()
+                            .unwrap()
+                            .to_string(),
                     })),
                     _ => Err(()),
                 }
@@ -401,7 +397,7 @@ pub trait Interactive: Sized + Element {
 
     fn on_event<F>(self, f: F) -> Self
     where
-        F: (Fn(&mut Event) -> ()) + 'static,
+        F: (Fn(&mut Event)) + 'static,
     {
         let _ = self
             .id()
@@ -411,7 +407,7 @@ pub trait Interactive: Sized + Element {
 
     fn on_mouse_event<F>(self, r#type: MouseEventType, f: F) -> Self
     where
-        F: (Fn(&mut MouseEvent) -> ()) + 'static,
+        F: (Fn(&mut MouseEvent)) + 'static,
     {
         let _ = self.id().add_event_listener(Box::new(move |event| {
             if let Event::Mouse(event) = event {
@@ -425,7 +421,7 @@ pub trait Interactive: Sized + Element {
 
     fn on_click<F>(self, f: F) -> Self
     where
-        F: (Fn(&MouseEvent) -> ()) + 'static,
+        F: (Fn(&MouseEvent)) + 'static,
     {
         self.on_mouse_event(MouseEventType::MouseDown, move |event| {
             f(event);
@@ -434,7 +430,7 @@ pub trait Interactive: Sized + Element {
 
     fn on_mouse_move<F>(self, f: F) -> Self
     where
-        F: (Fn(&MouseEvent) -> ()) + 'static,
+        F: (Fn(&MouseEvent)) + 'static,
     {
         self.on_mouse_event(MouseEventType::MouseMove, move |event| {
             f(event);
@@ -443,7 +439,7 @@ pub trait Interactive: Sized + Element {
 
     fn on_mouse_enter<F>(self, f: F) -> Self
     where
-        F: (Fn(&MouseEvent) -> ()) + 'static,
+        F: (Fn(&MouseEvent)) + 'static,
     {
         self.on_mouse_event(MouseEventType::MouseEnter, move |event| {
             f(event);
@@ -451,7 +447,7 @@ pub trait Interactive: Sized + Element {
     }
     fn on_mouse_leave<F>(self, f: F) -> Self
     where
-        F: (Fn(&MouseEvent) -> ()) + 'static,
+        F: (Fn(&MouseEvent)) + 'static,
     {
         self.on_mouse_event(MouseEventType::MouseLeave, move |event| {
             f(event);
@@ -460,7 +456,7 @@ pub trait Interactive: Sized + Element {
 
     fn on_mouse_down<F>(self, f: F) -> Self
     where
-        F: (Fn(&MouseEvent) -> ()) + 'static,
+        F: (Fn(&MouseEvent)) + 'static,
     {
         self.on_mouse_event(MouseEventType::MouseDown, move |event| {
             f(event);
@@ -469,7 +465,7 @@ pub trait Interactive: Sized + Element {
 
     fn on_mouse_up<F>(self, f: F) -> Self
     where
-        F: (Fn(&MouseEvent) -> ()) + 'static,
+        F: (Fn(&MouseEvent)) + 'static,
     {
         self.on_mouse_event(MouseEventType::MouseUp, move |event| {
             f(event);
@@ -478,14 +474,14 @@ pub trait Interactive: Sized + Element {
 
     fn on_mouse_wheel<F>(self, f: F) -> Self
     where
-        F: (Fn(&MouseEvent) -> ()) + 'static,
+        F: (Fn(&MouseEvent)) + 'static,
     {
         self.on_mouse_event(MouseEventType::MouseWheel, move |event| f(event))
     }
 
     fn on_focus<F>(self, f: F) -> Self
     where
-        F: (Fn(&FocusEvent) -> ()) + 'static,
+        F: (Fn(&FocusEvent)) + 'static,
     {
         self.on_event(move |event| {
             if let Event::Focus(event) = event {
@@ -497,7 +493,7 @@ pub trait Interactive: Sized + Element {
     }
     fn on_blur<F>(self, f: F) -> Self
     where
-        F: (Fn(&FocusEvent) -> ()) + 'static,
+        F: (Fn(&FocusEvent)) + 'static,
     {
         self.on_event(move |event| {
             if let Event::Focus(event) = event {
@@ -510,7 +506,7 @@ pub trait Interactive: Sized + Element {
 
     fn on_text_input<F>(self, f: F) -> Self
     where
-        F: (Fn(&TextInputEvent) -> ()) + 'static,
+        F: (Fn(&TextInputEvent)) + 'static,
     {
         self.on_event(move |event| {
             if let Event::TextInput(event) = event {
@@ -521,7 +517,7 @@ pub trait Interactive: Sized + Element {
 
     fn on_key_down<F>(self, f: F) -> Self
     where
-        F: (Fn(&mut KeyboardEvent) -> ()) + 'static,
+        F: (Fn(&mut KeyboardEvent)) + 'static,
     {
         self.on_event(move |event| {
             if let Event::Keyboard(event) = event {
@@ -534,7 +530,7 @@ pub trait Interactive: Sized + Element {
 
     fn on_key_up<F>(self, f: F) -> Self
     where
-        F: (Fn(&mut KeyboardEvent) -> ()) + 'static,
+        F: (Fn(&mut KeyboardEvent)) + 'static,
     {
         self.on_event(move |event| {
             if let Event::Keyboard(event) = event {
@@ -547,7 +543,7 @@ pub trait Interactive: Sized + Element {
 
     fn on_attach<F>(self, f: F) -> Self
     where
-        F: (Fn() -> ()) + 'static,
+        F: (Fn()) + 'static,
     {
         self.on_event(move |event| {
             if let Event::Lifecycle(event) = event {
@@ -560,7 +556,7 @@ pub trait Interactive: Sized + Element {
 
     fn on_detach<F>(self, f: F) -> Self
     where
-        F: (Fn() -> ()) + 'static,
+        F: (Fn()) + 'static,
     {
         self.on_event(move |event| {
             if let Event::Lifecycle(event) = event {
@@ -574,7 +570,7 @@ pub trait Interactive: Sized + Element {
 
 pub fn use_event<F>(f: F)
 where
-    F: (Fn(&mut Event) -> ()) + 'static,
+    F: (Fn(&mut Event)) + 'static,
 {
     let root: ViewId = use_context().unwrap();
     on_cleanup(root.add_event_listener(Box::new(f)))
@@ -582,7 +578,7 @@ where
 
 pub fn use_keyboard_event<F>(r#type: KeyboardEventType, f: F)
 where
-    F: (Fn(&mut KeyboardEvent) -> ()) + 'static,
+    F: (Fn(&mut KeyboardEvent)) + 'static,
 {
     use_event(move |event| {
         if let Event::Keyboard(event) = event {
@@ -595,14 +591,14 @@ where
 
 pub fn use_key_down_event<F>(f: F)
 where
-    F: (Fn(&mut KeyboardEvent) -> ()) + 'static,
+    F: (Fn(&mut KeyboardEvent)) + 'static,
 {
     use_keyboard_event(KeyboardEventType::KeyDown, f)
 }
 
 pub fn use_key<F>(key: SDL_Keycode, f: F)
 where
-    F: (Fn() -> ()) + 'static,
+    F: (Fn()) + 'static,
 {
     use_key_down_event(move |event| {
         if event.key == key {

@@ -1,7 +1,6 @@
 use crate::app::button;
 use crate::character::{Character, ZMap};
 use crate::scene::MainScene;
-use crate::sound::play_sound;
 use crate::sprite::{Sprite, SpriteAnimation, SpriteDrawable};
 use crate::timer::Repeat;
 use crate::WzBase;
@@ -20,12 +19,12 @@ use ui::geometry::{CubicBezier, Rect};
 use ui::peniko::Color;
 use ui::reactive::{
     create_effect, create_ref, create_rw_signal, provide_context, use_context, Ref, RwSignal,
-    SignalGet, SignalRead, SignalTrack, SignalUpdate, SignalWith,
+    SignalGet, SignalRead, SignalTrack, SignalUpdate,
 };
 use ui::style::{StyleBuilder, Styleable, TextWrap};
 use ui::widget::focus_trap::focus_trap;
 use ui::widget::image::IntoDrawable;
-use ui::{dynamic, fragment, view, Drawable, Element, Fragment, IntoElement, Renderer, TextInput};
+use ui::{dynamic, fragment, view, Drawable, Fragment, IntoElement, Renderer, TextInput};
 use ui::{text, View};
 use ui::{use_resource, Interactive};
 use ui::{Bounds, Image};
@@ -143,7 +142,7 @@ pub fn channel_option(
                         .style(|s| s.pointer_events_none().absolute().left(20).top(7)),
                     );
                 }
-                return fragment(());
+                fragment(())
             }
         }),
     ))
@@ -178,11 +177,11 @@ pub fn world_select_view(on_enter: impl Fn() + 'static) -> impl IntoElement {
     view()
         .style(|s| s.w_full().h_full())
         .on_click(move |event| {
-            if event.current.map(|v| v == event.target).unwrap_or_default() {
-                if selected_world.get_untracked().is_some() {
-                    selected_world.set(None);
-                    scroll_state.set(Some(1));
-                }
+            if event.current.map(|v| v == event.target).unwrap_or_default()
+                && selected_world.get_untracked().is_some()
+            {
+                selected_world.set(None);
+                scroll_state.set(Some(1));
             }
         })
         .children((
@@ -215,7 +214,7 @@ pub fn world_select_view(on_enter: impl Fn() + 'static) -> impl IntoElement {
 
                             let delay = 350.0;
                             let duration = 500.0;
-                            let mut elapsed = Rc::new(RefCell::new(0.0));
+                            let elapsed = Rc::new(RefCell::new(0.0));
                             let alpha = create_rw_signal(0.0);
                             use_raf(move |delta| {
                                 *elapsed.borrow_mut() += delta;
@@ -302,8 +301,8 @@ pub fn world_select_view(on_enter: impl Fn() + 'static) -> impl IntoElement {
 }
 
 pub fn world_select_sidebar(
-    step: RwSignal<usize>,
-    on_back: impl (Fn(&MouseEvent) -> ()) + 'static,
+    _step: RwSignal<usize>,
+    on_back: impl (Fn(&MouseEvent)) + 'static,
 ) -> impl IntoElement {
     let WzBase { node: base } = use_context().unwrap();
     let img = base.at_path("UI/Login.img").unwrap();
@@ -369,7 +368,7 @@ pub fn title_view(on_login: impl Fn() + 'static) -> impl IntoElement {
                 )),
             button(title.get("BtLogin"))
                 .style(|s| s.absolute().top(0).right(0))
-                .on_click(move |e| {
+                .on_click(move |_| {
                     on_login();
                 }),
             view()
@@ -625,7 +624,7 @@ pub fn create_normal() -> impl IntoElement {
                     .map(|(i, j)| options[gender][i][*j].0)
                     .collect::<Vec<_>>();
 
-                let face = value[0];
+                // let face = value[0];
                 let mut parts = vec![];
                 parts.push(format!("Face/000{}", value[0]));
                 parts.push(format!("Hair/000{}", value[1] + value[2]));
@@ -967,9 +966,9 @@ enum LoginStep {
     CreateAran,
 }
 
-impl Into<usize> for LoginStep {
-    fn into(self) -> usize {
-        match self {
+impl From<LoginStep> for usize {
+    fn from(val: LoginStep) -> Self {
+        match val {
             LoginStep::Title => 0,
             LoginStep::SelectWorld => 1,
             LoginStep::SelectCharacter => 2,
@@ -1051,7 +1050,7 @@ pub fn login_scene(on_enter: impl Fn() + 'static) -> View {
         let from = scroll_top.get_untracked();
         let to = compute_scroll_top();
         let duration = 600.0;
-        let mut elapsed = Cell::new(0.0);
+        let elapsed = Cell::new(0.0);
         use_raf(move |delta| {
             elapsed.set(elapsed.get() + delta);
             let x = elapsed.get().min(duration) / duration;

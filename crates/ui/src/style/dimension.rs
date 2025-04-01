@@ -31,9 +31,9 @@ impl From<taffy::Dimension> for Dimension {
     }
 }
 
-impl Into<taffy::Dimension> for Dimension {
-    fn into(self) -> taffy::Dimension {
-        self.0
+impl From<Dimension> for taffy::Dimension {
+    fn from(val: Dimension) -> Self {
+        val.0
     }
 }
 
@@ -80,9 +80,9 @@ impl From<usize> for LengthPercentageAuto {
         Self(taffy::LengthPercentageAuto::Length(value as f32))
     }
 }
-impl Into<taffy::LengthPercentageAuto> for LengthPercentageAuto {
-    fn into(self) -> taffy::LengthPercentageAuto {
-        self.0
+impl From<LengthPercentageAuto> for taffy::LengthPercentageAuto {
+    fn from(val: LengthPercentageAuto) -> Self {
+        val.0
     }
 }
 
@@ -131,9 +131,9 @@ impl From<taffy::LengthPercentage> for LengthPercentage {
     }
 }
 
-impl Into<taffy::LengthPercentage> for LengthPercentage {
-    fn into(self) -> taffy::LengthPercentage {
-        self.0
+impl From<LengthPercentage> for taffy::LengthPercentage {
+    fn from(val: LengthPercentage) -> Self {
+        val.0
     }
 }
 
@@ -200,13 +200,13 @@ impl<T: Into<LengthPercentageAuto> + Clone> From<[T; 2]> for Rect<LengthPercenta
     }
 }
 
-impl<U, T: Into<U> + Clone + Copy> Into<taffy::Rect<U>> for Rect<T> {
-    fn into(self) -> taffy::Rect<U> {
+impl<U, T: Into<U> + Clone + Copy> From<Rect<T>> for taffy::Rect<U> {
+    fn from(val: Rect<T>) -> Self {
         taffy::Rect {
-            left: self.left.into(),
-            top: self.top.into(),
-            right: self.right.into(),
-            bottom: self.bottom.into(),
+            left: val.left.into(),
+            top: val.top.into(),
+            right: val.right.into(),
+            bottom: val.bottom.into(),
         }
     }
 }

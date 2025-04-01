@@ -2,7 +2,6 @@ use crate::{
     create_rw_signal,
     effect::create_effect,
     read::{SignalRead, SignalTrack},
-    scope::Scope,
     signal::{create_signal, ReadSignal},
     RwSignal, SignalGet, SignalUpdate, SignalWith,
 };
@@ -49,7 +48,6 @@ pub fn create_memo<T>(f: impl Fn(Option<&T>) -> T + 'static) -> Memo<T>
 where
     T: PartialEq + 'static,
 {
-    let cx = Scope::current();
     let initial = f(None);
     let (getter, setter) = create_signal(initial);
     let reader = getter.read_untracked();

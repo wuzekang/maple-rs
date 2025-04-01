@@ -6,7 +6,6 @@ use std::{
     rc::Rc,
 };
 
-use crate::runtime::EffectTrait;
 use crate::{
     id::Id,
     read::{SignalRead, SignalTrack, SignalWith},

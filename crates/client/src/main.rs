@@ -1,13 +1,7 @@
-use glam::{vec2, Vec2Swizzles};
+use glam::vec2;
 use sdl3_sys::everything::*;
 use std::error::Error;
-use std::mem::MaybeUninit;
-use ui::widget::image::IntoDrawable;
-use ui::{
-    reactive::{provide_context, SignalGet, SignalUpdate},
-    taffy::prelude::*,
-    Drawable, Element, IntoElement, Root,
-};
+use ui::{reactive::provide_context, Root};
 use wz::Node;
 
 mod app;
@@ -35,15 +29,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // let size = vec2(1920.0, 1080.0);
     // let size = vec2(1366.0, 768.0);
-    let size = unsafe {
-        let mut num = MaybeUninit::<i32>::uninit();
-        let displays = SDL_GetDisplays(num.as_mut_ptr());
-        let num = num.assume_init();
-        let mode = SDL_GetCurrentDisplayMode(*displays.offset(0));
-        let w = (*mode).w;
-        let h = (*mode).h;
-        vec2(w as f32, h as f32)
-    };
+    // let size = unsafe {
+    //     let mut num = MaybeUninit::<i32>::uninit();
+    //     let displays = SDL_GetDisplays(num.as_mut_ptr());
+    //     let mode = SDL_GetCurrentDisplayMode(*displays.offset(0));
+    //     let w = (*mode).w;
+    //     let h = (*mode).h;
+    //     vec2(w as f32, h as f32)
+    // };
 
     // let size = vec2(1600.0, 600.0);
     let size = vec2(800.0, 600.0);

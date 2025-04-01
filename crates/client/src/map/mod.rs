@@ -1,11 +1,9 @@
-use crate::map;
 use crate::npc::Npc;
 use crate::sprite::{Sprite, SpriteAnimation};
 use crate::timer::{Repeat, Timer};
 use crate::wz::Node;
 use glam::{vec2, Vec2};
 use std::collections::HashMap;
-use wz_reader::node::Error;
 
 pub mod world_map;
 
@@ -22,6 +20,7 @@ impl TryFrom<Node> for MapHelper {
     }
 }
 
+#[allow(dead_code)]
 pub struct MapTile {
     pub id: i32,
     pub tile: Sprite,
@@ -51,6 +50,7 @@ impl TryFrom<Node> for Portal {
 }
 
 #[derive(Default)]
+#[allow(dead_code)]
 pub struct Foothold {
     pub start: Vec2,
     pub end: Vec2,
@@ -83,8 +83,9 @@ impl TryFrom<Node> for MapInfo {
     }
 }
 
+#[allow(dead_code)]
 pub struct MapObject {
-    id: i32,
+    pub id: i32,
     pub timer: Timer,
     pub flip: bool,
     pub sprites: Vec<Sprite>,
@@ -97,21 +98,7 @@ impl MapObject {
         self.timer.tick(delta);
         let sprite = &mut self.sprites[self.timer.index];
         let p = self.timer.progress();
-        sprite.alpha = (((1.0 - p) * sprite.a0 as f32 + p * sprite.a1 as f32) as i32);
-    }
-}
-
-pub enum MapItem {
-    Tile(MapTile),
-    Object(MapObject),
-}
-
-impl MapItem {
-    pub fn z(&self) -> i32 {
-        match self {
-            MapItem::Tile(item) => item.tile.z,
-            MapItem::Object(item) => item.z,
-        }
+        sprite.alpha = ((1.0 - p) * sprite.a0 as f32 + p * sprite.a1 as f32) as i32;
     }
 }
 
@@ -135,6 +122,8 @@ pub struct MapLayer {
 //     "x": 0,
 //     "y": 0
 // }
+
+#[allow(dead_code)]
 pub struct MapBackground {
     // bS
     pub bs: String,
@@ -155,6 +144,7 @@ pub struct MapBackground {
     pub offset_y: f32,
 }
 
+#[allow(dead_code)]
 pub struct MapLife {
     pub cy: i32,
     pub f: i32,
@@ -277,7 +267,6 @@ impl Map {
 
         let children = map_img.get("back").children();
         let backgrounds: Vec<_> = (0..children.len())
-            .into_iter()
             .filter_map(|i| {
                 MapBackground::new(root.clone(), children[i.to_string().as_str()].clone()).ok()
             })
@@ -340,7 +329,7 @@ impl Map {
                         let y: i32 = value.get("y").try_into()?;
                         let no: i32 = value.get("no").try_into()?;
                         let u: String = value.get("u").try_into()?;
-                        let zm: i32 = value.get("zM").try_into()?;
+                        // let zm: i32 = value.get("zM").try_into()?;
                         let tile_path = format!("Map/Tile/{ts}.img/{u}/{no}");
 
                         tiles.push(MapTile {
@@ -388,7 +377,7 @@ impl Map {
 
         let mut lt = Vec2::INFINITY;
         let mut rb = Vec2::NEG_INFINITY;
-        for (_, item) in &footholds {
+        for item in footholds.values() {
             lt = lt.min(item.start).min(item.end);
             rb = rb.max(item.start).max(item.end);
         }
@@ -412,10 +401,10 @@ impl Map {
             .collect();
 
         let mut info: MapInfo = map_img.get("info").try_into()?;
-        info.vr_left = info.vr_left.or_else(|| Some(lt.x as i32));
-        info.vr_top = info.vr_top.or_else(|| Some(lt.y as i32));
-        info.vr_right = info.vr_right.or_else(|| Some(rb.x as i32));
-        info.vr_bottom = info.vr_bottom.or_else(|| Some(rb.y as i32));
+        info.vr_left = info.vr_left.or(Some(lt.x as i32));
+        info.vr_top = info.vr_top.or(Some(lt.y as i32));
+        info.vr_right = info.vr_right.or(Some(rb.x as i32));
+        info.vr_bottom = info.vr_bottom.or(Some(rb.y as i32));
 
         Ok(Self {
             life,
@@ -425,7 +414,7 @@ impl Map {
             footholds,
             portals: map_img.get("portal").try_into()?,
             info,
-            portal_timer: Timer::new((1..helper.pv.len()).into_iter().map(|_| 100.0).collect()),
+            portal_timer: Timer::new((1..helper.pv.len()).map(|_| 100.0).collect()),
             helper,
         })
     }

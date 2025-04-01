@@ -16,6 +16,12 @@ pub struct Tile {
     commands: Vec<Box<dyn Command>>,
 }
 
+impl Default for Tile {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Tile {
     pub fn new() -> Self {
         Self {
@@ -159,13 +165,13 @@ impl Layer {
     }
 }
 
-struct TileIterator {
+pub struct TileIterator {
     x: usize,
     y: usize,
     end_x: usize,
     end_y: usize,
     columns: usize,
-    rows: usize,
+    // rows: usize,
 }
 
 impl TileIterator {
@@ -182,7 +188,7 @@ impl TileIterator {
         let end_y = ((y + height) as usize).div_ceil(TILE_HEIGHT);
 
         let columns = (bounds.width as usize).div_ceil(TILE_WIDTH);
-        let rows = (bounds.height as usize).div_ceil(TILE_HEIGHT);
+        // let rows = (bounds.height as usize).div_ceil(TILE_HEIGHT);
 
         // dbg!(
         //     clip_rect,
@@ -200,7 +206,7 @@ impl TileIterator {
             end_x,
             end_y,
             columns,
-            rows,
+            // rows,
         }
     }
 }

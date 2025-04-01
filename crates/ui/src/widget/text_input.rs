@@ -2,13 +2,12 @@ use crate::geometry::Rect;
 use crate::render::renderer::Renderer;
 use crate::style::dimension::percent;
 use crate::style::{Cursor, PointerEvents, StyleTrigger, Styleable, TextWrap};
-use crate::{element::Element, runtime::RUNTIME, view, view_id::ViewId, Interactive, Texture};
+use crate::{element::Element, runtime::RUNTIME, view, view_id::ViewId, Interactive};
 use cosmic_text::{Action, Buffer, Edit, Editor, Motion, Selection};
 use glam::{vec2, Vec2};
 use peniko::Color;
 use reactive::{create_ref, use_context, Ref};
 use sdl3_sys::everything::*;
-use std::fmt::Display;
 use taffy::{AlignItems, AvailableSpace, JustifyContent, Point, Size};
 
 pub struct OffsetEditor {
@@ -243,19 +242,25 @@ pub struct TextInput {
     id: ViewId,
 }
 
+impl Default for TextInput {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TextInput {
     pub fn new() -> Self {
         let focused = create_ref(false);
         let text_view = TextView::new(focused);
 
         let element = view().tab_index(0).children(
-            (text_view.style(|s| {
+            text_view.style(|s| {
                 s.font_size(12.0)
                     .line_height(12.0)
                     .text_wrap(TextWrap::None)
                     .width(percent(1.0))
                     .pointer_events(PointerEvents::None)
-            })),
+            }),
         );
 
         let element = element

@@ -198,9 +198,7 @@ impl Runtime {
 
     pub fn crete_child(&self, parent: Id) -> Id {
         let id = self.next();
-        self.nodes.borrow_mut()[parent.0]
-            .children
-            .push(id);
+        self.nodes.borrow_mut()[parent.0].children.push(id);
         id
     }
 
@@ -213,7 +211,6 @@ impl Runtime {
             id,
             f,
             value: RefCell::new(None),
-            observers: RefCell::new(HashSet::default()),
         });
         self.set_scope(id);
         self.run_initial_effect(effect);
@@ -235,10 +232,8 @@ impl Runtime {
     }
 
     pub fn with_scope<T>(&self, scope: Scope, f: impl FnOnce() -> T) -> T {
-        let prev_scope = { self.current_scope.borrow().clone() };
-        {
-            *self.current_scope.borrow_mut() = scope.0
-        };
+        let prev_scope = { *self.current_scope.borrow() };
+        *self.current_scope.borrow_mut() = scope.0;
         let result = f();
         {
             *self.current_scope.borrow_mut() = prev_scope;
@@ -293,9 +288,7 @@ impl Runtime {
 
         self.observer_clean_up(effect_id);
 
-        {
-            *self.current_effect.borrow_mut() = Some(effect.clone())
-        };
+        *self.current_effect.borrow_mut() = Some(effect.clone());
 
         let effect_scope = Scope(effect_id);
         self.with_scope(effect_scope, move || {
@@ -303,9 +296,7 @@ impl Runtime {
             effect.run();
         });
 
-        {
-            *self.current_effect.borrow_mut() = None
-        };
+        *self.current_effect.borrow_mut() = None;
     }
 
     pub fn subscribe(&self, id: Id) {
@@ -333,7 +324,6 @@ where
     id: Id,
     f: F,
     value: RefCell<Option<T>>,
-    observers: RefCell<HashSet<Id>>,
 }
 
 // impl<T, F> Drop for Effect<T, F>

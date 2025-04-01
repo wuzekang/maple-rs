@@ -63,7 +63,7 @@ where
     let (getter, setter) = create_signal(Vec::new());
 
     create_effect(move |prev: Option<(Vec<Item>, Vec<(Node, Scope)>)>| {
-        let mut data = data_fn();
+        let data = data_fn();
 
         let views = if let Some((_data, mut _vec)) = prev {
             let mut vec = Vec::with_capacity(data.len());
@@ -102,7 +102,7 @@ where
         } else {
             data.clone()
                 .into_iter()
-                .map(|item| view_fn(item))
+                .map(&view_fn)
                 .collect::<Vec<_>>()
         };
 

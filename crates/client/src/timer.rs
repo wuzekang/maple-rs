@@ -20,7 +20,6 @@ pub struct Timer {
     pub intervals: Vec<f32>,
     pub total: f32,
     pub repeat_count: u16,
-    pub complete: bool,
 }
 
 impl Timer {
@@ -32,7 +31,6 @@ impl Timer {
             index: 0,
             repeat: Repeat::Infinite,
             repeat_count: 0,
-            complete: false,
         }
     }
 
@@ -40,16 +38,12 @@ impl Timer {
         if self.intervals.is_empty() || self.total == 0.0 {
             return false;
         }
-        match self.repeat {
-            Repeat::Finite(count) => {
-                if self.repeat_count >= count {
-                    return false;
-                }
+        if let Repeat::Finite(count) = self.repeat {
+            if self.repeat_count >= count {
+                return false;
             }
-            _ => {}
         }
 
-        let prev = self.index;
         self.elapsed += delta;
         if self.elapsed >= self.total {
             self.repeat_count += (self.elapsed / self.total).trunc() as u16;
@@ -57,7 +51,7 @@ impl Timer {
         }
 
         while self.elapsed >= self.intervals[self.index] {
-            self.elapsed = (self.elapsed - self.intervals[self.index]);
+            self.elapsed -= self.intervals[self.index];
             self.index += 1;
             if self.index >= self.intervals.len() {
                 self.repeat_count += 1;
@@ -65,15 +59,12 @@ impl Timer {
             }
         }
 
-        match self.repeat {
-            Repeat::Finite(count) => {
-                if self.repeat_count >= count {
-                    self.index = self.intervals.len() - 1;
-                    self.elapsed  = self.intervals[self.index];
-                    return false;
-                }
+        if let Repeat::Finite(count) = self.repeat {
+            if self.repeat_count >= count {
+                self.index = self.intervals.len() - 1;
+                self.elapsed  = self.intervals[self.index];
+                return false;
             }
-            _ => {}
         }
 
         true

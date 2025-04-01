@@ -3,20 +3,19 @@ use crate::render::command::{
     Command, LineCommand, RectCommand, RenderTextureCommand, RenderTextureNineGridCommand,
     RenderTextureRotatedCommand,
 };
-use crate::render::layer::{Layer, Tile};
+use crate::render::layer::Layer;
 use crate::runtime::RUNTIME;
 use crate::style::dimension;
 use crate::{OffsetEditor, ViewId};
 use cosmic_text::{Edit, FontSystem, Metrics, Placement, SwashCache};
-use glam::{vec2, Vec2, Vec4Swizzles};
+use glam::{vec2, Vec2};
 use hashbrown::HashSet;
 use image::DynamicImage;
 use peniko::Color;
 use sdl3_sys::everything::*;
 use std::rc::Rc;
 use std::{cmp, collections::HashMap, sync::Arc};
-use taffy::prelude::length;
-use taffy::{AvailableSpace, LengthPercentage, Size};
+use taffy::{AvailableSpace, Size};
 use unicode_segmentation::UnicodeSegmentation;
 
 pub struct Surface {
@@ -189,7 +188,7 @@ impl NineGridTexture {
 
 impl Drawable for NineGridTexture {
     fn draw(&self, painter: &mut Renderer) {
-        painter.render_texture_nine_grid(&self, self.bounds.position, Some(self.bounds.size));
+        painter.render_texture_nine_grid(self, self.bounds.position, Some(self.bounds.size));
     }
 
     fn size(&self) -> Vec2 {
@@ -202,6 +201,7 @@ impl Drawable for NineGridTexture {
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
 struct TextLocation {
     pub placement: Placement,
     pub index: usize,
@@ -262,9 +262,7 @@ impl TextTexture {
     pub fn insert(&mut self, image: cosmic_text::SwashImage) -> Option<TextLocation> {
         let size = vec2(image.placement.width as f32, image.placement.height as f32);
         let location = self.allocate(size);
-        if location.is_none() {
-            return None;
-        }
+        location?;
         let location = location.unwrap();
 
         let texture = unsafe {
@@ -329,8 +327,8 @@ pub struct Bounds {
 pub trait Drawable {
     fn draw(&self, ctx: &mut Renderer);
     fn size(&self) -> Vec2;
-    fn set_bounds(&mut self, bounds: Bounds) {}
-    fn update(&mut self, delta: f32) -> bool {
+    fn set_bounds(&mut self, _bounds: Bounds) {}
+    fn update(&mut self, _delta: f32) -> bool {
         false
     }
 }
@@ -481,6 +479,7 @@ struct RendererState {
     layer: Option<Layer>,
 }
 
+#[allow(dead_code)]
 pub struct Renderer {
     pub dpr: f32,
     scale: f32,
@@ -667,7 +666,7 @@ impl Renderer {
         editor.editor.with_buffer(|buffer| {
             for run in buffer.layout_runs() {
                 let line_i = run.line_i;
-                let line_y = run.line_y;
+                // let line_y = run.line_y;
                 let line_top = run.line_top;
                 let line_height = run.line_height;
 
@@ -1037,8 +1036,8 @@ impl Renderer {
 
         src_rect.x += (rect.x - dst_rect.x) / dst_rect.width * src_rect.width;
         src_rect.y += (rect.y - dst_rect.y) / dst_rect.height * src_rect.height;
-        src_rect.width *= (rect.width / dst_rect.width);
-        src_rect.height *= (rect.height / dst_rect.height);
+        src_rect.width *= rect.width / dst_rect.width;
+        src_rect.height *= rect.height / dst_rect.height;
         if flip == SDL_FlipMode::HORIZONTAL {
             src_rect.x = origin_rect.width - src_rect.x - src_rect.width;
         }

@@ -58,7 +58,7 @@ pub struct ResourceResult {
 
 impl ResourceResult {
     pub fn cancel(&self) -> bool {
-        self.cancelled.borrow_mut().insert(self.current.borrow().clone())
+        self.cancelled.borrow_mut().insert(*self.current.borrow())
     }
 
     pub fn run(&self) {

@@ -5,11 +5,10 @@ use crate::widget::dynamic::Dynamic;
 use crate::{view_id::ViewId, widget::fragment::Fragment, widget::text::Text};
 use glam::{vec2, Vec2};
 use peniko::Color;
-use reactive::{ReadSignal, Scope, SignalGet};
+use reactive::{ReadSignal, Scope};
 use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
-use taffy::prelude::TaffyZero;
 use taffy::{AvailableSpace, Size};
 
 pub trait Element: Any {
@@ -17,9 +16,9 @@ pub trait Element: Any {
 
     fn name(&self) -> String;
 
-    fn update(&mut self, delta: f32) {}
+    fn update(&mut self, _delta: f32) {}
 
-    fn event(&mut self, event: &mut Event) {}
+    fn event(&mut self, _event: &mut Event) {}
 
     fn paint(&self, ctx: &mut Renderer) {
         let id = self.id();
@@ -46,13 +45,12 @@ pub trait Element: Any {
 
     fn measure(
         &self,
-        ctx: &mut Renderer,
-        known_dimensions: Size<Option<f32>>,
-        available_space: Size<AvailableSpace>,
+        _ctx: &mut Renderer,
+        _known_dimensions: Size<Option<f32>>,
+        _available_space: Size<AvailableSpace>,
     ) -> Size<f32> {
         Size::ZERO
     }
-
 }
 
 #[derive(Clone)]

@@ -10,9 +10,8 @@ use crate::runtime::RUNTIME;
 use crate::style::{compute_layout, Cursor, StyleComputeContext, Styleable};
 use crate::view_id::ViewId;
 use crate::widget::focus_trap::FocusTrap;
-use crate::{input, Bounds, Drawable, Interactive};
+use crate::{input, Bounds, Drawable};
 use bumpalo::Bump;
-use cosmic_text::ttf_parser::colr::Painter;
 use glam::{vec2, Vec2};
 use peniko::Color;
 use reactive::{provide_context, RwSignal, Scope, SignalGet, SignalUpdate};
@@ -60,8 +59,8 @@ impl AppContext {
 
         let focused = mem::take(&mut *self.focused.borrow_mut());
         let _ = self.focused.borrow_mut().insert(target);
-        let prev = HashSet::<ViewId>::from_iter(focused.into_iter());
-        let next = HashSet::<ViewId>::from_iter(self.focused.borrow().into_iter());
+        let prev = HashSet::<ViewId>::from_iter(focused);
+        let next = HashSet::<ViewId>::from_iter(*self.focused.borrow());
         for id in &prev - &next {
             let mut blur_event = Event::Focus(FocusEvent {
                 r#type: FocusEventType::Blur,
@@ -79,7 +78,8 @@ impl AppContext {
         }
     }
 
-    pub fn dispatch(&self, mut event: Event, root: ViewId) {
+    pub fn dispatch(&self, event: Event) {
+        let root = self.root;
         if let Event::Mouse(mut event) = event {
             root.event_capture(event.client(), &mut event.target);
             let target = event.target;
@@ -92,8 +92,8 @@ impl AppContext {
                     self.hovered.borrow_mut().insert(parent);
                     node = parent;
                 }
-                let mut entered = &*self.hovered.borrow() - &prev;
-                let mut leaved = &prev - &*self.hovered.borrow();
+                let entered = &*self.hovered.borrow() - &prev;
+                let leaved = &prev - &*self.hovered.borrow();
 
                 event.r#type = MouseEventType::MouseEnter;
                 let mut event = Event::Mouse(event);
@@ -141,7 +141,7 @@ impl AppContext {
             event.target = id;
             id.dispatch_event(&mut Event::Keyboard(event), true);
             return;
-        } else if let Event::TextInput(mut event) = event {
+        } else if let Event::TextInput(event) = event {
             let id = self.focused.borrow().unwrap_or(root);
             id.dispatch_event(&mut Event::TextInput(event), false);
         } else if let Event::Focus(event) = event {
@@ -181,10 +181,10 @@ impl AppContext {
 
     pub fn perform_detach(&self) {
         let focused = mem::take(&mut *self.focused.borrow_mut());
-        let mut focused = HashSet::<ViewId>::from_iter(focused.into_iter());
+        let mut focused = HashSet::<ViewId>::from_iter(focused);
         for (id, _) in self.unmounted.borrow().iter() {
-            self.hovered.borrow_mut().remove(&id);
-            self.style_dirty.borrow_mut().remove(&id);
+            self.hovered.borrow_mut().remove(id);
+            self.style_dirty.borrow_mut().remove(id);
             if self.inspect_element.get_untracked() == Some(*id) {
                 self.inspect_element.set(None);
             }
@@ -223,17 +223,16 @@ impl AppContext {
         self.queue.borrow_mut().push(event);
     }
 
-    pub fn process_queue(&self, root: ViewId) {
+    pub fn process_queue(&self) {
         let queue = mem::take(&mut *self.queue.borrow_mut());
         for event in queue.into_iter() {
-            self.dispatch(event, root);
+            self.dispatch(event);
         }
     }
 }
 
 struct CursorElement {
     root: ViewId,
-    position: Vec2,
     cursor: Cursor,
     image: Option<Box<dyn Drawable>>,
     target: Option<ViewId>,
@@ -247,7 +246,6 @@ impl CursorElement {
         Self {
             root,
             cursor: Cursor::DEFAULT,
-            position: Default::default(),
             image: Default::default(),
             target: Default::default(),
             inspect: false,
@@ -316,7 +314,6 @@ impl Drawable for CursorElement {
                 }
                 self.cursor = cursor
             }
-        } else {
         }
 
         if let Some(image) = &mut self.image {
@@ -334,11 +331,9 @@ pub struct Root {
     size: RwSignal<Vec2>,
     painter: Rc<RefCell<Renderer>>,
     renderer: *mut SDL_Renderer,
-    window: *mut SDL_Window,
     app_context: AppContext,
     bump: Bump,
     id: ViewId,
-    current_cursor: Cursor,
     cursor_element: CursorElement,
 }
 
@@ -382,18 +377,16 @@ impl Root {
 
         view.into_element();
 
-        let mut bump = Bump::new();
+        let bump = Bump::new();
 
         Self {
             id,
             size,
             painter,
             renderer,
-            window,
             bump,
             app_context,
             cursor_element,
-            current_cursor: Cursor::DEFAULT,
         }
     }
 
@@ -407,7 +400,7 @@ impl Root {
                         .set(vec2(event.window.data1 as f32, event.window.data2 as f32));
                 }
                 SDL_EventType::KEY_DOWN => {
-                    if (event.key.key == SDLK_D) {
+                    if event.key.key == SDLK_D {
                         self.cursor_element
                             .set_inspect(!self.cursor_element.inspect);
                     }
@@ -427,7 +420,7 @@ impl Root {
         } else if event.is_mouse_leave().is_some() {
             self.cursor_element.cursor_visible = false;
         }
-        self.app_context.dispatch(event, self.id);
+        self.app_context.dispatch(event);
     }
 
     pub fn compute_style(&self, nodes: Vec<ViewId>) {
@@ -485,7 +478,6 @@ impl Root {
 
     pub fn launch(&mut self) {
         let renderer = self.renderer;
-        let window = self.window;
         let mut events = EventIterator::new();
 
         unsafe {
@@ -496,23 +488,20 @@ impl Root {
             // }
 
             let mut exited = false;
-            let mut prev = unsafe { SDL_GetTicksNS() };
+            let mut prev = SDL_GetTicksNS();
             while !exited {
                 Resource::try_recv();
 
-                self.app_context.process_queue(self.id);
+                self.app_context.process_queue();
 
                 for event in &mut events {
                     self.dispatch_event(event);
-                    match SDL_EventType(event.r#type) {
-                        SDL_EventType::QUIT => {
-                            exited = true;
-                        }
-                        _ => {}
+                    if SDL_EventType(event.r#type) == SDL_EventType::QUIT {
+                        exited = true;
                     }
                 }
 
-                let current = unsafe { SDL_GetTicksNS() };
+                let current = SDL_GetTicksNS();
                 let delta = (current - prev) as f32 / 1000000.0;
                 prev = current;
 
@@ -533,11 +522,11 @@ impl Root {
 
                 self.id.update(delta);
 
-                if self.app_context.mounted.borrow().len() > 0
-                    || self.app_context.unmounted.borrow().len() > 0
+                if !self.app_context.mounted.borrow().is_empty()
+                    || !self.app_context.unmounted.borrow().is_empty()
                 {
                     let observers = RUNTIME.with_borrow(|r| {
-                        let mut values = r
+                        let values = r
                             .mutation_observers
                             .borrow()
                             .values()
@@ -549,7 +538,7 @@ impl Root {
                             .map(|v| {
                                 (
                                     v[0].0,
-                                    v.into_iter()
+                                    v.iter()
                                         .map(|(_, v, options)| (v.clone(), options.clone()))
                                         .collect::<Vec<_>>(),
                                 )
@@ -584,7 +573,7 @@ impl Root {
                         stack.push_back(*id);
                     }
 
-                    while stack.len() > 0 {
+                    while !stack.is_empty() {
                         let id = stack.pop_back().unwrap();
                         let parent = parents.get(&id).cloned().or_else(|| id.parent());
                         if let Some(parent) = parent {

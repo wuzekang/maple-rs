@@ -154,24 +154,24 @@ impl From<(Vec2, Vec2)> for Rect {
     }
 }
 
-impl Into<SDL_Rect> for Rect {
-    fn into(self) -> SDL_Rect {
+impl From<Rect> for SDL_Rect {
+    fn from(val: Rect) -> Self {
         SDL_Rect {
-            x: self.x as i32,
-            y: self.y as i32,
-            w: self.width as i32,
-            h: self.height as i32,
+            x: val.x as i32,
+            y: val.y as i32,
+            w: val.width as i32,
+            h: val.height as i32,
         }
     }
 }
 
-impl Into<SDL_FRect> for Rect {
-    fn into(self) -> SDL_FRect {
+impl From<Rect> for SDL_FRect {
+    fn from(val: Rect) -> Self {
         SDL_FRect {
-            x: self.x,
-            y: self.y,
-            w: self.width,
-            h: self.height,
+            x: val.x,
+            y: val.y,
+            w: val.width,
+            h: val.height,
         }
     }
 }

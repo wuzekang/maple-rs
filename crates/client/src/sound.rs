@@ -54,7 +54,7 @@ pub fn play_sound(path: &str) {
                 // Probe the media source.
                 let probed = symphonia::default::get_probe()
                     .format(
-                        &Hint::new().with_extension("mp3"),
+                        Hint::new().with_extension("mp3"),
                         // Create the media source stream.
                         MediaSourceStream::new(Box::new(Cursor::new(buffer)), Default::default()),
                         // Use the default options for metadata and format readers.
@@ -100,9 +100,9 @@ pub fn play_sound(path: &str) {
                             // for chained OGG physical streams.
                             unimplemented!();
                         }
-                        Err(Error::IoError(err)) => {
+                        Err(Error::IoError(_err)) => {
                             // A unrecoverable error occurred, halt decoding.
-                            format!("{}", err);
+                            // format!("{}", err);
                             break;
                         }
                         Err(err) => {
@@ -150,18 +150,16 @@ pub fn play_sound(path: &str) {
                             if sdl_stream.is_none() {
                                 let spec = *audio_buf.spec();
                                 let stream = unsafe {
-                                    unsafe {
-                                        SDL_OpenAudioDeviceStream(
-                                            SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
-                                            &SDL_AudioSpec {
-                                                format: SDL_AUDIO_F32,
-                                                channels: spec.channels.count() as i32,
-                                                freq: spec.rate as i32,
-                                            },
-                                            None,
-                                            std::ptr::null_mut(),
-                                        )
-                                    }
+                                    SDL_OpenAudioDeviceStream(
+                                        SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
+                                        &SDL_AudioSpec {
+                                            format: SDL_AUDIO_F32,
+                                            channels: spec.channels.count() as i32,
+                                            freq: spec.rate as i32,
+                                        },
+                                        None,
+                                        std::ptr::null_mut(),
+                                    )
                                 };
 
                                 unsafe {

@@ -8,7 +8,7 @@ use reactive::{create_effect, use_context};
 use sdl3_sys::everything::{SDL_CreateSystemCursor, SDL_Cursor, SDL_SystemCursor};
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::fmt::{Debug, Pointer};
+use std::fmt::Debug;
 use std::mem;
 use std::rc::Rc;
 use strum::EnumIter;
@@ -184,18 +184,18 @@ impl StylePropertyKey {
 
     pub(crate) fn value(&self, style: &Style) -> StyleProperty {
         match self {
-            Self::Background => StyleProperty::Background(style.background.clone()),
-            Self::Color => StyleProperty::Color(style.color.clone()),
-            Self::LineHeight => StyleProperty::LineHeight(style.line_height.clone()),
-            Self::FontSize => StyleProperty::FontSize(style.font_size.clone()),
+            Self::Background => StyleProperty::Background(style.background),
+            Self::Color => StyleProperty::Color(style.color),
+            Self::LineHeight => StyleProperty::LineHeight(style.line_height),
+            Self::FontSize => StyleProperty::FontSize(style.font_size),
             Self::TextWrap => StyleProperty::TextWrap(style.text_wrap.clone()),
-            Self::TextAlign => StyleProperty::TextAlign(style.text_align.clone()),
+            Self::TextAlign => StyleProperty::TextAlign(style.text_align),
             Self::Cursor => StyleProperty::Cursor(style.cursor.clone()),
             Self::PointerEvents => StyleProperty::PointerEvents(style.pointer_events.clone()),
-            Self::Translate => StyleProperty::Translate(style.translate.clone()),
-            Self::TranslateX => StyleProperty::TranslateX(style.translate.x.clone()),
-            Self::TranslateY => StyleProperty::TranslateY(style.translate.y.clone()),
-            Self::Opacity => StyleProperty::Opacity(style.opacity.clone()),
+            Self::Translate => StyleProperty::Translate(style.translate),
+            Self::TranslateX => StyleProperty::TranslateX(style.translate.x),
+            Self::TranslateY => StyleProperty::TranslateY(style.translate.y),
+            Self::Opacity => StyleProperty::Opacity(style.opacity),
         }
     }
 }
@@ -204,16 +204,16 @@ impl StyleProperty {
     pub(crate) fn assign_to(&self, style: &mut Style) {
         match self {
             Self::Background(value) => {
-                style.background = value.clone();
+                style.background = *value;
             }
             Self::Color(value) => {
-                style.color = value.clone();
+                style.color = *value;
             }
             Self::LineHeight(value) => {
-                style.line_height = value.clone();
+                style.line_height = *value;
             }
             Self::FontSize(value) => {
-                style.font_size = value.clone();
+                style.font_size = *value;
             }
             Self::Cursor(value) => {
                 style.cursor = value.clone();
@@ -222,22 +222,22 @@ impl StyleProperty {
                 style.text_wrap = value.clone();
             }
             Self::TextAlign(value) => {
-                style.text_align = value.clone();
+                style.text_align = *value;
             }
             Self::PointerEvents(value) => {
                 style.pointer_events = value.clone();
             }
             Self::Translate(value) => {
-                style.translate = value.clone();
+                style.translate = *value;
             }
             Self::TranslateX(value) => {
-                style.translate.x = value.clone();
+                style.translate.x = *value;
             }
             Self::TranslateY(value) => {
-                style.translate.y = value.clone();
+                style.translate.y = *value;
             }
             Self::Opacity(value) => {
-                style.opacity = value.clone();
+                style.opacity = *value;
             }
         }
     }
@@ -547,19 +547,12 @@ impl TaffyStyleProperty {
 }
 
 #[derive(Clone, PartialEq)]
+#[derive(Default)]
 pub struct StyleBuilder {
     pub taffy_style_props: Vec<(TaffyStylePropertyKey, TaffyStyleProperty)>,
     pub style_props: Vec<(StylePropertyKey, StyleProperty)>,
 }
 
-impl Default for StyleBuilder {
-    fn default() -> Self {
-        Self {
-            taffy_style_props: Default::default(),
-            style_props: Default::default(),
-        }
-    }
-}
 
 impl StyleBuilder {
     pub fn display(mut self, value: Display) -> Self {
@@ -1026,37 +1019,37 @@ impl StyleBuilder {
     }
 
     #[inline]
-    pub fn w_full(mut self) -> Self {
+    pub fn w_full(self) -> Self {
         self.width(dimension::percent(1.0))
     }
 
     #[inline]
-    pub fn h_full(mut self) -> Self {
+    pub fn h_full(self) -> Self {
         self.height(dimension::percent(1.0))
     }
 
     #[inline]
-    pub fn absolute(mut self) -> Self {
+    pub fn absolute(self) -> Self {
         self.position(Position::Absolute)
     }
 
     #[inline]
-    pub fn block(mut self) -> Self {
+    pub fn block(self) -> Self {
         self.display(Display::Block)
     }
 
     #[inline]
-    pub fn flex(mut self) -> Self {
+    pub fn flex(self) -> Self {
         self.display(Display::Flex)
     }
 
     #[inline]
-    pub fn hidden(mut self) -> Self {
+    pub fn hidden(self) -> Self {
         self.display(Display::None)
     }
 
     #[inline]
-    pub fn overflow_hidden(mut self) -> Self {
+    pub fn overflow_hidden(self) -> Self {
         self.overflow(Point {
             x: Overflow::Hidden,
             y: Overflow::Hidden,
@@ -1064,7 +1057,7 @@ impl StyleBuilder {
     }
 
     #[inline]
-    pub fn overflow_clip(mut self) -> Self {
+    pub fn overflow_clip(self) -> Self {
         self.overflow(Point {
             x: Overflow::Clip,
             y: Overflow::Clip,
@@ -1072,7 +1065,7 @@ impl StyleBuilder {
     }
 
     #[inline]
-    pub fn overflow_scroll(mut self) -> Self {
+    pub fn overflow_scroll(self) -> Self {
         self.overflow(Point {
             x: Overflow::Scroll,
             y: Overflow::Scroll,
@@ -1080,157 +1073,157 @@ impl StyleBuilder {
     }
 
     #[inline]
-    pub fn overflow_x_hidden(mut self) -> Self {
+    pub fn overflow_x_hidden(self) -> Self {
         self.overflow_x(Overflow::Hidden)
     }
 
     #[inline]
-    pub fn overflow_x_clip(mut self) -> Self {
+    pub fn overflow_x_clip(self) -> Self {
         self.overflow_x(Overflow::Clip)
     }
 
     #[inline]
-    pub fn overflow_x_scroll(mut self) -> Self {
+    pub fn overflow_x_scroll(self) -> Self {
         self.overflow_x(Overflow::Scroll)
     }
 
     #[inline]
-    pub fn overflow_y_hidden(mut self) -> Self {
+    pub fn overflow_y_hidden(self) -> Self {
         self.overflow_y(Overflow::Hidden)
     }
 
     #[inline]
-    pub fn overflow_y_clip(mut self) -> Self {
+    pub fn overflow_y_clip(self) -> Self {
         self.overflow_y(Overflow::Clip)
     }
 
     #[inline]
-    pub fn overflow_y_scroll(mut self) -> Self {
+    pub fn overflow_y_scroll(self) -> Self {
         self.overflow_y(Overflow::Scroll)
     }
 
     #[inline]
-    pub fn overflow_y_visible(mut self) -> Self {
+    pub fn overflow_y_visible(self) -> Self {
         self.overflow_y(Overflow::Visible)
     }
 
     #[inline]
-    pub fn size_full(mut self) -> Self {
+    pub fn size_full(self) -> Self {
         self.w_full().h_full()
     }
 
     #[inline]
-    pub fn flex_row(mut self) -> Self {
+    pub fn flex_row(self) -> Self {
         self.flex_direction(FlexDirection::Row)
     }
 
     #[inline]
-    pub fn flex_col(mut self) -> Self {
+    pub fn flex_col(self) -> Self {
         self.flex_direction(FlexDirection::Column)
     }
 
     #[inline]
-    pub fn flex_row_reverse(mut self) -> Self {
+    pub fn flex_row_reverse(self) -> Self {
         self.flex_direction(FlexDirection::RowReverse)
     }
 
     #[inline]
-    pub fn flex_col_reverse(mut self) -> Self {
+    pub fn flex_col_reverse(self) -> Self {
         self.flex_direction(FlexDirection::ColumnReverse)
     }
 
     #[inline]
-    pub fn justify_start(mut self) -> Self {
+    pub fn justify_start(self) -> Self {
         self.justify_content(JustifyContent::Start)
     }
 
     #[inline]
-    pub fn justify_end(mut self) -> Self {
+    pub fn justify_end(self) -> Self {
         self.justify_content(JustifyContent::End)
     }
 
     #[inline]
-    pub fn justify_center(mut self) -> Self {
+    pub fn justify_center(self) -> Self {
         self.justify_content(JustifyContent::Center)
     }
 
     #[inline]
-    pub fn justify_stretch(mut self) -> Self {
+    pub fn justify_stretch(self) -> Self {
         self.justify_content(JustifyContent::Stretch)
     }
 
     #[inline]
-    pub fn justify_between(mut self) -> Self {
+    pub fn justify_between(self) -> Self {
         self.justify_content(JustifyContent::SpaceBetween)
     }
 
     #[inline]
-    pub fn items_start(mut self) -> Self {
+    pub fn items_start(self) -> Self {
         self.align_items(AlignItems::Start)
     }
 
     #[inline]
-    pub fn items_end(mut self) -> Self {
+    pub fn items_end(self) -> Self {
         self.align_items(AlignItems::End)
     }
 
     #[inline]
-    pub fn items_center(mut self) -> Self {
+    pub fn items_center(self) -> Self {
         self.align_items(AlignItems::Center)
     }
 
     #[inline]
-    pub fn items_stretch(mut self) -> Self {
+    pub fn items_stretch(self) -> Self {
         self.align_items(AlignItems::Stretch)
     }
 
     #[inline]
-    pub fn bg_white(mut self) -> Self {
+    pub fn bg_white(self) -> Self {
         self.background(Color::WHITE)
     }
 
     #[inline]
-    pub fn bg_black(mut self) -> Self {
+    pub fn bg_black(self) -> Self {
         self.background(Color::BLACK)
     }
 
     #[inline]
-    pub fn text_red(mut self) -> Self {
+    pub fn text_red(self) -> Self {
         self.background(Color::new([1.0, 0.0, 0.0, 1.0]))
     }
 
     #[inline]
-    pub fn pointer_events_none(mut self) -> Self {
+    pub fn pointer_events_none(self) -> Self {
         self.pointer_events(PointerEvents::None)
     }
 
     #[inline]
-    pub fn pointer_events_auto(mut self) -> Self {
+    pub fn pointer_events_auto(self) -> Self {
         self.pointer_events(PointerEvents::Auto)
     }
 
     #[inline]
-    pub fn text_center(mut self) -> Self {
+    pub fn text_center(self) -> Self {
         self.text_align(TextAlign::Center)
     }
 
     #[inline]
-    pub fn text_nowrap(mut self) -> Self {
+    pub fn text_nowrap(self) -> Self {
         self.text_wrap(TextWrap::None)
     }
 
     #[inline]
-    pub fn text_wrap_glyph(mut self) -> Self {
+    pub fn text_wrap_glyph(self) -> Self {
         self.text_wrap(TextWrap::Glyph)
     }
 
     #[inline]
-    pub fn text_wrap_word(mut self) -> Self {
+    pub fn text_wrap_word(self) -> Self {
         self.text_wrap(TextWrap::Word)
     }
 
     #[inline]
-    pub fn text_wrap_both(mut self) -> Self {
+    pub fn text_wrap_both(self) -> Self {
         self.text_wrap(TextWrap::WordOrGlyph)
     }
 }
@@ -1275,8 +1268,10 @@ impl PartialEq for DrawableCursor {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[derive(Default)]
 pub enum Cursor {
     None,
+    #[default]
     Inherit,
     System(SystemCursor),
     Drawable(DrawableCursor),
@@ -1309,11 +1304,6 @@ impl Cursor {
     }
 }
 
-impl Default for Cursor {
-    fn default() -> Self {
-        Cursor::Inherit
-    }
-}
 
 pub trait Styleable: Sized + Element {
     fn style<F: Fn(StyleBuilder) -> StyleBuilder + 'static>(self, f: F) -> Self {

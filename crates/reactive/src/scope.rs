@@ -40,7 +40,7 @@ impl Scope {
     /// The current Scope in the Runtime. Any Signal/Effect/Memo created with
     /// implicitly Scope will be under this Scope
     pub fn current() -> Scope {
-        RUNTIME.with(|runtime| Scope(runtime.current_scope.borrow().clone()))
+        RUNTIME.with(|runtime| Scope(*runtime.current_scope.borrow()))
     }
 
     /// Create a child Scope of this Scope

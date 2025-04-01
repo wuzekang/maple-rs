@@ -3,6 +3,7 @@ use indexmap::IndexMap;
 
 use crate::{sprite::Sprite, wz::Node};
 
+#[allow(dead_code)]
 pub struct Item {
     pub r#type: i32,
     pub map_no: Option<IndexMap<String, i32>>,
@@ -27,6 +28,7 @@ impl TryFrom<Node> for Item {
     }
 }
 
+#[allow(dead_code)]
 pub struct Link {
     pub tool_tip: Option<String>,
     pub link_map: String,

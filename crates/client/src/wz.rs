@@ -19,9 +19,9 @@ pub struct Node {
     pub wz_node: WzNodeArc,
 }
 
-impl Into<Node> for WzNodeArc {
-    fn into(self) -> Node {
-        Node { wz_node: self }
+impl From<WzNodeArc> for Node {
+    fn from(val: WzNodeArc) -> Self {
+        Node { wz_node: val }
     }
 }
 
@@ -36,9 +36,9 @@ impl Equivalent<NodeName> for str {
     }
 }
 
-impl Into<NodeName> for WzNodeName {
-    fn into(self) -> NodeName {
-        NodeName { wz_name: self }
+impl From<WzNodeName> for NodeName {
+    fn from(val: WzNodeName) -> Self {
+        NodeName { wz_name: val }
     }
 }
 
@@ -57,7 +57,7 @@ impl Node {
             return Err(Error::NodeNotFound);
         }
 
-        let mut paths = path.split("/").collect::<Vec<_>>();
+        let paths = path.split("/").collect::<Vec<_>>();
 
         if paths.len() == 1 && !path.ends_with(".img") {
             return Ok(self.get(path));
@@ -67,7 +67,7 @@ impl Node {
             .into_iter()
             .fold(VecDeque::from(["".to_string()]), |mut paths, v| {
                 let last = paths.back_mut().unwrap();
-                if last.len() > 0 {
+                if !last.is_empty() {
                     *last += "/";
                 }
                 *last += v;
@@ -150,8 +150,7 @@ impl TryFrom<Node> for i32 {
 
     fn try_from(node: Node) -> Result<Self, Self::Error> {
         let v = node.wz_node.read().unwrap();
-        v.try_as_int()
-            .map(|v| *v)
+        v.try_as_int().copied()
             .or_else(|| v.try_as_string().unwrap().get_string().ok()?.parse().ok())
             .ok_or(())
     }

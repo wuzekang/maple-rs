@@ -227,10 +227,10 @@ impl Character {
                 frame.push(Sprite {
                     a0: 0,
                     a1: 0,
-                    alpha: 255.into(),
+                    alpha: 255,
                     path: "".to_string(),
                     image: item.image.clone(),
-                    origin: item.origin + offset(&slot, &part, &item.map),
+                    origin: item.origin + offset(slot, part, &item.map),
                     z: self.z_map.layers[&item.z],
                     delay: 0,
                     size: Vec2::new(item.image.width() as f32, item.image.height() as f32),

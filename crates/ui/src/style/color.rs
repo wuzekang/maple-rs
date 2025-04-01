@@ -37,8 +37,8 @@ impl From<peniko::Color> for Color {
     }
 }
 
-impl Into<peniko::Color> for Color {
-    fn into(self) -> peniko::Color {
-        peniko::Color::new(self.components)
+impl From<Color> for peniko::Color {
+    fn from(val: Color) -> Self {
+        peniko::Color::new(val.components)
     }
 }

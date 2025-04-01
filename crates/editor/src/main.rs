@@ -29,7 +29,7 @@ use std::time::Duration;
 fn load_system_font(ctx: &Context) {
     let mut fonts = FontDefinitions::empty();
 
-    const FONT_NAME: &'static str = "PingFang SC";
+    const FONT_NAME: &str = "PingFang SC";
 
     let handle = SystemSource::new()
         .select_best_match(
@@ -74,7 +74,7 @@ fn walk_node_and_to_json(node_arc: &WzNodeArc, json: &mut Map<String, Value>) {
         | WzObjectType::File(_)
         | WzObjectType::Property(_) => {
             let mut child_json = Map::new();
-            if node.children.len() != 0 {
+            if !node.children.is_empty() {
                 for value in node.children.values() {
                     walk_node_and_to_json(value, &mut child_json);
                 }
@@ -91,8 +91,8 @@ fn to_json(node: &WzNode) -> String {
         walk_node_and_to_json(value, &mut json);
     }
 
-    let json_string = serde_json::to_string_pretty(&Value::Object(json)).unwrap();
-    json_string
+    
+    serde_json::to_string_pretty(&Value::Object(json)).unwrap()
 }
 
 #[derive(Default)]
@@ -110,14 +110,14 @@ impl Tree {
 impl Tree {
     fn ui_impl(&mut self, ui: &mut Ui, name: &str, node: &WzNodeArc) -> bool {
         let mut changed = false;
-        if name.ends_with(".img") || node.read().unwrap().children.len() > 0 {
+        if name.ends_with(".img") || !node.read().unwrap().children.is_empty() {
             let id = ui.make_persistent_id(
                 "my_collapsing_header".to_string() + &node.read().unwrap().get_full_path(),
             );
             let (response, _, _) = CollapsingState::load_with_default_open(ui.ctx(), id, false)
                 .show_header(ui, |ui| {
                     let mut text = RichText::new(name);
-                    if self.search.len() > 0 && name.contains(&self.search) {
+                    if !self.search.is_empty() && name.contains(&self.search) {
                         text = text.color(Color32::RED)
                     }
                     if ui.button(text).clicked() {
@@ -129,11 +129,9 @@ impl Tree {
             if response.clicked() {
                 parse_node(node).unwrap();
             }
-        } else {
-            if ui.button(name).clicked() {
-                self.selected = Some(node.clone());
-                changed = true;
-            };
+        } else if ui.button(name).clicked() {
+            self.selected = Some(node.clone());
+            changed = true;
         }
         changed
     }
@@ -143,7 +141,7 @@ impl Tree {
         let children = binding.children.iter().collect::<Vec<_>>();
         let mut changed = false;
         for (name, node) in children {
-            changed = changed || self.ui_impl(ui, name.as_str(), &node);
+            changed = changed || self.ui_impl(ui, name.as_str(), node);
         }
         changed
     }
@@ -183,7 +181,7 @@ impl Default for MyApp {
 }
 
 fn type_of<T>(_: &T) -> String {
-    format!("{}", std::any::type_name::<T>())
+    std::any::type_name::<T>().to_string()
 }
 
 impl eframe::App for MyApp {
@@ -212,7 +210,7 @@ impl eframe::App for MyApp {
                     ui.separator();
 
                     match &node.object_type {
-                        WzObjectType::File(v) => {}
+                        WzObjectType::File(_) => {}
                         WzObjectType::Image(_) => {}
                         WzObjectType::Directory(_) => {}
                         WzObjectType::Property(v) => match v {
@@ -256,7 +254,7 @@ impl eframe::App for MyApp {
                                 ui.image(&handle);
                                 ui.add_space(8.0);
                                 if ui
-                                    .button(&format!("Copy to clipboard [{}]", v.format()))
+                                    .button(format!("Copy to clipboard [{}]", v.format()))
                                     .clicked()
                                 {
                                     let _ = self.clipboard.set_image(

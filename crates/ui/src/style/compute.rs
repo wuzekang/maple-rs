@@ -83,7 +83,7 @@ fn compute_style(id: &ViewId, ctx: &mut StyleComputeContext) {
     let parent_style = id
         .parent()
         .map(|id| id.state().borrow().style.clone())
-        .unwrap_or_else(Default::default);
+        .unwrap_or_default();
 
     for key in StylePropertyKey::iter() {
         if !style_props.contains_key(&key) && key.inherited() {
@@ -114,7 +114,7 @@ fn compute_style(id: &ViewId, ctx: &mut StyleComputeContext) {
             if ctx.style.contains_key(key) {
                 ctx.style.remove(key);
             }
-            ctx.style.insert(key.clone(), value.clone());
+            ctx.style.insert(*key, value.clone());
         }
     }
 
@@ -134,7 +134,7 @@ pub fn compute_style_recursive(id: &ViewId, ctx: &mut StyleComputeContext) {
 
         state.style_cache.clear();
         for (key, value) in &ctx.style {
-            state.style_cache.insert(key.clone(), value.clone());
+            state.style_cache.insert(*key, value.clone());
         }
     }
     if ctx.dirty {

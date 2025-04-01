@@ -5,6 +5,7 @@ const MAX_NEWTON_ITERATIONS: usize = 4;
 const BEZIER_EPSILON: f64 = 1e-7;
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct CubicBezier {
     ax: f64,
     bx: f64,
@@ -41,7 +42,7 @@ impl CubicBezier {
         let spline_samples = Self::init_spline(ax, bx, cx);
 
         #[cfg(debug_assertions)]
-        let monotonically_increasing = p1x >= 0.0 && p1x <= 1.0 && p2x >= 0.0 && p2x <= 1.0;
+        let monotonically_increasing = (0.0..=1.0).contains(&p1x) && (0.0..=1.0).contains(&p2x);
 
         CubicBezier {
             ax,
@@ -112,6 +113,7 @@ impl CubicBezier {
             return (range_min, range_max);
         }
 
+        #[allow(unused_assignments)]
         let (mut t1, mut t2) = (0.0, 0.0);
         if a.abs() < BEZIER_EPSILON {
             t1 = -c / b;

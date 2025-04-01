@@ -24,7 +24,6 @@ use ui::style::dimension::{length, percent};
 use ui::style::Styleable;
 use ui::taffy::{AlignItems, Display, FlexDirection, JustifyContent, Position};
 use ui::view_tuple::ViewTuple;
-use ui::widget::debug::debug;
 use ui::{
     dynamic, fragment, lazy, text, view, Bounds, Drawable, Element, Image, IntoElement,
     NineGridTexture, Renderer, Surface, TextInput, View,
@@ -61,7 +60,7 @@ pub fn app() -> impl IntoElement {
                         .on_click(move |_| stage.set(Stage::Logo)),
                 ),
                 Stage::Logo => fragment(logo_scene(move || stage.set(Stage::Login))),
-                Stage::Login => fragment((login_scene(move || stage.set(Stage::Main)))),
+                Stage::Login => fragment(login_scene(move || stage.set(Stage::Main))),
                 Stage::Main => fragment((
                     map_scene(current_map),
                     status_bar().composite(),
@@ -77,11 +76,6 @@ pub fn app() -> impl IntoElement {
         //         .background(Color::WHITE)
         // }),
     ))
-}
-
-struct SoundBuffer {
-    buffer: Vec<u8>,
-    cursor: u64,
 }
 
 struct SequenceAnimation {
@@ -286,7 +280,7 @@ pub fn button(btn_node: Node) -> View {
                         current.track();
                         let mut binding = animation.borrow_mut();
                         let animation = binding.as_mut().unwrap();
-                        if animation.frames.len() == 0 {
+                        if animation.frames.is_empty() {
                             None
                         } else {
                             Some(animation.current_frame().image.clone())
@@ -315,7 +309,7 @@ pub fn button(btn_node: Node) -> View {
                 current.track();
                 let binding = animation.borrow();
                 let animation = binding.as_ref().unwrap();
-                if animation.frames.len() == 0 {
+                if animation.frames.is_empty() {
                     return s;
                 }
                 let frame = animation.current_frame();
@@ -354,7 +348,7 @@ pub fn map_scene(map_name: RwSignal<String>) -> impl IntoElement {
     )
 }
 
-pub fn level_no<F>(value: F) -> View
+pub fn level_no<F>(_value: F) -> View
 where
     F: Fn() -> i32 + 'static,
 {
@@ -408,8 +402,8 @@ pub fn status_bar_number(f: impl (Fn() -> String) + 'static) -> View {
         })
         .children(dynamic(move || {
             f().chars()
-                .filter_map(|ch| {
-                    if ch >= '0' && ch <= '9' {
+                .filter_map(|ch: char| {
+                    if ch.is_ascii_digit() {
                         Some(images[ch as usize - '0' as usize].clone())
                     } else if ch == '/' {
                         Some(slash.clone())
@@ -419,7 +413,7 @@ pub fn status_bar_number(f: impl (Fn() -> String) + 'static) -> View {
                         None
                     }
                 })
-                .map(|item| Image::new(item))
+                .map(Image::new)
                 .collect::<Vec<_>>()
         }))
 }
@@ -498,14 +492,14 @@ pub fn status_bar() -> View {
                                                 .justify_content(JustifyContent::Center)
                                                 .align_items(AlignItems::Center)
                                         })
-                                        .children((Image::new(icon_blue))),
+                                        .children(Image::new(icon_blue)),
                                     view()
                                         .style(|s| {
                                             s.width(length(20.0))
                                                 .justify_content(JustifyContent::Center)
                                                 .align_items(AlignItems::Center)
                                         })
-                                        .children((Image::new(icon_memo))),
+                                        .children(Image::new(icon_memo)),
                                 )),
                         )),
                     view()
@@ -838,16 +832,16 @@ pub fn world_map_window(open: RwSignal<bool>, current_map: RwSignal<String>) -> 
 
         let active_link_view = dynamic(move || {
             if let Some(key) = hovered_link.get() {
-                let (image, position, link_map) = (world_map_signal.with(move |world_map| {
+                let (image, position, link_map) = world_map_signal.with(move |world_map| {
                     let map_link = world_map.map_link.as_ref().unwrap();
                     let link = &map_link[&key];
                     let link_img = &link.link_img;
                     let link_map = link.link_map.clone();
                     let image = link_img.image.clone();
-                    let text = map_link[&key].tool_tip.clone();
+                    // let text = map_link[&key].tool_tip.clone();
                     let position = content_size / 2.0 - link_img.origin;
                     (image, position, link_map)
-                }));
+                });
                 fragment(
                     Image::new(image)
                         .style(move |s| {
@@ -878,7 +872,7 @@ pub fn world_map_window(open: RwSignal<bool>, current_map: RwSignal<String>) -> 
                 open.set(false);
             });
 
-        return fragment(
+        fragment(
             view()
                 .style(|s| {
                     s.absolute()
@@ -899,7 +893,7 @@ pub fn world_map_window(open: RwSignal<bool>, current_map: RwSignal<String>) -> 
                         view()
                             .composite()
                             .style({
-                                let padding = padding.clone();
+                                let padding = padding;
                                 move |s| s.position(Position::Relative).padding(padding)
                             })
                             .children(
@@ -934,7 +928,7 @@ pub fn world_map_window(open: RwSignal<bool>, current_map: RwSignal<String>) -> 
                                                         }
                                                     }
                                                 }
-                                                return None;
+                                                None
                                             });
 
                                         if hovered_link.get_untracked() != key {
@@ -977,6 +971,6 @@ pub fn world_map_window(open: RwSignal<bool>, current_map: RwSignal<String>) -> 
                             .children((Image::new(title.image), close_button)),
                     )),
                 ),
-        );
+        )
     })
 }

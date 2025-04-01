@@ -88,11 +88,8 @@ fn collect(item: &Node) -> (Vec<ViewId>, Vec<Scope>) {
                 }
             }
             for item in vec {
-                match item {
-                    Node::Static(id) => {
-                        views.push(*id);
-                    }
-                    _ => {}
+                if let Node::Static(id) = item {
+                    views.push(*id);
                 }
             }
             (views, scopes)
