@@ -1,21 +1,20 @@
 use crate::character::Character;
 use crate::character::ZMap;
 use crate::map;
-use crate::map::Ladder;
+use crate::map::{Ladder, PortalType};
 use crate::sound::play_sound;
 use crate::sprite::SpriteRenderer;
 use crate::wz;
 use glam::{vec2, FloatExt, Vec2};
 use sdl3_sys::everything::*;
-use std::ffi::c_char;
 use std::sync::Arc;
 use ui::element::Node;
 use ui::event::{use_key, Event};
-use ui::geometry;
-use ui::peniko::Color;
+use ui::geometry::Rect;
 use ui::reactive::{create_rw_signal, RwSignal, SignalGet, SignalUpdate};
 use ui::style::Styleable;
 use ui::{dynamic, fragment, input, view, Element, IntoElement, Renderer, ViewId};
+use ui::{geometry, Drawable};
 
 #[derive(Default)]
 pub struct Cooldown {
@@ -109,8 +108,13 @@ impl Player {
         555.0
     }
 
-    pub fn update(&mut self, map: &map::Map, delta: f32) {
-        self.step(map, delta);
+    pub fn update(
+        &mut self,
+        map: &map::Map,
+        current_map: Option<RwSignal<(String, Option<String>)>>,
+        delta: f32,
+    ) {
+        self.step(map, current_map, delta);
         if !(self.speed == Vec2::ZERO && matches!(self.state, State::CLIMB)) {
             self.avatar.tick(delta);
         }
@@ -133,7 +137,12 @@ impl Player {
         self.state = State::CLIMB;
     }
 
-    pub fn step(&mut self, map: &map::Map, delta: f32) -> f32 {
+    pub fn step(
+        &mut self,
+        map: &map::Map,
+        current_map: Option<RwSignal<(String, Option<String>)>>,
+        delta: f32,
+    ) -> f32 {
         let delta = delta / 1000.0;
 
         if matches!(self.state, State::CLIMB) {
@@ -194,6 +203,7 @@ impl Player {
             }
         }
 
+        // climb
         if matches!(self.state, State::WALK | State::STAND)
             && !self.climb_cooldown.value
             && self.direction.y != 0.0
@@ -206,6 +216,26 @@ impl Player {
             });
             if let Some(ladder) = ladder {
                 self.climb(ladder);
+                return 0.0;
+            }
+        }
+
+        if matches!(self.state, State::WALK | State::STAND | State::CLIMB)
+            && self.direction.y < 0.0
+            && current_map.is_some()
+        {
+            for portal in &map.portals {
+                if !matches!(portal.pt, PortalType::REGULAR | PortalType::INVISIBLE) {
+                    continue;
+                }
+                let lt = portal.position + vec2(-25.0, -100.0);
+                let rb = portal.position + vec2(25.0, 25.0);
+                let rect = Rect::from((lt, rb - lt));
+                if rect.contains(self.position) {
+                    current_map
+                        .unwrap()
+                        .set((format!("{:0>9}", portal.tm), Some(portal.tn.clone())));
+                }
             }
         }
 
@@ -394,26 +424,28 @@ pub struct MainScene {
     size: Vec2,
     camera: Camera,
     pub camera_signal: RwSignal<Camera>,
+    current_map: Option<RwSignal<(String, Option<String>)>>,
     player: Option<Player>,
     map: map::Map,
 }
 
 impl MainScene {
-    pub fn resource(map_name: &str) -> (Player, map::Map) {
+    pub fn resource(map_name: &str, spawn: Option<String>) -> (Player, map::Map) {
         let base = wz::resolve_base().unwrap();
         let map = map::Map::new(base.clone(), map_name.to_string()).unwrap();
+        let spawn = spawn.unwrap_or("sp".to_string());
         let position = map.portals.iter().fold(None, |acc: Option<Vec2>, item| {
-            if item.pn != "sp" {
+            if item.pn != spawn {
                 return acc;
             }
             if let Some(prev) = acc {
                 if item.position.length() > prev.length() {
-                    Some(item.position)
+                    Some(item.position + vec2(0.0, -10.0))
                 } else {
                     acc
                 }
             } else {
-                Some(item.position)
+                Some(item.position + vec2(0.0, -10.0))
             }
         });
         let z_map: Arc<ZMap> = Arc::new(base.at_path("zmap.img").unwrap().try_into().unwrap());
@@ -443,7 +475,7 @@ impl MainScene {
         (player, map)
     }
 
-    pub fn new(map: map::Map) -> Self {
+    pub fn new(map: map::Map, current_map: Option<RwSignal<(String, Option<String>)>>) -> Self {
         let text_visible = create_rw_signal(false);
         use_key(SDLK_T, move || {
             text_visible.set(!text_visible.get());
@@ -523,6 +555,7 @@ impl MainScene {
             player: None,
             map,
             camera_signal,
+            current_map,
         }
     }
 
@@ -546,8 +579,6 @@ impl Element for MainScene {
     }
 
     fn update(&mut self, delta: f32) {
-        // self.id.request_repaint(StyleTrigger::Paint);
-
         player_move(self, delta);
 
         {
@@ -571,6 +602,11 @@ impl Element for MainScene {
         }
 
         map.portal_timer.tick(delta);
+        for mob in map.mobs.values_mut() {
+            if let Some(action) = mob.actions.get_mut("move") {
+                action.update(delta);
+            }
+        }
 
         for item in &map.life {
             if item.r#type == "n" {
@@ -659,14 +695,14 @@ impl Element for MainScene {
         }
 
         let sprite = &map.helper.pv[map.portal_timer.index];
+
         for item in map.portals.iter() {
-            if item.pn == "sp" {
-                continue;
+            if matches!(item.pt, PortalType::REGULAR | PortalType::SCRIPTED) {
+                sprite_renderer.draw(sprite, item.position - camera_position);
             }
-            if item.pt != 7 {
-                continue;
-            }
-            sprite_renderer.draw(sprite, item.position - camera_position);
+            sprite_renderer
+                .renderer
+                .render_debug_text(item.position - camera_position, &format!("{:?}", item.pt))
         }
 
         for item in &map.life {
@@ -676,6 +712,20 @@ impl Element for MainScene {
                     continue;
                 }
                 let action = npc.actions.get("stand").unwrap();
+                let sprite = &action.frames[action.timer.index];
+                sprite_renderer.draw_flip(
+                    sprite,
+                    vec2(item.x as f32, item.cy as f32) - camera_position,
+                    item.f == 1,
+                );
+            }
+            if item.r#type == "m" {
+                let npc = map.mobs.get(&item.id).unwrap();
+                if npc.actions.is_empty() {
+                    continue;
+                }
+                let action = npc.actions.get("move").unwrap();
+
                 let sprite = &action.frames[action.timer.index];
                 sprite_renderer.draw_flip(
                     sprite,
@@ -743,6 +793,7 @@ fn player_move(context: &mut MainScene, delta: f32) {
         camera,
         camera_signal,
         map,
+        current_map,
         ..
     } = context;
     if player.is_none() {
@@ -752,7 +803,7 @@ fn player_move(context: &mut MainScene, delta: f32) {
 
     let world_size = *size;
 
-    player.update(map, delta);
+    player.update(map, *current_map, delta);
 
     let vr_left = map.info.vr_left.unwrap() as f32;
     let vr_right = map.info.vr_right.unwrap() as f32;

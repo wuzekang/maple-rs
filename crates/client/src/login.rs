@@ -1062,6 +1062,7 @@ pub fn login_scene(on_enter: impl Fn() + 'static) -> View {
 
     let scene = Rc::new(RefCell::new(MainScene::new(
         map::Map::new(base, "login".to_string()).unwrap(),
+        None,
     )));
 
     create_effect({

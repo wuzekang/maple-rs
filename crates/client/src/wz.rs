@@ -152,7 +152,7 @@ impl TryFrom<Node> for i32 {
         let v = node.wz_node.read().unwrap();
         v.try_as_int()
             .copied()
-            .or_else(|| v.try_as_string().unwrap().get_string().ok()?.parse().ok())
+            .or_else(|| v.try_as_string()?.get_string().ok()?.parse().ok())
             .ok_or(())
     }
 }

@@ -9,6 +9,7 @@ mod character;
 mod cursor;
 mod login;
 mod map;
+mod mob;
 mod npc;
 mod scene;
 mod sound;

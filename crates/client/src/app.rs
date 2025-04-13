@@ -38,10 +38,10 @@ enum Stage {
 }
 
 pub fn app() -> impl IntoElement {
-    let stage = RwSignal::new(Stage::Logo);
+    let stage = RwSignal::new(Stage::Main);
     let open = RwSignal::new(false);
-
-    let current_map = RwSignal::new("910000000".to_string());
+    let current_map: RwSignal<(String, Option<String>)> =
+        RwSignal::new(("910000000".to_string(), None));
 
     fragment((
         view()
@@ -323,18 +323,18 @@ pub fn button(btn_node: Node) -> View {
         .style(|s| s.cursor(CursorState::LClick))
 }
 
-pub fn map_scene(map_name: RwSignal<String>) -> impl IntoElement {
+pub fn map_scene(map_name: RwSignal<(String, Option<String>)>) -> impl IntoElement {
     lazy(
         {
             move || {
-                let map_name = map_name.get();
-                async move { Some(MainScene::resource(&map_name)) }
+                let (map_name, spawn) = map_name.get();
+                async move { Some(MainScene::resource(&map_name, spawn)) }
             }
         },
         move |map| match map {
             None => fragment(()),
             Some((player, map)) => {
-                let main_scene = Rc::new(RefCell::new(MainScene::new(map)));
+                let main_scene = Rc::new(RefCell::new(MainScene::new(map, Some(map_name))));
                 main_scene.borrow_mut().set_player(player);
                 use_event({
                     let main_scene = main_scene.clone();
@@ -736,7 +736,10 @@ pub fn scroll_vertical() -> View {
             Image::new(next).style(|s| s.position(Position::Absolute).bottom(length(0.0))),
         ))
 }
-pub fn world_map_window(open: RwSignal<bool>, current_map: RwSignal<String>) -> impl IntoElement {
+pub fn world_map_window(
+    open: RwSignal<bool>,
+    current_map: RwSignal<(String, Option<String>)>,
+) -> impl IntoElement {
     use_key(SDLK_W, move || open.set(!open.get()));
 
     dynamic(move || {
@@ -822,7 +825,7 @@ pub fn world_map_window(open: RwSignal<bool>, current_map: RwSignal<String>) -> 
                             })
                             .on_click(move |_| {
                                 if let Some(map_no) = clickable {
-                                    current_map.set(format!("{:0>9}", map_no))
+                                    current_map.set((format!("{:0>9}", map_no), None))
                                 }
                             })
                     })

@@ -1010,6 +1010,7 @@ dependencies = [
  "log",
  "sdl3-sys",
  "slotmap",
+ "strum",
  "symphonia",
  "thiserror",
  "tokio",

@@ -13,6 +13,7 @@ use hashbrown::HashSet;
 use image::DynamicImage;
 use peniko::Color;
 use sdl3_sys::everything::*;
+use std::ffi::c_char;
 use std::rc::Rc;
 use std::{cmp, collections::HashMap, sync::Arc};
 use taffy::{AvailableSpace, Size};
@@ -626,6 +627,17 @@ impl Renderer {
     //     unsafe { SDL_RenderLines(self.renderer, points.as_ptr(), count) };
     //     self.draw_calls += 1;
     // }
+
+    pub fn render_debug_text(&mut self, location: Vec2, text: &str) {
+        unsafe {
+            SDL_RenderDebugText(
+                self.renderer,
+                location.x,
+                location.y,
+                format!("{}\0", text).as_ptr() as *const c_char,
+            );
+        }
+    }
 
     pub fn fill_selection(
         &mut self,

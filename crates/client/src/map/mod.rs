@@ -1,11 +1,33 @@
+use crate::mob::Mob;
 use crate::npc::Npc;
 use crate::sprite::{Sprite, SpriteAnimation};
 use crate::timer::{Repeat, Timer};
 use crate::wz::Node;
 use glam::{vec2, FloatExt, Vec2};
 use std::collections::HashMap;
+use strum::FromRepr;
 
 pub mod world_map;
+
+#[derive(FromRepr, Debug)]
+#[repr(i32)]
+pub enum PortalType {
+    SPAWN,
+    INVISIBLE,
+    REGULAR,
+    TOUCH,
+    TYPE4,
+    TYPE5,
+    WARP,
+    SCRIPTED,
+    SCRIPTED_INVISIBLE,
+    SCRIPTED_TOUCH,
+    HIDDEN,
+    SCRIPTED_HIDDEN,
+    SPRING1,
+    SPRING2,
+    TYPE14,
+}
 
 pub struct Wall {
     pub left: f32,
@@ -37,8 +59,10 @@ pub struct MapTile {
 #[derive(Debug)]
 pub struct Portal {
     pub pn: String,
-    pub pt: i32,
+    pub pt: PortalType,
     pub position: Vec2,
+    pub tm: i32,
+    pub tn: String,
 }
 
 impl TryFrom<Node> for Portal {
@@ -47,11 +71,13 @@ impl TryFrom<Node> for Portal {
     fn try_from(node: Node) -> Result<Self, Self::Error> {
         Ok(Self {
             pn: node.get("pn").try_into()?,
-            pt: node.get("pt").try_into()?,
+            pt: PortalType::from_repr(node.get("pt").try_into()?).ok_or(())?,
             position: vec2(
                 i32::try_from(node.get("x"))? as f32,
                 i32::try_from(node.get("y"))? as f32,
             ),
+            tm: node.get("tm").try_into()?,
+            tn: node.get("tn").try_into()?,
         })
     }
 }
@@ -251,7 +277,10 @@ impl BackgroundSprite {
 impl MapBackground {
     pub fn new(root: Node, node: Node) -> Result<Self, ()> {
         let bs: String = node.get("bS").try_into()?;
-        let ani: i32 = node.get("ani").try_into()?;
+        let ani: i32 = node
+            .try_get("ani")
+            .map(TryInto::try_into)
+            .transpose()?.unwrap_or(0);
         let no: i32 = node.get("no").try_into()?;
 
         let path = format!(
@@ -305,6 +334,7 @@ impl MapBackground {
 }
 pub struct Map {
     pub npc: HashMap<String, Npc>,
+    pub mobs: HashMap<String, Mob>,
     pub life: Vec<MapLife>,
     pub backgrounds: Vec<MapBackground>,
     pub layers: Vec<MapLayer>,
@@ -471,6 +501,19 @@ impl Map {
             })
             .collect();
 
+        let mobs: HashMap<String, Mob> = life
+            .iter()
+            .filter(|item| item.r#type == "m")
+            .filter_map(|item| {
+                Some((
+                    item.id.to_string(),
+                    root.at_path(&format!("Mob/{}.img", item.id))
+                        .unwrap()
+                        .try_into()
+                        .ok()?,
+                ))
+            })
+            .collect();
         let mut info: MapInfo = map_img.get("info").try_into()?;
         info.vr_left = info.vr_left.or(Some(lt.x as i32));
         info.vr_top = info.vr_top.or(Some(lt.y as i32));
@@ -480,6 +523,7 @@ impl Map {
         Ok(Self {
             life,
             npc,
+            mobs,
             backgrounds,
             layers,
             footholds,

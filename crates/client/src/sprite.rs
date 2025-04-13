@@ -8,7 +8,7 @@ use std::sync::Arc;
 use ui::{Bounds, Drawable, Renderer, Texture};
 
 pub struct SpriteRenderer<'a> {
-    renderer: &'a mut Renderer,
+    pub renderer: &'a mut Renderer,
 }
 
 impl<'a> SpriteRenderer<'a> {
