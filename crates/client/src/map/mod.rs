@@ -2,10 +2,17 @@ use crate::npc::Npc;
 use crate::sprite::{Sprite, SpriteAnimation};
 use crate::timer::{Repeat, Timer};
 use crate::wz::Node;
-use glam::{vec2, Vec2};
+use glam::{vec2, FloatExt, Vec2};
 use std::collections::HashMap;
 
 pub mod world_map;
+
+pub struct Wall {
+    pub left: f32,
+    pub top: f32,
+    pub right: f32,
+    pub bottom: f32,
+}
 
 pub struct MapHelper {
     pub pv: Vec<Sprite>,
@@ -49,15 +56,67 @@ impl TryFrom<Node> for Portal {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug, Copy, Clone)]
 #[allow(dead_code)]
 pub struct Foothold {
+    pub id: i32,
     pub start: Vec2,
     pub end: Vec2,
     pub prev: i32,
     pub next: i32,
-    pub page: i32,
+    pub layer: i32,
     pub z_mass: i32,
+}
+
+impl Foothold {
+    pub fn is_wall(&self) -> bool {
+        self.start.x == self.end.x
+    }
+    pub fn is_blocking(&self, y: f32) -> bool {
+        if !self.is_wall() {
+            return false;
+        }
+        let t = y - 50.0;
+        let b = y - 1.0;
+
+        let ft = self.start.y.min(self.end.y);
+        let fb = self.start.y.max(self.end.y);
+
+        t.max(ft) <= b.min(fb)
+    }
+    pub fn ground(&self, x: f32) -> f32 {
+        if self.is_wall() {
+            self.start.y
+        } else {
+            self.start
+                .y
+                .lerp(self.end.y, (x - self.start.x) / (self.end.x - self.start.x))
+        }
+    }
+}
+
+#[derive(Default, Debug, Clone, Copy)]
+pub struct Ladder {
+    pub is_ladder: bool,
+    // page: i32,
+    pub uf: bool,
+    pub x: f32,
+    pub y1: f32,
+    pub y2: f32,
+}
+
+impl TryFrom<Node> for Ladder {
+    type Error = ();
+    fn try_from(node: Node) -> Result<Self, Self::Error> {
+        Ok(Self {
+            is_ladder: node.get("l").try_into()?,
+            // page: node.get("page").try_into()?,
+            uf: node.get("uf").try_into()?,
+            x: node.get("x").try_into()?,
+            y1: node.get("y1").try_into()?,
+            y2: node.get("y2").try_into()?,
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -250,6 +309,8 @@ pub struct Map {
     pub backgrounds: Vec<MapBackground>,
     pub layers: Vec<MapLayer>,
     pub footholds: HashMap<i32, Foothold>,
+    pub wall: Wall,
+    pub ladders: Vec<Ladder>,
     pub portals: Vec<Portal>,
     pub helper: MapHelper,
     pub portal_timer: Timer,
@@ -287,7 +348,6 @@ impl Map {
                     let y: i32 = item.get("y").try_into()?;
                     let z: i32 = item.get("z").try_into()?;
 
-
                     let path = format!(
                         "Map/Obj/{}.img/{}/{}/{}",
                         String::try_from(item.get("oS"))?,
@@ -305,7 +365,8 @@ impl Map {
                         .unwrap_or(true);
 
                     let sprites: Vec<Sprite> = node.try_into().unwrap();
-                    let mut timer = Timer::new(sprites.iter().map(|item| item.delay as f32).collect());
+                    let mut timer =
+                        Timer::new(sprites.iter().map(|item| item.delay as f32).collect());
                     if !repeat {
                         timer.repeat = Repeat::Finite(1)
                     }
@@ -348,8 +409,8 @@ impl Map {
         }
 
         let mut footholds = HashMap::<i32, Foothold>::new();
-        for (page, val) in &map_img.get("foothold").children() {
-            let page = page.to_string().parse::<i32>().unwrap();
+        for (layer, val) in &map_img.get("foothold").children() {
+            let layer = layer.to_string().parse::<i32>().unwrap();
             for (z_mass, val) in &val.children() {
                 let z_mass = z_mass.to_string().parse::<i32>().unwrap();
                 for (key, val) in &val.children() {
@@ -359,21 +420,24 @@ impl Map {
                     let y2: i32 = val.get("y2").try_into()?;
                     let next: i32 = val.get("next").try_into()?;
                     let prev: i32 = val.get("prev").try_into()?;
-                    let key = key.to_string().parse::<i32>().unwrap();
+                    let id = key.to_string().parse::<i32>().unwrap();
                     footholds.insert(
-                        key,
+                        id,
                         Foothold {
+                            id,
                             start: vec2(x1 as f32, y1 as f32),
                             end: vec2(x2 as f32, y2 as f32),
                             next,
                             prev,
-                            page,
+                            layer,
                             z_mass,
                         },
                     );
                 }
             }
         }
+
+        let ladders: Vec<Ladder> = map_img.get("ladderRope").try_into()?;
 
         let mut lt = Vec2::INFINITY;
         let mut rb = Vec2::NEG_INFINITY;
@@ -383,6 +447,13 @@ impl Map {
         }
         lt.y -= 320.0;
         rb.y += 160.0;
+
+        let wall = Wall {
+            left: lt.x + 25.0,
+            right: rb.x - 25.0,
+            top: lt.y,
+            bottom: rb.y,
+        };
 
         let helper: MapHelper = root.at_path("Map/MapHelper.img").or(Err(()))?.try_into()?;
         let life: Vec<MapLife> = map_img.get("life").try_into()?;
@@ -412,6 +483,8 @@ impl Map {
             backgrounds,
             layers,
             footholds,
+            wall,
+            ladders,
             portals: map_img.get("portal").try_into()?,
             info,
             portal_timer: Timer::new((1..helper.pv.len()).map(|_| 100.0).collect()),

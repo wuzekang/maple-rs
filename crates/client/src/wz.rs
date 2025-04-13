@@ -150,9 +150,19 @@ impl TryFrom<Node> for i32 {
 
     fn try_from(node: Node) -> Result<Self, Self::Error> {
         let v = node.wz_node.read().unwrap();
-        v.try_as_int().copied()
+        v.try_as_int()
+            .copied()
             .or_else(|| v.try_as_string().unwrap().get_string().ok()?.parse().ok())
             .ok_or(())
+    }
+}
+
+impl TryFrom<Node> for f32 {
+    type Error = ();
+
+    fn try_from(node: Node) -> Result<Self, Self::Error> {
+        let value: i32 = node.try_into()?;
+        Ok(value as f32)
     }
 }
 

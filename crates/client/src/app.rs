@@ -38,8 +38,8 @@ enum Stage {
 }
 
 pub fn app() -> impl IntoElement {
-    let stage = RwSignal::new(Stage::Pause);
-    let open = RwSignal::new(true);
+    let stage = RwSignal::new(Stage::Logo);
+    let open = RwSignal::new(false);
 
     let current_map = RwSignal::new("910000000".to_string());
 

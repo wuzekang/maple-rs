@@ -200,7 +200,7 @@ impl Character {
         let index = self.timer.index;
 
         let body = &self.slots["Bd"].variant[action][index].parts["body"].map;
-        let arm = &self.slots["Bd"].variant[action][index].parts["arm"].map;
+        let arm = self.slots["Bd"].variant[action][index].parts.get("arm");
         let head = &self.slots["Hd"].variant[action][index].parts["head"].map;
         let offset = |slot: &str, part: &str, item: &HashMap<String, Vec2>| match slot {
             "Bd" => match part {
@@ -209,13 +209,19 @@ impl Character {
             },
             "Hd" => item["neck"] - body["neck"],
             "Fc" | "Hr" => item["brow"] - head["brow"] + head["neck"] - body["neck"],
-            "Wp" => item["hand"] - arm["hand"] + arm["navel"] - body["navel"],
+            "Wp" => {
+                let arm = &arm.unwrap().map;
+                item["hand"] - arm["hand"] + arm["navel"] - body["navel"]
+            }
             _ => item["navel"] - body["navel"],
         };
 
         let mut frame = Vec::<Sprite>::new();
 
         for (slot, item) in self.slots.iter() {
+            if slot == "Fc" && matches!(action.as_str(), "ladder" | "rope") {
+                continue;
+            }
             let parts = if slot == "Fc" {
                 item.variant[emotion][0].borrow()
             } else {

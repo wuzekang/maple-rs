@@ -1,18 +1,67 @@
 use crate::character::Character;
 use crate::character::ZMap;
 use crate::map;
+use crate::map::Ladder;
 use crate::sound::play_sound;
 use crate::sprite::SpriteRenderer;
 use crate::wz;
-use glam::{vec2, Vec2};
+use glam::{vec2, FloatExt, Vec2};
 use sdl3_sys::everything::*;
+use std::ffi::c_char;
 use std::sync::Arc;
 use ui::element::Node;
 use ui::event::{use_key, Event};
 use ui::geometry;
+use ui::peniko::Color;
 use ui::reactive::{create_rw_signal, RwSignal, SignalGet, SignalUpdate};
 use ui::style::Styleable;
 use ui::{dynamic, fragment, input, view, Element, IntoElement, Renderer, ViewId};
+
+#[derive(Default)]
+pub struct Cooldown {
+    pub value: bool,
+    delay: f32,
+}
+
+impl Cooldown {
+    pub fn new() -> Self {
+        Self {
+            value: false,
+            delay: 0.0,
+        }
+    }
+
+    pub fn set(&mut self, delay: f32) {
+        self.delay = delay;
+        self.value = true;
+    }
+
+    pub fn update(&mut self, delta: f32) {
+        if !self.value {
+            return;
+        }
+        if delta > self.delay {
+            self.delay = 0.0;
+            self.value = false;
+        } else {
+            self.delay -= delta;
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Default)]
+enum State {
+    WALK,
+    STAND,
+    #[default]
+    FALL,
+    ALERT,
+    PRONE,
+    SWIM,
+    CLIMB,
+    DIED,
+    SIT,
+}
 
 #[derive(Default, Clone)]
 pub struct Camera {
@@ -22,11 +71,322 @@ pub struct Camera {
 #[derive(Default)]
 pub struct Player {
     avatar: Character,
-    position: Vec2,
     direction: Vec2,
     speed: Vec2,
+    position: Vec2,
     flip: bool,
+    state: State,
     foothold: i32,
+    layer: i32,
+    ladder: Option<Ladder>,
+    climb_cooldown: Cooldown,
+}
+
+impl Player {
+    pub fn walk_force(&self) -> f32 {
+        14000.0
+    }
+    pub fn walk_drag(&self) -> f32 {
+        8000.0
+    }
+    pub fn walk_speed(&self) -> f32 {
+        125.0
+    }
+
+    pub fn climb_speed(&self) -> f32 {
+        100.0
+    }
+
+    pub fn gravity_acc(&self) -> f32 {
+        2000.0
+    }
+
+    pub fn fall_speed(&self) -> f32 {
+        670.0
+    }
+
+    pub fn jump_speed(&self) -> f32 {
+        555.0
+    }
+
+    pub fn update(&mut self, map: &map::Map, delta: f32) {
+        self.step(map, delta);
+        if !(self.speed == Vec2::ZERO && matches!(self.state, State::CLIMB)) {
+            self.avatar.tick(delta);
+        }
+        self.climb_cooldown.update(delta);
+    }
+
+    pub fn jump(&mut self) {
+        play_sound("Sound/Game.img/Jump");
+        self.avatar.set_action("jump");
+        self.state = State::FALL;
+    }
+
+    pub fn climb(&mut self, ladder: &Ladder) {
+        self.speed = Vec2::ZERO;
+        self.position.x = ladder.x;
+        self.position.y = self.position.y.clamp(ladder.y1, ladder.y2);
+        self.avatar
+            .set_action(if ladder.is_ladder { "ladder" } else { "rope" });
+        self.ladder = Some(ladder.clone());
+        self.state = State::CLIMB;
+    }
+
+    pub fn step(&mut self, map: &map::Map, delta: f32) -> f32 {
+        let delta = delta / 1000.0;
+
+        if matches!(self.state, State::CLIMB) {
+            self.flip = false;
+        } else if self.direction.x > 0.0 {
+            self.flip = true;
+        } else if self.direction.x < 0.0 {
+            self.flip = false;
+        }
+
+        // jump left right
+        if input::key_pressed(SDL_SCANCODE_LALT)
+            && self.direction.y <= 0.0
+            && self.direction.x != 0.0
+            && matches!(
+                self.state,
+                State::WALK | State::STAND | State::PRONE | State::CLIMB
+            )
+        {
+            if self.ladder.is_some() {
+                self.climb_cooldown.set(200.0);
+                self.ladder = None;
+            }
+            self.speed.x = self.walk_force() * 8.0 / 1000.0 * self.direction.x;
+            self.speed.y = -self.jump_speed();
+            self.jump();
+            return 0.0;
+        }
+
+        // jump up
+        if input::key_pressed(SDL_SCANCODE_LALT)
+            && self.direction.y <= 0.0
+            && self.direction.x == 0.0
+            && matches!(self.state, State::WALK | State::STAND | State::PRONE)
+        {
+            self.speed.x = 0.0;
+            self.speed.y = -self.jump_speed();
+            self.jump();
+            return 0.0;
+        }
+
+        // jump down
+        if matches!(self.state, State::WALK | State::STAND | State::PRONE)
+            && input::key_pressed(SDL_SCANCODE_LALT)
+            && self.direction.y > 0.0
+        {
+            let foothold = map.footholds.values().find(|item| {
+                !item.is_wall()
+                    && item.id != self.foothold
+                    && self.position.x >= item.start.x
+                    && self.position.x <= item.end.x
+                    && item.ground(self.position.x) > self.position.y
+            });
+            if let Some(foothold) = foothold {
+                self.position.y += 1.0;
+                self.jump();
+                return 0.0;
+            }
+        }
+
+        if matches!(self.state, State::WALK | State::STAND)
+            && !self.climb_cooldown.value
+            && self.direction.y != 0.0
+        {
+            let ladder = map.ladders.iter().find(|item| {
+                let hor = self.position.x >= item.x - 10.0 && self.position.x < item.x + 10.0;
+                let y = self.position.y + self.direction.y * 5.0;
+                let ver = y >= item.y1 && y < item.y2;
+                hor && ver
+            });
+            if let Some(ladder) = ladder {
+                self.climb(ladder);
+            }
+        }
+
+        match self.state {
+            State::WALK => {
+                if self.direction.y > 0.0 {
+                    self.avatar.set_action("prone");
+                    self.state = State::PRONE;
+                    return 0.0;
+                }
+
+                if self.direction.x == 0.0 {
+                    self.avatar.set_action("stand1");
+                    self.state = State::STAND;
+                    return 0.0;
+                }
+
+                let speed = self.speed.x
+                    + self.direction.x * (self.walk_force() - self.walk_drag()) * delta;
+                self.speed.x = speed.clamp(-self.walk_speed(), self.walk_speed());
+
+                let x = self.position.x + self.speed.x * delta;
+
+                let foothold = &map.footholds[&self.foothold];
+                self.position.x = x.clamp(foothold.start.x, foothold.end.x);
+                self.position.x = self.position.x.clamp(map.wall.left, map.wall.right);
+
+                if !foothold.is_wall() {
+                    self.position.y = foothold.ground(self.position.x);
+                }
+
+                let mut next = None;
+                if self.direction.x < 0.0 && x < foothold.start.x {
+                    next = Some(foothold.prev);
+                }
+                if self.direction.x > 0.0 && x > foothold.end.x {
+                    next = Some(foothold.next);
+                }
+
+                if let Some(next) = next {
+                    if next == 0 {
+                        self.position.x = x;
+                        self.avatar.set_action("jump");
+                        self.state = State::FALL;
+                    } else {
+                        let foothold = &map.footholds[&next];
+                        if foothold.is_blocking(self.position.y) {
+                            return 0.0;
+                        } else if foothold.is_wall() {
+                            self.avatar.set_action("jump");
+                            self.state = State::FALL;
+                        } else {
+                            self.foothold = foothold.id;
+                        }
+                    }
+                }
+            }
+            State::STAND => {
+                if self.direction.y > 0.0 {
+                    self.avatar.set_action("prone");
+                    self.state = State::PRONE;
+                } else if self.direction.x != 0.0 {
+                    self.avatar.set_action("walk1");
+                    self.state = State::WALK;
+                } else if self.speed.x != 0.0 {
+                    let speed = self.speed.x - self.speed.x.signum() * self.walk_drag() * delta;
+                    let speed = if self.speed.x > 0.0 {
+                        speed.max(0.0)
+                    } else {
+                        speed.min(0.0)
+                    };
+                    self.speed.x = speed;
+                    self.position += self.speed * delta;
+                    self.position.x = self.position.x.clamp(map.wall.left, map.wall.right);
+                }
+            }
+            State::FALL => {
+                let prev = self.position;
+                self.position += self.speed * delta;
+                self.position.x = self.position.x.clamp(map.wall.left, map.wall.right);
+                self.speed.y += self.gravity_acc() * delta;
+                self.speed.y = self.speed.y.min(self.fall_speed());
+
+                for foothold in map.footholds.values() {
+                    if foothold.layer == self.layer
+                        && (foothold.is_blocking(prev.y) || foothold.is_blocking(self.position.y))
+                    {
+                        if let Some(p) = geometry::intersect(
+                            &foothold.start,
+                            &foothold.end,
+                            &prev,
+                            &self.position,
+                        ) {
+                            self.position.x = p.x - self.direction.x * 1.0;
+                            self.position.y = p.y;
+                            self.speed.x = 0.0;
+                            return 0.0;
+                        }
+                    }
+                }
+
+                if self.direction.y < 0.0 && !self.climb_cooldown.value {
+                    for ladder in map.ladders.iter() {
+                        if let Some(p) = geometry::intersect(
+                            &vec2(ladder.x - 10.0, ladder.y1 - 5.0),
+                            &vec2(ladder.x - 10.0, ladder.y2 + 5.0),
+                            &prev,
+                            &self.position,
+                        )
+                        .or_else(|| {
+                            geometry::intersect(
+                                &vec2(ladder.x + 10.0, ladder.y1 - 5.0),
+                                &vec2(ladder.x + 10.0, ladder.y2 + 5.0),
+                                &prev,
+                                &self.position,
+                            )
+                        }) {
+                            self.position.x = ladder.x;
+                            self.position.y = p.y;
+                            self.climb(ladder);
+                            return 0.0;
+                        }
+                    }
+                }
+
+                if self.speed.y > 0.0 {
+                    for foothold in map.footholds.values() {
+                        if foothold.is_wall() {
+                            continue;
+                        }
+                        if let Some(p) = geometry::intersect(
+                            &foothold.start,
+                            &foothold.end,
+                            &prev,
+                            &self.position,
+                        ) {
+                            self.position = p;
+                            self.speed = Vec2::ZERO;
+                            self.avatar.set_action("stand1");
+                            self.foothold = foothold.id;
+                            self.layer = foothold.layer;
+                            self.state = State::STAND;
+                            break;
+                        }
+                    }
+                }
+            }
+            State::ALERT => {}
+            State::PRONE => {
+                if self.direction.y <= 0.0 {
+                    self.avatar.set_action("stand1");
+                    self.state = State::STAND;
+                }
+            }
+            State::SWIM => {}
+            State::CLIMB => {
+                let ladder = self.ladder.unwrap();
+                self.speed.y = self.direction.y * 100.0;
+                self.position += self.speed * delta;
+
+                if self.position.y < ladder.y1 {
+                    if ladder.uf {
+                        self.position.y = ladder.y1 - 5.0;
+                        self.avatar.set_action("jump");
+                        self.state = State::FALL;
+                    } else {
+                        self.position.y = self.position.y.max(ladder.y1);
+                    }
+                }
+                if self.position.y > ladder.y2 {
+                    self.position.y = ladder.y2;
+                    self.avatar.set_action("jump");
+                    self.state = State::FALL;
+                }
+            }
+            State::DIED => {}
+            State::SIT => {}
+        }
+
+        0.0
+    }
 }
 
 pub struct MainScene {
@@ -76,7 +436,7 @@ impl MainScene {
             ),
             position: position.unwrap_or_default(),
             direction: Vec2::ZERO,
-            speed: Vec2::ONE * 500.0,
+            speed: Vec2::ZERO,
             ..Default::default()
         };
 
@@ -222,10 +582,6 @@ impl Element for MainScene {
                 action.timer.tick(delta);
             }
         }
-
-        if let Some(player) = self.player.as_mut() {
-            player.avatar.tick(delta);
-        }
     }
 
     fn event(&mut self, event: &mut Event) {
@@ -335,6 +691,22 @@ impl Element for MainScene {
             }
         }
 
+        // for foothold in map.footholds.values() {
+        //     let start = foothold.start - camera_position;
+        //     let end = foothold.end - camera_position;
+        //     renderer.line(Color::new([1.0, 0.0, 0.0, 1.0]), start, end);
+        //
+        //     let center = (start + end) / 2.0;
+        //     unsafe {
+        //         SDL_RenderDebugText(
+        //             renderer.renderer,
+        //             center.x,
+        //             center.y,
+        //             format!("{}\0", foothold.id).as_ptr() as *const c_char,
+        //         );
+        //     }
+        // }
+
         // let t = map.info.vr_top.unwrap() as f32 - camera_position.y;
         // let b = map.info.vr_bottom.unwrap() as f32 - camera_position.y;
         // let l = map.info.vr_left.unwrap() as f32 - camera_position.x;
@@ -380,59 +752,32 @@ fn player_move(context: &mut MainScene, delta: f32) {
 
     let world_size = *size;
 
-    if player.direction.x > 0.0 && !player.flip || player.direction.x < 0.0 && player.flip {
-        player.flip = !player.flip;
-    }
+    player.update(map, delta);
 
-    if player.foothold == 0 {
-        player.avatar.set_action("jump");
-        let prev = player.position;
-        player.position += vec2(0.0, 200.0) * delta / 1000.0;
-        for (i, fh) in map.footholds.iter() {
-            if let Some(p) = geometry::intersect(&fh.start, &fh.end, &prev, &player.position) {
-                player.position = p;
-                player.foothold = *i;
-                player.avatar.set_action("stand1");
-                break;
-            }
-        }
-    } else {
-        if player.direction.x == 0.0 {
-            player.avatar.set_action("stand1");
-        } else {
-            player.avatar.set_action("walk1");
-        }
-
-        if player.direction.y > 0.0 {
-            player.avatar.set_action("prone");
-        }
-
-        let direction = player.direction;
-        let speed = player.speed;
-        player.position += direction * speed * delta / 1000.0;
-    }
-
-    camera.position = player.position - world_size / 2.0;
     let vr_left = map.info.vr_left.unwrap() as f32;
     let vr_right = map.info.vr_right.unwrap() as f32;
     let vr_top = map.info.vr_top.unwrap() as f32;
     let vr_bottom = map.info.vr_bottom.unwrap() as f32;
     let vr_size = vec2(vr_right - vr_left, vr_bottom - vr_top);
 
+    let mut next = Vec2::ZERO;
     if vr_size.x < world_size.x {
-        camera.position.x = vr_left - (world_size.x - vr_size.x) / 2.0;
+        next.x = vr_left - (world_size.x - vr_size.x) / 2.0;
     } else {
-        camera.position.x = (player.position.x - world_size.x / 2.0)
+        next.x = (player.position.x - world_size.x / 2.0)
             .max(vr_left)
             .min(vr_right - world_size.x);
     }
     if vr_size.y < world_size.y {
-        camera.position.y = vr_top - (world_size.y - vr_size.y) / 2.0;
+        next.y = vr_top - (world_size.y - vr_size.y) / 2.0;
     } else {
-        camera.position.y = (player.position.y - world_size.y + 240.0)
+        next.y = (player.position.y - world_size.y + 240.0)
             .max(vr_top)
             .min(vr_bottom - world_size.y);
     }
+    let prev = camera.position;
+    camera.position = prev.lerp(next, (next - prev).length().min(6000.0) / 6000.0);
+
     if camera.position != camera_signal.get().position {
         camera_signal.set(camera.clone());
     }
