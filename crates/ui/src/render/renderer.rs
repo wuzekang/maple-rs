@@ -885,6 +885,7 @@ impl Renderer {
                     src_rect,
                     Rect::from((location + vec2(x, y) / dpr, vec2(w, h) / dpr)),
                     Some(color),
+                    false,
                 );
             }
         }
@@ -982,6 +983,7 @@ impl Renderer {
         src_rect: Rect,
         dst_rect: Rect,
         color: Option<Color>,
+        tiled: bool,
     ) {
         if let Some((src_rect, dst_rect)) = self.clip_rect(src_rect, dst_rect, SDL_FlipMode::NONE) {
             self.command(RenderTextureCommand {
@@ -989,6 +991,7 @@ impl Renderer {
                 src_rect,
                 dst_rect,
                 color,
+                tiled,
             });
         }
     }

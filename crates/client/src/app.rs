@@ -1,10 +1,12 @@
 use crate::cursor::CursorState;
 use crate::login::login_scene;
 use crate::map::world_map::WorldMap;
+use crate::npc::Npc;
 use crate::scene::MainScene;
 use crate::sound::play_sound;
 use crate::sprite::{ASpriteAnimation, Sprite, SpriteAnimation};
 use crate::timer::Repeat;
+use crate::widget::tiled;
 use crate::wz::Node;
 use crate::WzBase;
 use glam::{vec2, Vec2};
@@ -40,8 +42,10 @@ enum Stage {
 pub fn app() -> impl IntoElement {
     let stage = RwSignal::new(Stage::Main);
     let open = RwSignal::new(false);
+    // 000010000
+    // 910000000
     let current_map: RwSignal<(String, Option<String>)> =
-        RwSignal::new(("910000000".to_string(), None));
+        RwSignal::new(("000010000".to_string(), None));
 
     fragment((
         view()
@@ -65,6 +69,7 @@ pub fn app() -> impl IntoElement {
                     map_scene(current_map),
                     status_bar().composite(),
                     world_map_window(open, current_map),
+                    dialog(),
                 )),
             })),
         // debug().style(|s| {
@@ -506,7 +511,7 @@ pub fn status_bar() -> View {
                         .style(|s| {
                             s.justify_content(JustifyContent::FlexStart)
                                 .align_items(AlignItems::FlexStart)
-                                .gap_column(2.0)
+                                .gap_row(2.0)
                         })
                         .children((
                             button(img.get("EquipKey")),
@@ -635,6 +640,92 @@ pub fn status_bar() -> View {
                     button(img.get("BtShort")),
                 )),
         ))
+}
+
+pub fn dialog() -> impl IntoElement {
+    let open = create_rw_signal(true);
+
+    dynamic(move || {
+        if !open.get() {
+            return fragment(());
+        }
+
+        let WzBase { node: base } = use_context().ok_or(()).unwrap();
+        let node = base.at_path("UI/UIWindow.img/UtilDlgEx").unwrap();
+        let t: Arc<DynamicImage> = node.get("t").try_into().unwrap();
+        let s: Arc<DynamicImage> = node.get("s").try_into().unwrap();
+
+        let npc: Npc = base.at_path("Npc/9010000.img").unwrap().try_into().unwrap();
+
+        let Sprite { image, origin, .. } = npc.actions["stand"].frames[0].clone();
+
+        fragment(
+            view()
+                .style(|s| {
+                    s.pointer_events_none()
+                        .absolute()
+                        .left(0)
+                        .top(0)
+                        .w_full()
+                        .h_full()
+                        .justify_center()
+                        .items_center()
+                })
+                .children(
+                    view()
+                        .style(|s| s.pointer_events_auto().flex_col().items_stretch())
+                        .children((
+                            Image::new(t),
+                            view().children((
+                                tiled(node.get("c")).style(|s| s.absolute().w_full().h_full()),
+                                view().children((
+                                    view().children((view()
+                                        .style(|s| s.margin_top(117).margin_left(20))
+                                        .children((
+                                            view()
+                                                .style(|s| s.absolute().left(percent(0.5)).top(4))
+                                                .children(Image::new(image).style(move|s| {
+                                                    s.translate_x(-origin.x).translate_y(-origin.y)
+                                                })),
+                                            Image::new(node.get("bar")),
+                                            view()
+                                                .style(|s| {
+                                                    s.absolute()
+                                                        .left(0)
+                                                        .top(0)
+                                                        .w_full()
+                                                        .h_full()
+                                                        .color(Color::WHITE)
+                                                        .justify_center()
+                                                        .items_center()
+                                                })
+                                                .children(text(|| "Maple Administrator")),
+                                        )),)),
+                                    view()
+                                        .style(|s| {
+                                            s.margin_top(13)
+                                                .margin_left(20)
+                                                .margin_bottom(10)
+                                                .flex_col()
+                                        })
+                                        .children((
+                                            text(|| "Basic Configuration for MapleStory")
+                                                .style(|s| s.margin_bottom(13)),
+                                            Image::new(node.get("notice")),
+                                        )),
+                                )),
+                            )),
+                            Image::new(s),
+                            button(node.get("BtClose"))
+                                .style(|s| s.absolute().left(9).bottom(8))
+                                .on_click(move |_| open.set(false)),
+                            button(node.get("BtOK"))
+                                .style(|s| s.absolute().right(8).bottom(8))
+                                .on_click(move |_| open.set(false)),
+                        )),
+                ),
+        )
+    })
 }
 
 pub fn chat_box() -> impl IntoElement {

@@ -14,7 +14,7 @@ use crate::{input, Bounds, Drawable};
 use bumpalo::Bump;
 use glam::{vec2, Vec2};
 use peniko::Color;
-use reactive::{provide_context, RwSignal, Scope, SignalGet, SignalUpdate};
+use reactive::{provide_context, use_context, RwSignal, Scope, SignalGet, SignalUpdate};
 use sdl3_sys::everything::*;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -236,6 +236,7 @@ struct CursorElement {
     cursor: Cursor,
     image: Option<Box<dyn Drawable>>,
     target: Option<ViewId>,
+    position: Vec2,
     pub inspect: bool,
     pub inspect_element: RwSignal<Option<ViewId>>,
     pub cursor_visible: bool,
@@ -248,6 +249,7 @@ impl CursorElement {
             cursor: Cursor::DEFAULT,
             image: Default::default(),
             target: Default::default(),
+            position: Default::default(),
             inspect: false,
             inspect_element,
             cursor_visible: false,
@@ -256,6 +258,49 @@ impl CursorElement {
 
     fn set_inspect(&mut self, inspect: bool) {
         self.inspect = inspect;
+    }
+
+    fn event(&mut self, event: &mut Event) {
+
+        if event.is_mouse_enter().is_some() {
+            self.cursor_visible = true;
+        } else if event.is_mouse_leave().is_some() {
+            self.cursor_visible = false;
+        }
+
+        if let Some(event) = event.is_mouse_move() {
+            let position = event.motion;
+            self.position = position;
+            let mut target = self.root;
+            self.root.event_capture(position, &mut target);
+            self.target = Some(target);
+
+            if let Some(target) = self.target {
+                let state = target.state();
+                let cursor = state.borrow().style.cursor.clone();
+                if self.cursor != cursor {
+                    match &cursor {
+                        Cursor::None => {
+                            unsafe { SDL_HideCursor() };
+                            self.image = None;
+                        }
+                        Cursor::System(cursor) => {
+                            unsafe {
+                                SDL_ShowCursor();
+                                SDL_SetCursor(cursor.cursor());
+                            };
+                            self.image = None;
+                        }
+                        Cursor::Drawable(f) => {
+                            unsafe { SDL_HideCursor() };
+                            self.image = Some(f.0());
+                        }
+                        _ => {}
+                    }
+                    self.cursor = cursor
+                }
+            }
+        }
     }
 }
 
@@ -284,45 +329,17 @@ impl Drawable for CursorElement {
     }
 
     fn update(&mut self, delta: f32) -> bool {
-        let position = input::mouse_position();
 
-        let mut target = self.root;
-        self.root.event_capture(position, &mut target);
-        self.target = Some(target);
-
-        if let Some(target) = self.target {
-            let state = target.state();
-            let cursor = state.borrow().style.cursor.clone();
-            if self.cursor != cursor {
-                match &cursor {
-                    Cursor::None => {
-                        unsafe { SDL_HideCursor() };
-                        self.image = None;
-                    }
-                    Cursor::System(cursor) => {
-                        unsafe {
-                            SDL_ShowCursor();
-                            SDL_SetCursor(cursor.cursor());
-                        };
-                        self.image = None;
-                    }
-                    Cursor::Drawable(f) => {
-                        unsafe { SDL_HideCursor() };
-                        self.image = Some(f.0());
-                    }
-                    _ => {}
-                }
-                self.cursor = cursor
+        if self.cursor_visible {
+            if let Some(image) = &mut self.image {
+                image.set_bounds(Bounds {
+                    position: self.position,
+                    size: image.size(),
+                });
+                image.update(delta);
             }
         }
 
-        if let Some(image) = &mut self.image {
-            image.set_bounds(Bounds {
-                position,
-                size: image.size(),
-            });
-            image.update(delta);
-        }
         true
     }
 }
@@ -415,11 +432,7 @@ impl Root {
     }
 
     pub fn handle_event(&mut self, mut event: Event) {
-        if event.is_mouse_enter().is_some() {
-            self.cursor_element.cursor_visible = true;
-        } else if event.is_mouse_leave().is_some() {
-            self.cursor_element.cursor_visible = false;
-        }
+        self.cursor_element.event(&mut event);
         self.app_context.dispatch(event);
     }
 

@@ -3,6 +3,7 @@ use crate::timer::Timer;
 use crate::wz::Node;
 use glam::Vec2;
 use image::DynamicImage;
+use indexmap::IndexMap;
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -80,7 +81,7 @@ impl TryFrom<Node> for AvatarFrame {
 #[derive(Debug)]
 pub struct AvatarPart {
     pub info: AvatarPartInfo,
-    pub variant: HashMap<String, Vec<AvatarFrame>>,
+    pub variant: HashMap<String, IndexMap<i32, AvatarFrame>>,
 }
 
 impl TryFrom<Node> for AvatarPart {
@@ -99,16 +100,16 @@ impl TryFrom<Node> for AvatarPart {
                         if children.contains_key("0") {
                             children
                                 .into_iter()
-                                .filter_map(|(_, node)| {
+                                .filter_map(|(key, node)| {
                                     if node.has("action") {
                                         None
                                     } else {
-                                        Some(node.try_into().ok()?)
+                                        Some((key.try_into().ok()?, node.try_into().ok()?))
                                     }
                                 })
                                 .collect()
                         } else {
-                            vec![node.try_into().ok()?]
+                            IndexMap::from([(0, node.try_into().ok()?)])
                         }
                     }))
                 })
@@ -120,6 +121,7 @@ impl TryFrom<Node> for AvatarPart {
 #[derive(Debug)]
 pub struct AvatarPartInfo {
     pub slot: String,
+    pub after_image: Option<String>,
     // pub cash: bool,
 }
 
@@ -128,6 +130,10 @@ impl TryFrom<Node> for AvatarPartInfo {
     fn try_from(value: Node) -> Result<Self, Self::Error> {
         Ok(Self {
             slot: value.get("islot").try_into()?,
+            after_image: value
+                .try_get("afterImage")
+                .map(TryInto::try_into)
+                .transpose()?,
             // cash: value.get("cash").into(),
         })
     }
@@ -138,6 +144,7 @@ pub struct Character {
     pub slots: HashMap<String, AvatarPart>,
     pub action: String,
     pub emotion: String,
+    pub after_image: Option<String>,
     pub flip: bool,
     timer: Timer,
     z_map: Arc<ZMap>,
@@ -149,6 +156,7 @@ impl Character {
             slots: HashMap::new(),
             action: "stand1".to_string(),
             emotion: "default".to_string(),
+            after_image: None,
             flip: false,
             timer: Timer::new(vec![]),
             z_map,
@@ -160,7 +168,7 @@ impl Character {
         if len > 0 {
             item.timer = Timer::new(
                 item.slots["Bd"].variant[&item.action]
-                    .iter()
+                    .values()
                     .map(|frame| frame.delay.unwrap() as f32)
                     .collect(),
             );
@@ -170,6 +178,9 @@ impl Character {
 
     pub fn insert(&mut self, node: Node) {
         let part: AvatarPart = node.try_into().unwrap();
+        if part.info.slot == "Wp" {
+            self.after_image = part.info.after_image.clone();
+        }
         self.slots.insert(part.info.slot.clone(), part);
     }
 
@@ -185,7 +196,7 @@ impl Character {
         if self.slots["Bd"].variant[&self.action].len() > 1 {
             self.timer = Timer::new(
                 self.slots["Bd"].variant[&self.action]
-                    .iter()
+                    .values()
                     .map(|frame| frame.delay.unwrap() as f32)
                     .collect(),
             );
@@ -211,7 +222,11 @@ impl Character {
             "Fc" | "Hr" => item["brow"] - head["brow"] + head["neck"] - body["neck"],
             "Wp" => {
                 let arm = &arm.unwrap().map;
-                item["hand"] - arm["hand"] + arm["navel"] - body["navel"]
+                if let Some(hand) = item.get("hand") {
+                    hand - arm["hand"] + arm["navel"] - body["navel"]
+                } else {
+                    item["navel"] - body["navel"]
+                }
             }
             _ => item["navel"] - body["navel"],
         };
@@ -219,7 +234,8 @@ impl Character {
         let mut frame = Vec::<Sprite>::new();
 
         for (slot, item) in self.slots.iter() {
-            if slot == "Fc" && matches!(action.as_str(), "ladder" | "rope") {
+            if matches!(slot.as_str(), "Fc" | "Wp") && matches!(action.as_str(), "ladder" | "rope")
+            {
                 continue;
             }
             let parts = if slot == "Fc" {

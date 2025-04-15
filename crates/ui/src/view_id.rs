@@ -244,6 +244,19 @@ impl ViewId {
         }
     }
 
+    pub fn layout_rect(&self) -> Rect {
+        let layout = self.layout();
+        let location = layout.location;
+        let size = layout.size;
+
+        Rect {
+            x: location.x,
+            y: location.y,
+            width: size.width,
+            height: size.height,
+        }
+    }
+
     pub fn index_path(&self, root: ViewId) -> Vec<usize> {
         let mut path = vec![];
         let mut current = *self;

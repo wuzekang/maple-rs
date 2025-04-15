@@ -82,6 +82,7 @@ impl Tile {
             Rect::from((Vec2::ZERO, texture.size)),
             Rect::from((Vec2::ZERO, texture.size / ctx.dpr)),
             Some(Color::new([alpha, alpha, alpha, alpha])),
+            false
         );
 
         ctx.draw_tiles.0 += 1;

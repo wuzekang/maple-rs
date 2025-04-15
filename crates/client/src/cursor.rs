@@ -6,6 +6,7 @@ use ui::reactive::use_context;
 use ui::style::Cursor;
 use ui::{input, Bounds, Drawable, Renderer};
 
+#[derive(Debug, Copy, Clone)]
 pub enum CursorState {
     Idle,
     LClick,

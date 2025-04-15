@@ -26,6 +26,7 @@ pub trait Command {
 pub struct RenderTextureCommand {
     pub texture: *mut SDL_Texture,
     pub color: Option<Color>,
+    pub tiled: bool,
     pub src_rect: Rect,
     pub dst_rect: Rect,
 }
@@ -40,6 +41,7 @@ impl Command for RenderTextureCommand {
         Some(Box::new(Self {
             texture: self.texture,
             color: self.color,
+            tiled: self.tiled,
             src_rect,
             dst_rect,
         }))
@@ -52,12 +54,22 @@ impl Command for RenderTextureCommand {
                 SDL_SetTextureColorModFloat(self.texture, r, g, b);
                 SDL_SetTextureAlphaModFloat(self.texture, a);
             }
-            SDL_RenderTexture(
-                ctx.renderer,
-                self.texture,
-                &self.src_rect.into(),
-                &(self.dst_rect).into(),
-            );
+            if self.tiled {
+                SDL_RenderTextureTiled(
+                    ctx.renderer,
+                    self.texture,
+                    &self.src_rect.into(),
+                    1.0,
+                    &(self.dst_rect).into(),
+                );
+            } else {
+                SDL_RenderTexture(
+                    ctx.renderer,
+                    self.texture,
+                    &self.src_rect.into(),
+                    &(self.dst_rect).into(),
+                );
+            }
         }
     }
 }

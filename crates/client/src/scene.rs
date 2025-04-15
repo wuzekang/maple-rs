@@ -1,18 +1,19 @@
 use crate::character::Character;
 use crate::character::ZMap;
+use crate::cursor::{cursor, CursorState};
 use crate::map;
 use crate::map::{Ladder, PortalType};
 use crate::sound::play_sound;
 use crate::sprite::SpriteRenderer;
 use crate::wz;
-use glam::{vec2, FloatExt, Vec2};
+use glam::{vec2, Vec2};
 use sdl3_sys::everything::*;
 use std::sync::Arc;
 use ui::element::Node;
 use ui::event::{use_key, Event};
 use ui::geometry::Rect;
 use ui::reactive::{create_rw_signal, RwSignal, SignalGet, SignalUpdate};
-use ui::style::Styleable;
+use ui::style::{Cursor, Styleable};
 use ui::{dynamic, fragment, input, view, Element, IntoElement, Renderer, ViewId};
 use ui::{geometry, Drawable};
 
@@ -220,6 +221,12 @@ impl Player {
             }
         }
 
+        if matches!(self.state, State::WALK | State::STAND | State::FALL)
+            && input::key_pressed(SDL_SCANCODE_LCTRL)
+        {
+            self.avatar.set_action("swingO1");
+        }
+
         if matches!(self.state, State::WALK | State::STAND | State::CLIMB)
             && self.direction.y < 0.0
             && current_map.is_some()
@@ -424,6 +431,7 @@ pub struct MainScene {
     size: Vec2,
     camera: Camera,
     pub camera_signal: RwSignal<Camera>,
+    cursor_state: RwSignal<CursorState>,
     current_map: Option<RwSignal<(String, Option<String>)>>,
     player: Option<Player>,
     map: map::Map,
@@ -431,6 +439,7 @@ pub struct MainScene {
 
 impl MainScene {
     pub fn resource(map_name: &str, spawn: Option<String>) -> (Player, map::Map) {
+        dbg!(map_name);
         let base = wz::resolve_base().unwrap();
         let map = map::Map::new(base.clone(), map_name.to_string()).unwrap();
         let spawn = spawn.unwrap_or("sp".to_string());
@@ -450,16 +459,21 @@ impl MainScene {
         });
         let z_map: Arc<ZMap> = Arc::new(base.at_path("zmap.img").unwrap().try_into().unwrap());
 
+        // for item in map.npc.keys() {
+        //     dbg!(item);
+        // }
+
         let player = Player {
             avatar: Character::new(
                 [
                     "00002000",
                     "00012000",
-                    "Hair/00030000",
-                    "Coat/01040036",
-                    "Pants/01060026",
-                    "Shoes/01071000",
+                    "Hair/00030020",
+                    "Coat/01040002",
+                    "Pants/01060002",
+                    "Shoes/01072005",
                     "Face/00020000",
+                    "Weapon/01302000",
                 ]
                 .iter()
                 .map(|path| base.at_path(&format!("Character/{path}.img")).unwrap())
@@ -481,6 +495,7 @@ impl MainScene {
             text_visible.set(!text_visible.get());
         });
         let camera_signal = create_rw_signal(Camera::default());
+        let cursor_state = create_rw_signal(CursorState::Idle);
         let bgm = map.info.bgm.split("/").collect::<Vec<_>>();
         play_sound(&format!("Sound/{}.img/{}", bgm[0], bgm[1]));
 
@@ -523,6 +538,7 @@ impl MainScene {
 
         let id = view()
             .style(move |s| s.absolute().left(0).top(0).width(size.x).height(size.y))
+            .style(move |s| s.cursor(cursor(cursor_state.get())))
             .children(
                 view()
                     .style(move |s| {
@@ -535,16 +551,23 @@ impl MainScene {
                             .translate_x(-camera.position.x + l)
                             .translate_y(-camera.position.y + t)
                     })
-                    .composite()
-                    .children((dynamic({
-                        move || {
-                            if text_visible.get() {
-                                texts.clone()
-                            } else {
-                                Node::Fragment(vec![])
-                            }
-                        }
-                    }),)),
+                    .children((
+                        view()
+                            .style(|s| s.absolute().left(0).top(0).w_full().h_full())
+                            .children(()),
+                        view()
+                            .composite()
+                            .style(|s| s.absolute().left(0).top(0).w_full().h_full())
+                            .children(dynamic({
+                                move || {
+                                    if text_visible.get() {
+                                        texts.clone()
+                                    } else {
+                                        Node::Fragment(vec![])
+                                    }
+                                }
+                            })),
+                    )),
             )
             .id();
 
@@ -553,6 +576,7 @@ impl MainScene {
             size,
             camera,
             player: None,
+            cursor_state,
             map,
             camera_signal,
             current_map,
@@ -608,6 +632,7 @@ impl Element for MainScene {
             }
         }
 
+        let mut clickable = false;
         for item in &map.life {
             if item.r#type == "n" {
                 let npc = map.npc.get_mut(&item.id).unwrap();
@@ -616,7 +641,23 @@ impl Element for MainScene {
                 }
                 let action = npc.actions.get_mut("stand").unwrap();
                 action.timer.tick(delta);
+                let frame = &action.frames[action.timer.index];
+                if Rect::from((
+                    vec2(item.x as f32, item.cy as f32) - self.camera.position - frame.origin,
+                    frame.size,
+                ))
+                .contains(input::mouse_position())
+                {
+                    clickable = true;
+                }
             }
+        }
+
+        if clickable && matches!(self.cursor_state.get_untracked(), CursorState::Idle) {
+            self.cursor_state.set(CursorState::LClick);
+        }
+        if !clickable && matches!(self.cursor_state.get_untracked(), CursorState::LClick) {
+            self.cursor_state.set(CursorState::Idle);
         }
     }
 
@@ -826,8 +867,21 @@ fn player_move(context: &mut MainScene, delta: f32) {
             .max(vr_top)
             .min(vr_bottom - world_size.y);
     }
+
     let prev = camera.position;
-    camera.position = prev.lerp(next, (next - prev).length().min(6000.0) / 6000.0);
+    let offset = next - prev;
+    camera.position += vec2(
+        if offset.x.abs() >= 5.0 {
+            offset.x * 12.0 / 800.0
+        } else {
+            0.0
+        },
+        if offset.y.abs() >= 5.0 {
+            offset.y * 12.0 / 600.0
+        } else {
+            0.0
+        },
+    );
 
     if camera.position != camera_signal.get().position {
         camera_signal.set(camera.clone());

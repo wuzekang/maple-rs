@@ -15,6 +15,7 @@ mod scene;
 mod sound;
 mod sprite;
 mod timer;
+mod widget;
 mod wz;
 
 #[derive(Clone)]
