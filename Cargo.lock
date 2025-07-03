@@ -5805,6 +5805,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e9df38ee2d2c3c5948ea468a8406ff0db0b29ae1ffde1bcf20ef305bcc95c51"
 
 [[package]]
+name = "wz-parser"
+version = "0.1.0"
+dependencies = [
+ "aes",
+ "ecb",
+ "flate2",
+ "hashbrown 0.14.5",
+ "image",
+ "indexmap",
+ "rayon",
+ "scroll",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "wz_reader"
 version = "0.0.10"
 dependencies = [
