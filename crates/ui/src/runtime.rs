@@ -32,7 +32,11 @@ impl Default for Runtime {
         let font_system = FontSystem::new_with_fonts([Source::File("Data/simsun.ttc".into())]);
         
         #[cfg(target_arch = "wasm32")]
-        let font_system = FontSystem::new(); // Use default system fonts for WebAssembly
+        let font_system = {
+            // For WebAssembly, embed a default font
+            let font_data = include_bytes!("../../../Data/US/WenQuanYiMicroHei.ttf");
+            FontSystem::new_with_fonts([Source::Binary(std::sync::Arc::new(font_data as &[u8]))])
+        };
         
         let (sender, receiver) = channel::<Resource>();
 

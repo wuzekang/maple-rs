@@ -3,5 +3,13 @@ linker = "emcc"
 rustflags = [
   "-C", "link-arg=--no-entry",
   "-C", "link-arg=-s",
-  "-C", "link-arg=ERROR_ON_UNDEFINED_SYMBOLS=0"
+  "-C", "link-arg=ERROR_ON_UNDEFINED_SYMBOLS=0",
+  "-C", "link-arg=-s",
+  "-C", "link-arg=ALLOW_MEMORY_GROWTH=1",
+  "-C", "link-arg=-s", 
+  "-C", "link-arg=INITIAL_MEMORY=67108864",
+  "-C", "link-arg=-s",
+  "-C", "link-arg=MAXIMUM_MEMORY=4294967296",
+  "-C", "link-arg=-s",
+  "-C", "link-arg=FETCH=1"
 ]

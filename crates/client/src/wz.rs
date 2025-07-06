@@ -8,14 +8,18 @@ use std::sync::{Arc, Mutex, OnceLock};
 use wz_parser::node::Error;
 use wz_parser::{property::Vector2D, WzNodeArc};
 use wz_parser::{WzNodeCast, WzNodeName};
+#[cfg(all(target_arch = "wasm32", target_os = "emscripten"))]
 use web_fetch::{WebFetch, FetchError, FetchOptions};
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct WzConfig {
     pub url: Option<String>,
     pub use_network: bool,
     pub fallback_to_preload: bool,
     pub timeout_ms: Option<u32>,
+    pub base_url: Option<String>,
+    pub additional_wz_files: Option<Vec<String>>,
+    pub max_response_size: Option<usize>,
 }
 
 impl Default for WzConfig {
@@ -25,49 +29,137 @@ impl Default for WzConfig {
             use_network: true,
             fallback_to_preload: true,
             timeout_ms: Some(30000),
+            base_url: None,
+            additional_wz_files: None,
+            max_response_size: Some(1024 * 1024 * 1024), // 1GB
         }
     }
 }
 
-pub fn resolve_base() -> Result<Node, std::io::Error> {
-    resolve_base_with_config(&WzConfig::default())
+pub async fn resolve_base() -> Result<Node, std::io::Error> {
+    resolve_base_with_config(&WzConfig::default()).await
 }
 
-pub async fn resolve_base_async() -> Result<Node, std::io::Error> {
-    resolve_base_with_config_async(&WzConfig::default()).await
-}
-
-pub fn resolve_base_with_config(config: &WzConfig) -> Result<Node, std::io::Error> {
+pub async fn resolve_base_with_config(config: &WzConfig) -> Result<Node, std::io::Error> {
     #[cfg(all(target_arch = "wasm32", target_os = "emscripten"))]
     {
-        log::info!("Running in Emscripten environment with config: {:?}", config);
-        
+        log::debug!("Running in Emscripten environment");
+
         // Try network loading first if enabled
         if config.use_network {
-            log::warn!("Synchronous network loading is not supported in Emscripten. Falling back to preloaded files.");
-            
-            if !config.fallback_to_preload {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "Synchronous network loading is not supported and fallback to preload is disabled. Please use resolve_base_async()"
-                ));
+            let url = config.url.as_deref().unwrap_or("./Data/Base.wz");
+            log::debug!("Attempting network loading from: {}", url);
+
+            match resolve_base_from_url_with_config(url, config).await {
+                Ok(node) => {
+                    // Successfully loaded Base.wz, now load additional WZ files
+                    let base_url = config.base_url.as_deref().unwrap_or_else(|| {
+                        // Extract base URL from the Base.wz URL
+                        if let Some(last_slash) = url.rfind('/') {
+                            &url[..last_slash]
+                        } else {
+                            "."
+                        }
+                    });
+
+                    // Get the list of additional WZ files to load
+                    // Priority files (smaller, load first)
+                    let priority_files = vec![
+                        "Etc".to_string(),
+                        "TamingMob".to_string(),
+                        "Morph".to_string(),
+                        "Quest".to_string(),
+                        "String".to_string(),
+                        "Item".to_string(),
+                        "UI".to_string(),
+                    ];
+
+                    // Large files (load after priority files)
+                    let large_files = vec![
+                        "Sound".to_string(),  // 366MB - Make sure Sound is included!
+                        "Map".to_string(),    // 638MB
+                        "Mob".to_string(),    // 479MB
+                        "Character".to_string(), // 206MB
+                        "Skill".to_string(),  // 76MB
+                        "Effect".to_string(), // 63MB
+                        "Npc".to_string(),    // 53MB
+                        "Reactor".to_string(), // 54MB
+                        "List".to_string(),   // 13KB
+                    ];
+
+                    // Combine both lists
+                    let mut default_files = priority_files;
+                    default_files.extend(large_files);
+
+                    let additional_files = config.additional_wz_files.as_ref().unwrap_or(&default_files);
+
+                    let base_node_arc = node.wz_node.clone();
+
+                    // Check which WZ files are referenced in Base.wz
+                    let mut files_to_load = Vec::new();
+                    {
+                        let base_read = base_node_arc.read().unwrap();
+                        for wz_name in additional_files {
+                            if base_read.at(wz_name).is_some() {
+                                files_to_load.push(wz_name.clone());
+                            }
+                        }
+                    }
+
+                    // Load all additional WZ files concurrently
+                    let mut load_futures = Vec::new();
+                    for wz_name in files_to_load {
+                        let wz_url = format!("{}/{}.wz", base_url, wz_name);
+                        let base_node = base_node_arc.clone();
+                        let config = config.clone();
+                        let wz_name_clone = wz_name.clone();
+                        load_futures.push(async move {
+                            if let Err(e) = load_additional_wz_from_url(&base_node, &wz_name_clone, &wz_url, &config).await {
+                                log::warn!("Failed to load {}.wz from network: {}", wz_name_clone, e);
+                            }
+                        });
+                    }
+
+                    // Wait for all loads to complete
+                    futures::future::join_all(load_futures).await;
+
+
+                    return Ok(node);
+                }
+                Err(e) => {
+                    log::warn!("Base.wz network loading failed: {}", e);
+
+                    if !config.fallback_to_preload {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::NotFound,
+                            "Network loading failed and fallback to preload is disabled",
+                        ));
+                    }
+
+                    log::debug!("Network loading failed, falling back to preloaded files");
+                }
             }
         }
-        
+
         // Fall back to preloaded filesystem paths
         let possible_paths = [
             "/Data/Base.wz",
-            "Data/Base.wz", 
+            "Data/Base.wz",
             "./Data/Base.wz",
             "Base.wz"
         ];
-        
+
+        let mut base_node = None;
+        let mut base_dir = None;
+
         for path in &possible_paths {
             match std::fs::read(path) {
                 Ok(bytes) => {
-                    log::info!("Successfully read {} bytes from {}", bytes.len(), path);
                     let wz_node = wz_parser::util::resolve_base_from_bytes(&bytes, None)?;
-                    return Ok(wz_node.into());
+                    base_node = Some(wz_node);
+                    // Extract base directory from path
+                    base_dir = Some(std::path::Path::new(path).parent().unwrap_or(std::path::Path::new(".")));
+                    break;
                 }
                 Err(_) => {
                     log::debug!("Failed to read from {}, trying next path", path);
@@ -75,13 +167,37 @@ pub fn resolve_base_with_config(config: &WzConfig) -> Result<Node, std::io::Erro
                 }
             }
         }
-        
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound, 
-            "Could not find Base.wz in any expected location. Make sure to preload it with --preload-file or serve it via HTTP"
-        ));
+
+        let base_node = base_node.ok_or_else(|| std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "Could not find Base.wz in any expected location. Make sure to preload it with --preload-file or serve it via HTTP",
+        ))?;
+
+        // Load additional WZ files that are referenced in Base.wz
+        if let Some(base_dir) = base_dir {
+            let additional_wz_files = ["UI", "Map", "Character", "Item", "Mob", "Npc", "Skill", "Sound", "Effect"];
+
+            for wz_name in &additional_wz_files {
+                let wz_path = base_dir.join(format!("{}.wz", wz_name));
+
+                // Check if this WZ file is referenced in Base.wz
+                {
+                    let base_read = base_node.read().unwrap();
+                    if base_read.at(wz_name).is_none() {
+                        continue; // Skip if not referenced in Base.wz
+                    }
+                }
+
+                if let Ok(bytes) = std::fs::read(&wz_path) {
+                    let _ = wz_parser::util::merge_wz_bytes(&base_node, wz_name, &bytes, None);
+                }
+            }
+        }
+
+
+        return Ok(base_node.into());
     }
-    
+
     #[cfg(not(target_arch = "wasm32"))]
     {
         let wz_node = wz_parser::util::resolve_base("./Data/Base.wz", None)?;
@@ -89,119 +205,93 @@ pub fn resolve_base_with_config(config: &WzConfig) -> Result<Node, std::io::Erro
     }
 }
 
-pub async fn resolve_base_with_config_async(config: &WzConfig) -> Result<Node, std::io::Error> {
-    #[cfg(all(target_arch = "wasm32", target_os = "emscripten"))]
-    {
-        log::info!("Running in Emscripten environment with config: {:?}", config);
-        
-        // Try network loading first if enabled
-        if config.use_network {
-            let url = config.url.as_deref().unwrap_or("./Data/Base.wz");
-            log::info!("Attempting network loading from: {}", url);
-            
-            if let Ok(node) = resolve_base_from_url_async_with_config(url, config).await {
-                return Ok(node);
-            }
-            
-            if !config.fallback_to_preload {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "Network loading failed and fallback to preload is disabled"
-                ));
-            }
-            
-            log::info!("Network loading failed, falling back to preloaded files");
-        }
-        
-        // Fall back to preloaded filesystem paths
-        let possible_paths = [
-            "/Data/Base.wz",
-            "Data/Base.wz", 
-            "./Data/Base.wz",
-            "Base.wz"
-        ];
-        
-        for path in &possible_paths {
-            match std::fs::read(path) {
-                Ok(bytes) => {
-                    log::info!("Successfully read {} bytes from {}", bytes.len(), path);
-                    let wz_node = wz_parser::util::resolve_base_from_bytes(&bytes, None)?;
-                    return Ok(wz_node.into());
-                }
-                Err(_) => {
-                    log::debug!("Failed to read from {}, trying next path", path);
-                    continue;
-                }
-            }
-        }
-        
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound, 
-            "Could not find Base.wz in any expected location. Make sure to preload it with --preload-file or serve it via HTTP"
-        ));
-    }
-    
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        // 在非 wasm 环境中，直接使用同步版本
-        resolve_base_with_config(config)
-    }
+#[cfg(all(target_arch = "wasm32", target_os = "emscripten"))]
+pub async fn resolve_base_from_url(url: &str) -> Result<Node, std::io::Error> {
+    resolve_base_from_url_with_config(url, &WzConfig::default()).await
 }
 
 #[cfg(all(target_arch = "wasm32", target_os = "emscripten"))]
-pub fn resolve_base_from_url(url: &str) -> Result<Node, std::io::Error> {
-    resolve_base_from_url_with_config(url, &WzConfig::default())
-}
+async fn load_additional_wz_from_url(base_node: &WzNodeArc, wz_name: &str, url: &str, config: &WzConfig) -> Result<(), std::io::Error> {
 
-#[cfg(all(target_arch = "wasm32", target_os = "emscripten"))]
-pub fn resolve_base_from_url_with_config(_url: &str, _config: &WzConfig) -> Result<Node, std::io::Error> {
-    // 同步网络请求在 Emscripten 中会阻塞浏览器主线程
-    // 请使用异步版本 resolve_base_from_url_async_with_config
-    Err(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        "Synchronous network requests are not supported in Emscripten. Please use the async version: resolve_base_from_url_async_with_config"
-    ))
-}
-
-#[cfg(not(all(target_arch = "wasm32", target_os = "emscripten")))]
-pub fn resolve_base_from_url(_url: &str) -> Result<Node, std::io::Error> {
-    Err(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        "Network loading is only supported on Emscripten target"
-    ))
-}
-
-#[cfg(all(target_arch = "wasm32", target_os = "emscripten"))]
-pub async fn resolve_base_from_url_async(url: &str) -> Result<Node, std::io::Error> {
-    resolve_base_from_url_async_with_config(url, &WzConfig::default()).await
-}
-
-#[cfg(all(target_arch = "wasm32", target_os = "emscripten"))]
-pub async fn resolve_base_from_url_async_with_config(url: &str, config: &WzConfig) -> Result<Node, std::io::Error> {
-    log::info!("Attempting to load WZ file from URL: {}", url);
-    
     let mut options = FetchOptions::default();
     if let Some(timeout) = config.timeout_ms {
         options.timeout_ms = Some(timeout);
     }
-    
+    if let Some(max_size) = config.max_response_size {
+        options.max_response_size = Some(max_size);
+    }
+
     match WebFetch::fetch(url, Some(options)).await {
         Ok(response) => {
             if response.status != 200 {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::Other,
-                    format!("HTTP error: {} {}", response.status, response.status_text)
+                    format!("HTTP error for {}: {} {}", wz_name, response.status, response.status_text),
                 ));
             }
-            
-            log::info!("Successfully fetched {} bytes from {}", response.data.len(), url);
-            
+
+
+            match wz_parser::util::merge_wz_bytes(base_node, wz_name, &response.data, None) {
+                Ok(_) => {
+                    Ok(())
+                }
+                Err(e) => {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("Failed to merge {}: {:?}", wz_name, e),
+                    ))
+                }
+            }
+        }
+        Err(fetch_error) => {
+            let error_msg = match fetch_error {
+                FetchError::NetworkError(msg) => {
+                    // Check if it's a 404 error
+                    if msg.contains("404") {
+                        format!("File not found (404) for {}.wz at URL: {}", wz_name, url)
+                    } else {
+                        format!("Network error for {}: {}", wz_name, msg)
+                    }
+                }
+                FetchError::InvalidUrl(url) => format!("Invalid URL for {}: {}", wz_name, url),
+            };
+
+
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                error_msg,
+            ))
+        }
+    }
+}
+
+#[cfg(all(target_arch = "wasm32", target_os = "emscripten"))]
+pub async fn resolve_base_from_url_with_config(url: &str, config: &WzConfig) -> Result<Node, std::io::Error> {
+
+    let mut options = FetchOptions::default();
+    if let Some(timeout) = config.timeout_ms {
+        options.timeout_ms = Some(timeout);
+    }
+    if let Some(max_size) = config.max_response_size {
+        options.max_response_size = Some(max_size);
+    }
+
+    match WebFetch::fetch(url, Some(options)).await {
+        Ok(response) => {
+            if response.status != 200 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("HTTP error: {} {}", response.status, response.status_text),
+                ));
+            }
+
+
             let wz_node = wz_parser::util::resolve_base_from_bytes(&response.data, None)
                 .map_err(|e| std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
-                    format!("Failed to parse WZ file: {}", e)
+                    format!("Failed to parse WZ file: {}", e),
                 ))?;
-            
+
             Ok(wz_node.into())
         }
         Err(fetch_error) => {
@@ -209,22 +299,22 @@ pub async fn resolve_base_from_url_async_with_config(url: &str, config: &WzConfi
                 FetchError::NetworkError(msg) => format!("Network error: {}", msg),
                 FetchError::InvalidUrl(url) => format!("Invalid URL: {}", url),
             };
-            
+
             log::warn!("Failed to fetch WZ file from {}: {}", url, error_msg);
-            
+
             Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
-                error_msg
+                error_msg,
             ))
         }
     }
 }
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "emscripten")))]
-pub async fn resolve_base_from_url_async(_url: &str) -> Result<Node, std::io::Error> {
+pub async fn resolve_base_from_url(_url: &str) -> Result<Node, std::io::Error> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
-        "Network loading is only supported on Emscripten target"
+        "Network loading is only supported on Emscripten target",
     ))
 }
 
@@ -427,11 +517,6 @@ impl TryFrom<Node> for Arc<DynamicImage> {
     }
 }
 
-// impl Into<Arc<DynamicImage>> for Node {
-//     fn into(self) -> Arc<DynamicImage> {
-//         self.try_into().unwrap()
-//     }
-// }
 
 impl TryFrom<Node> for bool {
     type Error = ();

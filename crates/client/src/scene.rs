@@ -5,7 +5,6 @@ use crate::map;
 use crate::map::{Ladder, PortalType};
 use crate::sound::play_sound;
 use crate::sprite::SpriteRenderer;
-use crate::wz;
 use glam::{vec2, Vec2};
 use sdl3_sys::everything::*;
 use std::sync::Arc;
@@ -13,7 +12,7 @@ use ui::element::Node;
 use ui::event::{use_key, Event};
 use ui::geometry::Rect;
 use ui::reactive::{create_rw_signal, RwSignal, SignalGet, SignalUpdate};
-use ui::style::{Cursor, Styleable};
+use ui::style::Styleable;
 use ui::{dynamic, fragment, input, view, Element, IntoElement, Renderer, ViewId};
 use ui::{geometry, Drawable};
 
@@ -197,7 +196,7 @@ impl Player {
                     && self.position.x <= item.end.x
                     && item.ground(self.position.x) > self.position.y
             });
-            if let Some(foothold) = foothold {
+            if let Some(_foothold) = foothold {
                 self.position.y += 1.0;
                 self.jump();
                 return 0.0;
@@ -438,10 +437,12 @@ pub struct MainScene {
 }
 
 impl MainScene {
-    pub fn resource(map_name: &str, spawn: Option<String>) -> (Player, map::Map) {
+    pub fn resource(map_name: &str, spawn: Option<String>, base: crate::wz::Node) -> Result<(Player, map::Map), Box<dyn std::error::Error>> {
+        println!("开始加载地图: {}", map_name);
         dbg!(map_name);
-        let base = wz::resolve_base().unwrap();
-        let map = map::Map::new(base.clone(), map_name.to_string()).unwrap();
+        println!("WZ数据加载完成，开始创建地图对象");
+        let map = map::Map::new(base.clone(), map_name.to_string()).map_err(|_| "Failed to create map")?;
+        println!("地图对象创建完成");
         let spawn = spawn.unwrap_or("sp".to_string());
         let position = map.portals.iter().fold(None, |acc: Option<Vec2>, item| {
             if item.pn != spawn {
@@ -457,7 +458,7 @@ impl MainScene {
                 Some(item.position + vec2(0.0, -10.0))
             }
         });
-        let z_map: Arc<ZMap> = Arc::new(base.at_path("zmap.img").unwrap().try_into().unwrap());
+        let z_map: Arc<ZMap> = Arc::new(base.at_path("zmap.img")?.try_into().map_err(|_| "Failed to parse zmap")?);
 
         // for item in map.npc.keys() {
         //     dbg!(item);
@@ -476,8 +477,8 @@ impl MainScene {
                     "Weapon/01302000",
                 ]
                 .iter()
-                .map(|path| base.at_path(&format!("Character/{path}.img")).unwrap())
-                .collect(),
+                .map(|path| base.at_path(&format!("Character/{path}.img")))
+                .collect::<Result<Vec<_>, _>>()?,
                 z_map,
             ),
             position: position.unwrap_or_default(),
@@ -486,7 +487,7 @@ impl MainScene {
             ..Default::default()
         };
 
-        (player, map)
+        Ok((player, map))
     }
 
     pub fn new(map: map::Map, current_map: Option<RwSignal<(String, Option<String>)>>) -> Self {

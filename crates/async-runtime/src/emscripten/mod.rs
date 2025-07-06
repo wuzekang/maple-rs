@@ -135,9 +135,9 @@ fn set_timeout<F: FnOnce() + 'static>(callback: F, delay_ms: i32) {
     extern "C" {
         fn emscripten_set_timeout(
             callback: extern "C" fn(*mut c_void),
-            timeout: c_int,
+            timeout: f64,
             user_data: *mut c_void,
-        );
+        ) -> c_int;
     }
     
     extern "C" fn timeout_callback(user_data: *mut c_void) {
@@ -151,7 +151,7 @@ fn set_timeout<F: FnOnce() + 'static>(callback: F, delay_ms: i32) {
     unsafe {
         emscripten_set_timeout(
             timeout_callback,
-            delay_ms,
+            delay_ms as f64,
             Box::into_raw(boxed_callback) as *mut c_void,
         );
     }

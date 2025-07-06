@@ -21,6 +21,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::mem;
 use std::rc::Rc;
 use taffy::{prelude::TaffyMaxContent, Point, Size};
+use std::time::Duration;
+
 
 #[derive(Clone)]
 pub struct AppContext {
@@ -489,7 +491,7 @@ impl Root {
         self.cursor_element.draw(&mut self.painter.borrow_mut());
     }
 
-    pub fn launch(&mut self) {
+    pub async fn launch(&mut self) {
         let renderer = self.renderer;
         let mut events = EventIterator::new();
 
@@ -503,6 +505,8 @@ impl Root {
             let mut exited = false;
             let mut prev = SDL_GetTicksNS();
             while !exited {
+
+                async_runtime::sleep(Duration::from_millis(10)).await;
                 Resource::try_recv();
 
                 self.app_context.process_queue();
@@ -643,6 +647,7 @@ impl Root {
                 self.painter.borrow_mut().present();
                 self.bump.reset();
             }
+            
         }
         Scope::current().dispose()
     }

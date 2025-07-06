@@ -24,6 +24,14 @@ extern "C" {
 
 #[cfg(target_os = "emscripten")]
 const EMSCRIPTEN_FETCH_LOAD_TO_MEMORY: u32 = 1;
+#[cfg(target_os = "emscripten")]
+const EMSCRIPTEN_FETCH_STREAM_DATA: u32 = 2;
+#[cfg(target_os = "emscripten")]
+const EMSCRIPTEN_FETCH_PERSIST_FILE: u32 = 4;
+#[cfg(target_os = "emscripten")]
+const EMSCRIPTEN_FETCH_APPEND: u32 = 8;
+#[cfg(target_os = "emscripten")]
+const EMSCRIPTEN_FETCH_NO_DOWNLOAD: u32 = 32;
 
 #[cfg(target_os = "emscripten")]
 type EmscriptenFetchCallback = unsafe extern "C" fn(*mut EmscriptenFetch);
@@ -73,6 +81,7 @@ pub struct FetchOptions {
     pub headers: HashMap<String, String>,
     pub body: Option<String>,
     pub timeout_ms: Option<u32>,
+    pub max_response_size: Option<usize>,
 }
 
 impl Default for FetchOptions {
@@ -82,6 +91,7 @@ impl Default for FetchOptions {
             headers: HashMap::new(),
             body: None,
             timeout_ms: Some(30000),
+            max_response_size: Some(1024 * 1024 * 1024), // 默认 1GB
         }
     }
 }
@@ -168,11 +178,41 @@ unsafe extern "C" fn on_success(fetch: *mut EmscriptenFetch) {
     let user_data = fetch_ref.user_data;
 
     if !user_data.is_null() {
-        // 提取响应数据
+        // 提取响应数据，增加错误处理
         let data = if !fetch_ref.data.is_null() && fetch_ref.num_bytes > 0 {
-            let size = std::cmp::min(fetch_ref.num_bytes as usize, 10 * 1024 * 1024);
-            let mut data = vec![0u8; size];
-            std::ptr::copy_nonoverlapping(fetch_ref.data as *const u8, data.as_mut_ptr(), size);
+            // 限制最大响应大小为 1GB
+            const MAX_RESPONSE_SIZE: usize = 1024 * 1024 * 1024;
+            let actual_size = fetch_ref.num_bytes as usize;
+            
+            if actual_size > MAX_RESPONSE_SIZE {
+                // 如果响应太大，发送错误
+                let sender: Box<oneshot::Sender<FetchResult<FetchResponse>>> = Box::from_raw(user_data as *mut oneshot::Sender<FetchResult<FetchResponse>>);
+                let _ = sender.send(Err(FetchError::NetworkError(
+                    format!("Response too large: {} bytes (max: {} bytes)", actual_size, MAX_RESPONSE_SIZE)
+                )));
+                emscripten_fetch_close(fetch);
+                return;
+            }
+            
+            // 尝试分配内存
+            let mut data = match Vec::<u8>::try_reserve_exact(&mut Vec::new(), actual_size) {
+                Ok(_) => {
+                    let mut v = Vec::with_capacity(actual_size);
+                    v.resize(actual_size, 0);
+                    v
+                }
+                Err(_) => {
+                    // 内存分配失败
+                    let sender: Box<oneshot::Sender<FetchResult<FetchResponse>>> = Box::from_raw(user_data as *mut oneshot::Sender<FetchResult<FetchResponse>>);
+                    let _ = sender.send(Err(FetchError::NetworkError(
+                        format!("Failed to allocate {} bytes for response", actual_size)
+                    )));
+                    emscripten_fetch_close(fetch);
+                    return;
+                }
+            };
+            
+            std::ptr::copy_nonoverlapping(fetch_ref.data as *const u8, data.as_mut_ptr(), actual_size);
             data
         } else {
             Vec::new()

@@ -329,28 +329,18 @@ pub fn button(btn_node: Node) -> View {
 }
 
 pub fn map_scene(map_name: RwSignal<(String, Option<String>)>) -> impl IntoElement {
-    lazy(
-        {
-            move || {
-                let (map_name, spawn) = map_name.get();
-                async move { Some(MainScene::resource(&map_name, spawn)) }
-            }
-        },
-        move |map| match map {
-            None => fragment(()),
-            Some((player, map)) => {
-                let main_scene = Rc::new(RefCell::new(MainScene::new(map, Some(map_name))));
-                main_scene.borrow_mut().set_player(player);
-                use_event({
-                    let main_scene = main_scene.clone();
-                    move |event| {
-                        main_scene.borrow_mut().event(event);
-                    }
-                });
-                fragment(main_scene)
-            }
-        },
-    )
+    let (_map_name, spawn) = map_name.get();
+    let WzBase { node: base } = use_context().unwrap();
+    let (player, map) = MainScene::resource(&_map_name, spawn, base).unwrap();
+    let main_scene = Rc::new(RefCell::new(MainScene::new(map, Some(map_name))));
+    main_scene.borrow_mut().set_player(player);
+    use_event({
+        let main_scene = main_scene.clone();
+        move |event| {
+            main_scene.borrow_mut().event(event);
+        }
+    });
+    fragment(main_scene)
 }
 
 pub fn level_no<F>(_value: F) -> View
@@ -684,7 +674,7 @@ pub fn dialog() -> impl IntoElement {
                                         .children((
                                             view()
                                                 .style(|s| s.absolute().left(percent(0.5)).top(4))
-                                                .children(Image::new(image).style(move|s| {
+                                                .children(Image::new(image).style(move |s| {
                                                     s.translate_x(-origin.x).translate_y(-origin.y)
                                                 })),
                                             Image::new(node.get("bar")),

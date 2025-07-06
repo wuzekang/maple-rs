@@ -3,7 +3,7 @@ source ../emsdk/emsdk_env.sh
 
 # Set environment for emscripten
 # EMCC_CFLAGS for C/C++ code
-export EMCC_CFLAGS="-s USE_SDL=3 -s FETCH=1"
+export EMCC_CFLAGS="-s USE_SDL=3 -s FETCH=1 -s ALLOW_MEMORY_GROWTH=1"
 
 # Build for wasm32-unknown-emscripten
 # cargo build --target wasm32-unknown-emscripten --release --example future_demo -p web-fetch

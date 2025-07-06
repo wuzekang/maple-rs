@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 glam = "0.29.2"
-wz-parser = { path = "../wz-parser" }
+wz-parser = { path = "../wz-parser", default-features = false}
 ui = { path = "../ui" }
 web-fetch = { path = "../web-fetch" }
 async-runtime = { path = "../async-runtime" }
@@ -17,10 +17,5 @@ hecs = "0.10.5"
 log = "0.4.22"
 symphonia = { version = "0.5.4", features = ["mp3"], default-features = false }
 strum = { version = "0.27", features = ["derive"] }
-
-# Platform-specific dependencies to avoid rayon in wasm32
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 image = { version = "0.25.2", default-features = false, features = ["png"] }
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-image = { version = "0.25.2", default-features = false, features = ["png"] }
+futures = "0.3"
