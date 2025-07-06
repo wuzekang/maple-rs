@@ -78,48 +78,21 @@ async fn run_app() -> Result<(), Box<dyn Error>> {
             Ok(node) => {
                 log::info!("Successfully loaded WZ data (including network resources)");
                 // Debug: Check if Sound node exists
-                println!("Checking Sound node in loaded WZ data:");
                 if let Some(sound_node) = node.try_get("Sound") {
-                    println!("✓ Sound node exists in Base.wz");
                     
                     // Check if Sound node has actual content
                     let sound_read = sound_node.wz_node.read().unwrap();
                     if sound_read.children.is_empty() {
-                        println!("Sound node exists but is EMPTY - Sound.wz was not loaded!");
-                        println!("Sound node children count: 0");
-                    } else {
-                        println!("Sound node has {} children", sound_read.children.len());
-                        println!("First few Sound children:");
-                        for (i, (name, _)) in sound_read.children.iter().enumerate() {
-                            if i < 5 {
-                                println!("  - {}", name);
-                            }
-                        }
                     }
                     drop(sound_read);
                     
                     // Try to access a known sound path
                     if let Ok(_test_sound) = node.at_path("Sound/UI.img/BtMouseOver") {
-                        println!("✓ Can access Sound/UI.img/BtMouseOver");
-                    } else {
-                        println!("✗ Cannot access Sound/UI.img/BtMouseOver");
                         
                         // Try to see what's in Sound node
                         if let Ok(ui_node) = node.at_path("Sound/UI.img") {
-                            println!("Found Sound/UI.img, checking its contents...");
-                            let ui_read = ui_node.wz_node.read().unwrap();
-                            println!("UI.img has {} children", ui_read.children.len());
-                            for (i, (name, _)) in ui_read.children.iter().enumerate() {
-                                if i < 10 {
-                                    println!("  - {}", name);
-                                }
-                            }
-                        } else {
-                            println!("Cannot access Sound/UI.img");
                         }
                     }
-                } else {
-                    println!("✗ Sound node NOT found in Base.wz!");
                 }
                 
                 provide_context(WzBase { node });

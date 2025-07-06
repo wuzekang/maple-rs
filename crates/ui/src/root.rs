@@ -506,7 +506,7 @@ impl Root {
             let mut prev = SDL_GetTicksNS();
             while !exited {
 
-                async_runtime::sleep(Duration::from_millis(10)).await;
+                async_runtime::yield_now().await;
                 Resource::try_recv();
 
                 self.app_context.process_queue();

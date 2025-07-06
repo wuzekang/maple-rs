@@ -113,7 +113,6 @@ pub fn merge_wz_bytes(
 ) -> Result<(), io::Error> {
     use crate::{WzNode, WzFile};
     
-    println!("merge_wz_bytes: Starting to merge {} ({} bytes)", wz_name, bytes.len());
     
     // Get patch version and keys from base node
     let (patch_version, keys) = {
@@ -149,18 +148,7 @@ pub fn merge_wz_bytes(
     // Merge into base node
     {
         let mut base_write = base_node.write().unwrap();
-        
-        // Check if there's already a node with this name
-        if base_write.at(wz_name).is_some() {
-            println!("merge_wz_bytes: Found existing node '{}' in base, replacing it", wz_name);
-        } else {
-            println!("merge_wz_bytes: No existing node '{}' in base, creating new entry", wz_name);
-            println!("merge_wz_bytes: Current base node children: {:?}", 
-                base_write.children.keys().map(|k| k.to_string()).collect::<Vec<_>>());
-        }
-        
         base_write.children.insert(wz_name.into(), wz_node);
-        println!("Successfully merged {} ({} bytes) into base node", wz_name, bytes.len());
     }
     
     Ok(())
@@ -196,17 +184,13 @@ pub fn resolve_base_from_bytes(
         })?;
     }
     
-    println!("Successfully parsed {} bytes of WZ data", bytes.len());
     
     // Debug: List all top-level nodes in Base.wz
     {
         let base_read = base_node.read().unwrap();
-        println!("Base.wz top-level nodes:");
         for (name, _) in base_read.children.iter() {
-            println!("  - {}", name);
         }
         if base_read.children.is_empty() {
-            println!("  (Base.wz has no children - this is unexpected!)");
         }
     }
     

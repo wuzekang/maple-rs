@@ -4,8 +4,30 @@ use std::future::Future;
 use std::time::Duration;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 pub use executor::EmscriptenExecutor;
+
+// 全局执行器实例
+thread_local! {
+    static GLOBAL_EXECUTOR: RefCell<Option<Rc<EmscriptenExecutor>>> = RefCell::new(None);
+}
+
+/// 初始化运行时（不启动事件循环）
+/// 这个函数应该在使用 spawn 之前调用
+pub fn init_runtime() -> Rc<EmscriptenExecutor> {
+    GLOBAL_EXECUTOR.with(|executor| {
+        let mut executor_ref = executor.borrow_mut();
+        if let Some(exec) = executor_ref.as_ref() {
+            exec.clone()
+        } else {
+            let new_executor = Rc::new(EmscriptenExecutor::new());
+            *executor_ref = Some(new_executor.clone());
+            new_executor
+        }
+    })
+}
 
 /// 在 Emscripten 中运行异步任务直到完成
 /// 注意：这会接管控制流，永不返回
@@ -14,7 +36,8 @@ where
     F: Future + 'static,
     F::Output: 'static,
 {
-    let executor = EmscriptenExecutor::new();
+    // 初始化全局执行器
+    let executor = init_runtime();
     
     // 将 future 转换为一个永不返回的任务
     executor.spawn(async move {
@@ -36,9 +59,14 @@ pub fn spawn<F>(future: F)
 where
     F: Future<Output = ()> + 'static,
 {
-    // 这里我们假设有一个全局的执行器实例
-    // 在实际使用中，应该通过某种方式管理执行器的生命周期
-    log::warn!("spawn called - this requires a running EmscriptenExecutor");
+    GLOBAL_EXECUTOR.with(|executor| {
+        let executor_ref = executor.borrow();
+        if let Some(exec) = executor_ref.as_ref() {
+            exec.spawn(future);
+        } else {
+            panic!("spawn: 全局执行器未初始化！请先调用 init_runtime() 或 block_on()");
+        }
+    });
 }
 
 /// 异步延时
@@ -73,14 +101,20 @@ impl Future for SleepFuture {
         if self.start_time.is_none() {
             self.start_time = Some(current_time_ms());
         }
-
-        let elapsed = current_time_ms() - self.start_time.unwrap();
+        
+        let current = current_time_ms();
+        let start = self.start_time.unwrap();
+        let elapsed = current - start;
+        
+        
         if elapsed >= self.duration_ms {
             Poll::Ready(())
         } else {
             // 设置一个定时器来唤醒任务
             let waker = cx.waker().clone();
             let remaining = (self.duration_ms - elapsed) as i32;
+            
+            
             set_timeout(move || {
                 waker.wake();
             }, remaining.max(1));

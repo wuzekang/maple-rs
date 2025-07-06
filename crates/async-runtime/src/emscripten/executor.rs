@@ -36,6 +36,8 @@ struct ExecutorInner {
 /// 简单的 Emscripten Future 执行器
 pub struct EmscriptenExecutor {
     inner: Rc<RefCell<ExecutorInner>>,
+    // 待添加的新任务（放在 RefCell 外部，避免借用冲突）
+    pending_tasks: Rc<RefCell<Vec<Pin<Box<dyn Future<Output = ()> + 'static>>>>>,
 }
 
 impl EmscriptenExecutor {
@@ -47,36 +49,41 @@ impl EmscriptenExecutor {
                 ready_queue: VecDeque::new(),
                 free_slots: Vec::new(),
             })),
+            pending_tasks: Rc::new(RefCell::new(Vec::new())),
         }
     }
 
     /// 生成一个新的异步任务
     pub fn spawn(&self, future: impl Future<Output = ()> + 'static) {
-        let mut inner = self.inner.borrow_mut();
-        
-        // 找到一个槽位：重用空闲槽位或添加新槽位
-        let index = if let Some(free_index) = inner.free_slots.pop() {
-            inner.tasks[free_index] = Some(Task {
-                future: Box::pin(future),
-                is_ready: Cell::new(true),
-            });
-            free_index
+        // 尝试直接添加任务
+        if let Ok(mut inner) = self.inner.try_borrow_mut() {
+            // 找到一个槽位：重用空闲槽位或添加新槽位
+            let index = if let Some(free_index) = inner.free_slots.pop() {
+                inner.tasks[free_index] = Some(Task {
+                    future: Box::pin(future),
+                    is_ready: Cell::new(true),
+                });
+                free_index
+            } else {
+                let index = inner.tasks.len();
+                inner.tasks.push(Some(Task {
+                    future: Box::pin(future),
+                    is_ready: Cell::new(true),
+                }));
+                index
+            };
+            
+            // 新任务立即加入就绪队列
+            inner.ready_queue.push_back(index);
         } else {
-            let index = inner.tasks.len();
-            inner.tasks.push(Some(Task {
-                future: Box::pin(future),
-                is_ready: Cell::new(true),
-            }));
-            index
-        };
-        
-        // 新任务立即加入就绪队列
-        inner.ready_queue.push_back(index);
+            // 如果无法立即添加（因为借用冲突），添加到待处理队列
+            self.pending_tasks.borrow_mut().push(Box::pin(future));
+        }
     }
 
     /// 运行执行器（接管控制流）
-    pub fn run(self) {
-        let executor_ptr = Box::into_raw(Box::new(self));
+    pub fn run(self: &Rc<Self>) {
+        let executor_ptr = Rc::into_raw(self.clone());
         unsafe {
             // 以 60 FPS 运行主循环，降低延迟
             emscripten_set_main_loop_arg(
@@ -97,36 +104,80 @@ impl EmscriptenExecutor {
             *executor_cell.borrow_mut() = Some(executor as *const EmscriptenExecutor);
         });
         
-        let mut inner = executor.inner.borrow_mut();
-
-        // 快速路径：如果没有就绪任务，直接返回
-        if inner.ready_queue.is_empty() {
-            return;
+        // 首先处理待添加的任务
+        {
+            let pending_tasks = std::mem::take(&mut *executor.pending_tasks.borrow_mut());
+            if !pending_tasks.is_empty() {
+                let mut inner = executor.inner.borrow_mut();
+                for future in pending_tasks {
+                    // 找到一个槽位：重用空闲槽位或添加新槽位
+                    let index = if let Some(free_index) = inner.free_slots.pop() {
+                        inner.tasks[free_index] = Some(Task {
+                            future,
+                            is_ready: Cell::new(true),
+                        });
+                        free_index
+                    } else {
+                        let index = inner.tasks.len();
+                        inner.tasks.push(Some(Task {
+                            future,
+                            is_ready: Cell::new(true),
+                        }));
+                        index
+                    };
+                    
+                    // 新任务立即加入就绪队列
+                    inner.ready_queue.push_back(index);
+                }
+            }
         }
+        
+        // 取出所有就绪任务的索引，避免在轮询时持有借用
+        let ready_tasks = {
+            let mut inner = executor.inner.borrow_mut();
+            if inner.ready_queue.is_empty() {
+                return;
+            }
+            
+            
+            // 将所有就绪任务取出
+            let mut tasks = Vec::new();
+            while let Some(task_index) = inner.ready_queue.pop_front() {
+                tasks.push(task_index);
+            }
+            tasks
+        };
 
-        // 处理所有当前就绪的任务（避免在循环中借用冲突）
-        let ready_count = inner.ready_queue.len();
-        for _ in 0..ready_count {
-            if let Some(task_index) = inner.ready_queue.pop_front() {
-                // 检查任务是否存在
+        // 处理每个就绪任务
+        for task_index in ready_tasks {
+
+            // 创建 Waker
+            let waker = create_waker(task_index);
+            let mut context = Context::from_waker(&waker);
+            
+            // 轮询任务（每次重新借用）
+            let poll_result = {
+                let mut inner = executor.inner.borrow_mut();
                 if let Some(Some(task)) = inner.tasks.get_mut(task_index) {
                     // 重置就绪标记
                     task.is_ready.set(false);
-                    
-                    // 创建 Waker
-                    let waker = create_waker(task_index);
-                    let mut context = Context::from_waker(&waker);
-
-                    // 轮询任务
-                    match task.future.as_mut().poll(&mut context) {
-                        Poll::Ready(()) => {
-                            // 任务完成，移除并标记槽位为空闲
-                            inner.tasks[task_index] = None;
-                            inner.free_slots.push(task_index);
-                        }
-                        Poll::Pending => {
-                            // 任务未完成，等待下次唤醒
-                        }
+                    Some(task.future.as_mut().poll(&mut context))
+                } else {
+                    None
+                }
+            };
+            
+            // 处理轮询结果
+            if let Some(poll_result) = poll_result {
+                match poll_result {
+                    Poll::Ready(()) => {
+                        // 任务完成，移除并标记槽位为空闲
+                        let mut inner = executor.inner.borrow_mut();
+                        inner.tasks[task_index] = None;
+                        inner.free_slots.push(task_index);
+                    }
+                    Poll::Pending => {
+                        // 任务未完成，等待下次唤醒
                     }
                 }
             }

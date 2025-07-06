@@ -438,11 +438,8 @@ pub struct MainScene {
 
 impl MainScene {
     pub fn resource(map_name: &str, spawn: Option<String>, base: crate::wz::Node) -> Result<(Player, map::Map), Box<dyn std::error::Error>> {
-        println!("开始加载地图: {}", map_name);
         dbg!(map_name);
-        println!("WZ数据加载完成，开始创建地图对象");
         let map = map::Map::new(base.clone(), map_name.to_string()).map_err(|_| "Failed to create map")?;
-        println!("地图对象创建完成");
         let spawn = spawn.unwrap_or("sp".to_string());
         let position = map.portals.iter().fold(None, |acc: Option<Vec2>, item| {
             if item.pn != spawn {

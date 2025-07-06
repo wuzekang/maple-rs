@@ -357,13 +357,12 @@ impl Map {
         };
 
         let children = map_img.get("back").children();
-        println!("背景数量: {}", children.len());
         let backgrounds: Vec<_> = (0..children.len())
             .filter_map(|i| {
                 let result = MapBackground::new(root.clone(), children[i.to_string().as_str()].clone());
                 match &result {
-                    Ok(bg) => println!("背景 {} 加载成功: bs={}, type={}, x={}, y={}", i, bg.bs, bg.r#type, bg.x, bg.y),
-                    Err(_) => println!("背景 {} 加载失败", i),
+                    Ok(_) => {},
+                    Err(_) => {},
                 }
                 result.ok()
             })
