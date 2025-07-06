@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web Fetch Future API 演示</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        button {
+            padding: 12px 20px;
+            background: #3498db;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background: #2980b9;
+        }
+        button:disabled {
+            background: #bdc3c7;
+            cursor: not-allowed;
+        }
+        .status {
+            background: #ecf0f1;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #3498db;
+        }
+        .output {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 20px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            max-height: 500px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin: 30px 0;
+        }
+        .feature {
+            background: #e8f6ff;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #3498db;
+        }
+        .feature h3 {
+            margin-top: 0;
+            color: #2c3e50;
+        }
+        .warning {
+            background: #fff3cd;
+            color: #856404;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #ffc107;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Web Fetch Future API 演示</h1>
+        
+        <div class="status">
+            <strong>状态:</strong> <span id="status">正在加载 WASM 模块...</span>
+        </div>
+
+        <div class="warning">
+            <strong>注意:</strong> 此演示需要启动本地服务器来避免 CORS 问题。请运行 <code>python3 -m http.server 8000</code> 并访问 <code>http://localhost:8000/future-demo.html</code>
+        </div>
+
+        <div class="features">
+            <div class="feature">
+                <h3>🎯 简洁 API</h3>
+                <p>只有三个主要方法：<code>get()</code>, <code>post()</code>, <code>fetch()</code></p>
+            </div>
+            <div class="feature">
+                <h3>📡 基于 Channel</h3>
+                <p>无 ID 系统，自动资源管理，每个请求独立</p>
+            </div>
+            <div class="feature">
+                <h3>⚡ Future 支持</h3>
+                <p>原生 async/await 支持，并发友好</p>
+            </div>
+            <div class="feature">
+                <h3>🔧 类型安全</h3>
+                <p>完整的 Rust 类型系统保护，编译时错误检查</p>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button onclick="runFullDemo()">🚀 运行完整演示</button>
+            <button onclick="runBasicGet()">📥 基本 GET 请求</button>
+            <button onclick="runBasicPost()">📤 基本 POST 请求</button>
+            <button onclick="runCustomOptions()">⚙️ 自定义选项请求</button>
+            <button onclick="runConcurrentRequests()">🔄 并发请求测试</button>
+            <button onclick="runErrorHandling()">❌ 错误处理测试</button>
+            <button onclick="clearOutput()">🧹 清空输出</button>
+            <button onclick="checkPlatformSupport()">🔍 检查平台支持</button>
+        </div>
+
+        <div class="output" id="output">正在初始化...</div>
+    </div>
+
+    <script>
+        let wasmLoaded = false;
+
+        // 定义Module配置对象
+        window.Module = {
+            // 重定向 stdout 到我们的输出区域
+            print: function(text) {
+                const output = document.getElementById('output');
+                output.textContent += text + '\n';
+                output.scrollTop = output.scrollHeight;
+            },
+
+            printErr: function(text) {
+                const output = document.getElementById('output');
+                output.textContent += '[ERROR] ' + text + '\n';
+                output.scrollTop = output.scrollHeight;
+            },
+
+            onRuntimeInitialized: function() {
+                wasmLoaded = true;
+                document.getElementById('status').textContent = '✅ WASM 模块加载成功，可以开始测试';
+                document.getElementById('output').textContent = '📋 准备就绪，点击按钮开始测试...\n';
+                
+                // 启用所有按钮
+                const buttons = document.querySelectorAll('button');
+                buttons.forEach(btn => btn.disabled = false);
+            }
+        };
+
+        function ensureWasmLoaded() {
+            if (!wasmLoaded) {
+                alert('WASM 模块尚未加载完成，请稍等...');
+                return false;
+            }
+            return true;
+        }
+
+        function runFullDemo() {
+            if (!ensureWasmLoaded()) return;
+            clearOutput();
+            Module.print('🚀 开始完整 Future API 演示...\n');
+            Module._run_future_demo();
+        }
+
+        function runBasicGet() {
+            if (!ensureWasmLoaded()) return;
+            Module.print('\n📥 测试基本 GET 请求...');
+            // 这里可以调用特定的测试函数，或者运行完整演示
+            Module._test_simple_get();
+        }
+
+        function runBasicPost() {
+            if (!ensureWasmLoaded()) return;
+            Module.print('\n📤 基本 POST 请求测试尚未单独实现，请运行完整演示');
+        }
+
+        function runCustomOptions() {
+            if (!ensureWasmLoaded()) return;
+            Module.print('\n⚙️ 自定义选项请求测试尚未单独实现，请运行完整演示');
+        }
+
+        function runConcurrentRequests() {
+            if (!ensureWasmLoaded()) return;
+            Module.print('\n🔄 并发请求测试尚未单独实现，请运行完整演示');
+        }
+
+        function runErrorHandling() {
+            if (!ensureWasmLoaded()) return;
+            Module.print('\n❌ 错误处理测试尚未单独实现，请运行完整演示');
+        }
+
+        function checkPlatformSupport() {
+            if (!ensureWasmLoaded()) return;
+            const supported = Module._check_platform_support();
+            Module.print(`\n🔍 平台支持检查: ${supported ? '✅ 支持' : '❌ 不支持'}`);
+        }
+
+        function clearOutput() {
+            document.getElementById('output').textContent = '📋 输出已清空，准备新的测试...\n';
+        }
+
+        // 初始时禁用所有按钮
+        window.addEventListener('DOMContentLoaded', function() {
+            const buttons = document.querySelectorAll('button');
+            buttons.forEach(btn => btn.disabled = true);
+        });
+    </script>
+
+    <!-- 加载 WASM 模块 -->
+    <script src="target/wasm32-unknown-emscripten/debug/examples/future_demo.js"></script>
+</body>
+</html>
