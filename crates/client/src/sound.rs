@@ -11,7 +11,7 @@ use symphonia::core::io::MediaSourceStream;
 use symphonia::core::probe::Hint;
 use ui::reactive::{on_cleanup, use_context};
 use ui::resource::use_resource;
-use wz_reader::WzNodeCast;
+use wz_parser::WzNodeCast;
 
 struct AudioStream(*mut SDL_AudioStream);
 

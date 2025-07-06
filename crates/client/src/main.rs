@@ -23,8 +23,12 @@ struct WzBase {
     pub node: Node,
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<(), Box<dyn Error>> {
+    async_runtime::block_on(run_app())
+}
+
+async fn run_app() -> Result<(), Box<dyn Error>> {
+
     unsafe {
         SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO);
     }
@@ -56,11 +60,50 @@ async fn main() -> Result<(), Box<dyn Error>> {
     };
     let renderer = unsafe { SDL_CreateRenderer(window, std::ptr::null()) };
 
-    provide_context(WzBase {
-        node: wz::resolve_base().unwrap(),
-    });
-
-    Root::new(app::app, renderer).launch();
+    // Handle WZ data loading
+    #[cfg(all(target_arch = "wasm32", target_os = "emscripten"))]
+    {
+        log::info!("Emscripten: Loading WZ data asynchronously");
+        
+        // Try to load WZ data asynchronously
+        match wz::resolve_base_async().await {
+            Ok(node) => {
+                log::info!("Successfully loaded WZ data");
+                provide_context(WzBase { node });
+                Root::new(app::app, renderer).launch();
+            }
+            Err(e) => {
+                log::error!("Failed to load WZ data: {}. Make sure to preload Base.wz with --preload-file or serve it via HTTP", e);
+                // Create mock data and start anyway for testing
+                use std::sync::{Arc, RwLock, Weak};
+                use wz_parser::{WzNode, WzObjectType, property::WzSubProperty, WzNodeName};
+                use indexmap::IndexMap;
+                
+                let mock_property = WzSubProperty::Property;
+                let mock_node = WzNode {
+                    name: WzNodeName::from("MockBase"),
+                    object_type: WzObjectType::Property(mock_property),
+                    parent: Weak::new(),
+                    children: IndexMap::new(),
+                };
+                
+                let wz_node = Arc::new(RwLock::new(mock_node));
+                provide_context(WzBase {
+                    node: wz_node.into(),
+                });
+                Root::new(app::app, renderer).launch();
+            }
+        }
+        return Ok(());
+    }
+    
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        provide_context(WzBase {
+            node: wz::resolve_base().unwrap(),
+        });
+        Root::new(app::app, renderer).launch();
+    }
 
     Ok(())
 }

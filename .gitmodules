@@ -1,3 +1,0 @@
-[submodule "crates/wz-reader-rs"]
-	path = crates/wz-reader-rs
-	url = https://github.com/wuzekang/wz-reader-rs.git

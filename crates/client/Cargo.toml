@@ -5,15 +5,22 @@ edition = "2021"
 
 [dependencies]
 glam = "0.29.2"
-image = "0.25.2"
-wz_reader = { path = "../wz-reader-rs" }
+wz-parser = { path = "../wz-parser" }
 ui = { path = "../ui" }
+web-fetch = { path = "../web-fetch" }
+async-runtime = { path = "../async-runtime" }
 indexmap = "2.3.0"
 thiserror = "1.0.57"
 slotmap = "1.0.7"
-tokio = { version = "1", features = ["full"] }
-sdl3-sys = { version = "0.4.6", features = ["build-from-source-static"] }
+sdl3-sys = { version = "0.4.6" }
 hecs = "0.10.5"
 log = "0.4.22"
 symphonia = { version = "0.5.4", features = ["mp3"], default-features = false }
 strum = { version = "0.27", features = ["derive"] }
+
+# Platform-specific dependencies to avoid rayon in wasm32
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+image = { version = "0.25.2", default-features = false, features = ["png"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+image = { version = "0.25.2", default-features = false, features = ["png"] }

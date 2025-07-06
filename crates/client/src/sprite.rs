@@ -238,6 +238,30 @@ impl TryFrom<Node> for SpriteAnimation {
     }
 }
 
+impl Default for SpriteAnimation {
+    fn default() -> Self {
+        // Create a minimal sprite with 1x1 transparent image
+        let image = Arc::new(DynamicImage::new_rgba8(1, 1));
+        let default_sprite = Sprite {
+            path: "default".to_string(),
+            image,
+            size: vec2(1.0, 1.0),
+            origin: Vec2::ZERO,
+            a0: 255,
+            a1: 255,
+            alpha: 255,
+            z: 0,
+            delay: 100,
+        };
+        
+        Self {
+            frames: vec![default_sprite],
+            timer: Timer::new(vec![100.0]),
+            bounds: Bounds::default(),
+        }
+    }
+}
+
 impl SpriteAnimation {
     pub fn tick(&mut self, delta: f32) -> &Sprite {
         self.timer.tick(delta);

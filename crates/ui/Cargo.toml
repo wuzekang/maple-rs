@@ -4,20 +4,29 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-cosmic-text = { version = "0.12.1", features = ["default"] }
 glam = "0.29.2"
-image = "0.25.5"
-sdl3-sys = { version = "0.4.6", features = ["build-from-source-static"] }
+sdl3-sys = { version = "0.4.6" }
 slotmap = "1.0.7"
 taffy = "0.7.6"
 peniko = { version = "0.3.1" }
-parley = { version = "0.3.0" }
 swash = { version = "0.2.1" }
 reactive = { path = "../reactive" }
+async-runtime = { path = "../async-runtime" }
 log = "0.4.22"
 unicode-segmentation = "1.11.0"
-tokio = { version = "1", features = ["full"] }
-futures = "0.3.31"
 bumpalo = { version = "3.17.0", features = ["allocator-api2", "collections"] }
 hashbrown = { version = "0.15.2", features = ["allocator-api2"] }
 strum = { version = "0.27", features = ["derive"] }
+futures = "0.3.31"
+
+# Platform-specific dependencies to avoid rayon in wasm32
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+parley = { version = "0.3.0" }
+cosmic-text = { version = "0.12.1", default-features = false, features = ["std", "swash"] }
+image = { version = "0.25.5", default-features = false, features = ["png"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# For wasm32, use cosmic-text with no_std to avoid rayon
+cosmic-text = { version = "0.12.1", default-features = false, features = ["no_std", "swash", "hashbrown"] }
+# For wasm32, use image without rayon features
+image = { version = "0.25.5", default-features = false, features = ["png"] }

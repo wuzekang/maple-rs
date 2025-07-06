@@ -12,7 +12,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::time::sleep;
+use async_runtime::sleep;
 use ui::animation::use_raf;
 use ui::event::MouseEvent;
 use ui::geometry::{CubicBezier, Rect};

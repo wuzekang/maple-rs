@@ -104,6 +104,41 @@ pub fn resolve_root_wz_file_dir(
     resolve_root_wz_file_dir_full(dir, None, None, parent, None)
 }
 
+/// Construct `WzNode` tree from `Base.wz` file bytes
+pub fn resolve_base_from_bytes(
+    bytes: &[u8],
+    version: Option<WzMapleVersion>,
+) -> Result<WzNodeArc, io::Error> {
+    use crate::{WzNode, WzFile};
+    
+    // Convert bytes to Vec<u8> for WzFile::from_bytes
+    let data = bytes.to_vec();
+    
+    // Create WzFile from bytes
+    let wz_file = WzFile::from_bytes(
+        data,
+        version.map(crate::version::get_iv_by_maple_version),
+        None, // patch_version - let it auto-detect
+        None, // existing_key
+    ).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("WZ parsing failed: {}", e)))?;
+    
+    // Create WzNode from WzFile
+    let base_node = WzNode::new(&"Base".into(), wz_file, None);
+    let base_node: WzNodeArc = base_node.into();
+    
+    // Parse the base node to load the directory structure
+    {
+        let mut base_write = base_node.write().unwrap();
+        base_write.parse(&base_node).map_err(|e| {
+            io::Error::new(io::ErrorKind::InvalidData, format!("Node parsing failed: {}", e))
+        })?;
+    }
+    
+    println!("Successfully parsed {} bytes of WZ data", bytes.len());
+    
+    Ok(base_node)
+}
+
 /// Construct `WzNode` tree from `Base.wz`
 pub fn resolve_base(
     path: impl AsRef<Path>,

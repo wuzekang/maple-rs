@@ -7,13 +7,13 @@ use image::DynamicImage;
 use image::EncodableLayout;
 use serde_json::{Map, Value};
 use std::fs::read;
-use wz_reader::util::resolve_base;
-use wz_reader::{
+use wz_parser::util::resolve_base;
+use wz_parser::{
     property::{WzSubProperty, WzValue},
     util::node_util::parse_node,
     WzNodeArc, WzObjectType,
 };
-use wz_reader::{util::node_util, WzNode};
+use wz_parser::{util::node_util, WzNode};
 
 use eframe::{
     egui::{Context, FontData, FontDefinitions},

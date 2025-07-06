@@ -11,9 +11,7 @@ use std::os::raw::{c_char, c_int, c_void};
 #[cfg(target_os = "emscripten")]
 use futures::channel::oneshot;
 
-// 导出 Emscripten 运行时
-#[cfg(target_os = "emscripten")]
-pub mod emscripten_runtime;
+// Emscripten 运行时现在由 async-runtime crate 提供
 
 
 // Emscripten FFI 绑定
@@ -115,24 +113,22 @@ impl std::error::Error for FetchError {}
 
 pub type FetchResult<T> = Result<T, FetchError>;
 
-// Future 执行器
-#[cfg(target_os = "emscripten")]
-pub fn spawn_local<F>(_future: F)
-where
-    F: Future<Output = ()> + 'static,
-{
-    // Emscripten 环境中暂时不支持直接的异步执行
-    // 需要通过 JavaScript 桥接来处理异步调用
-    println!("注意: Emscripten 环境需要通过 JavaScript 处理异步调用");
-}
-
+// Future 执行器 - 使用 async-runtime 提供的实现
 #[cfg(not(target_os = "emscripten"))]
 pub fn spawn_local<F>(future: F)
 where
     F: Future<Output = ()> + Send + 'static,
 {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.spawn(future);
+    async_runtime::spawn(future);
+}
+
+#[cfg(target_os = "emscripten")]
+pub fn spawn_local<F>(future: F)
+where
+    F: Future<Output = ()> + 'static,
+{
+    // 在 Emscripten 中，spawn 不需要 Send 约束
+    async_runtime::spawn(future);
 }
 
 // 核心 Future 封装

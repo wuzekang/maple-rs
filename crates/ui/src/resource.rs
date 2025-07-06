@@ -6,7 +6,7 @@ use std::any::Any;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
-use tokio::task;
+// async-runtime 提供了 spawn 函数
 
 pub struct Resource {
     pub id: u64,
@@ -107,7 +107,7 @@ where
             let id = current.borrow().checked_add(u64::MAX).unwrap_or(0);
             *current.borrow_mut() = id;
             let future = f();
-            task::spawn({
+            async_runtime::spawn({
                 let sender = sender.clone();
                 async move {
                     sender

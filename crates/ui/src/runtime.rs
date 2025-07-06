@@ -27,7 +27,13 @@ pub struct Runtime {
 
 impl Default for Runtime {
     fn default() -> Self {
+        // Platform-specific font system initialization
+        #[cfg(not(target_arch = "wasm32"))]
         let font_system = FontSystem::new_with_fonts([Source::File("Data/simsun.ttc".into())]);
+        
+        #[cfg(target_arch = "wasm32")]
+        let font_system = FontSystem::new(); // Use default system fonts for WebAssembly
+        
         let (sender, receiver) = channel::<Resource>();
 
         Self {

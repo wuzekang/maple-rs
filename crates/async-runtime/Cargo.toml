@@ -1,0 +1,20 @@
+[package]
+name = "async-runtime"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+futures = "0.3"
+log = "0.4"
+
+# 非 Emscripten 平台使用 tokio
+[target.'cfg(not(all(target_arch = "wasm32", target_os = "emscripten")))'.dependencies]
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time"] }
+
+# Emscripten 平台依赖
+[target.'cfg(all(target_arch = "wasm32", target_os = "emscripten"))'.dependencies]
+futures-channel = "0.3"
+
+# 用于 Emscripten FFI
+[dependencies.libc]
+version = "0.2"

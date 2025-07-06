@@ -1,0 +1,7 @@
+[target.wasm32-unknown-emscripten]
+linker = "emcc"
+rustflags = [
+  "-C", "link-arg=--no-entry",
+  "-C", "link-arg=-s",
+  "-C", "link-arg=ERROR_ON_UNDEFINED_SYMBOLS=0"
+]

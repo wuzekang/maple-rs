@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Maple RS - WebAssembly Client</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: Arial, sans-serif;
+        }
+        
+        #canvas-container {
+            position: relative;
+            background-color: #222;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+        }
+        
+        canvas {
+            display: block;
+            image-rendering: crisp-edges;
+            image-rendering: pixelated;
+        }
+        
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 24px;
+            text-align: center;
+        }
+        
+        #error {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #ff6b6b;
+            font-size: 18px;
+            text-align: center;
+            max-width: 80%;
+            display: none;
+        }
+        
+        #status {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            color: white;
+            font-size: 12px;
+            opacity: 0.7;
+        }
+        
+        .controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            display: flex;
+            gap: 10px;
+        }
+        
+        button {
+            padding: 8px 16px;
+            background-color: #4a4a4a;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        
+        button:hover {
+            background-color: #5a5a5a;
+        }
+        
+        button:active {
+            background-color: #3a3a3a;
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container">
+        <div id="loading">
+            <div>Loading Maple RS...</div>
+            <div style="font-size: 14px; margin-top: 10px;">
+                <span id="progress">0%</span>
+            </div>
+        </div>
+        <div id="error"></div>
+        <canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+        <div id="status"></div>
+        <div class="controls">
+            <button onclick="toggleFullscreen()">Fullscreen</button>
+            <button onclick="toggleDebug()">Debug</button>
+        </div>
+    </div>
+
+    <script type='text/javascript'>
+        var Module = {
+            preRun: [],
+            postRun: [],
+            
+            // Canvas element
+            canvas: (function() {
+                var canvas = document.getElementById('canvas');
+                
+                // As a default initial behavior, pop up an alert when webgl context is lost
+                canvas.addEventListener("webglcontextlost", function(e) {
+                    alert('WebGL context lost. You will need to reload the page.');
+                    e.preventDefault();
+                }, false);
+                
+                return canvas;
+            })(),
+            
+            // Progress tracking
+            setStatus: function(text) {
+                if (!Module.setStatus.last) Module.setStatus.last = { time: Date.now(), text: '' };
+                if (text === Module.setStatus.last.text) return;
+                
+                var m = text.match(/([^(]+)\((\d+(\.\d+)?)\/(\d+)\)/);
+                var now = Date.now();
+                
+                if (m && now - Module.setStatus.last.time < 30) return; // if this is a progress update, skip it if too soon
+                Module.setStatus.last.time = now;
+                Module.setStatus.last.text = text;
+                
+                var statusElement = document.getElementById('status');
+                var progressElement = document.getElementById('progress');
+                var loadingElement = document.getElementById('loading');
+                
+                if (m) {
+                    text = m[1];
+                    progressElement.innerText = Math.round(parseInt(m[2])/parseInt(m[4]) * 100) + '%';
+                } else if (text === '') {
+                    // Loading complete
+                    loadingElement.style.display = 'none';
+                    statusElement.innerText = 'Ready';
+                } else {
+                    statusElement.innerText = text;
+                }
+            },
+            
+            totalDependencies: 0,
+            
+            monitorRunDependencies: function(left) {
+                this.totalDependencies = Math.max(this.totalDependencies, left);
+                Module.setStatus(left ? 'Preparing... (' + (this.totalDependencies-left) + '/' + this.totalDependencies + ')' : 'All downloads complete.');
+            },
+            
+            // Handle errors
+            onAbort: function(what) {
+                var errorElement = document.getElementById('error');
+                var loadingElement = document.getElementById('loading');
+                loadingElement.style.display = 'none';
+                errorElement.style.display = 'block';
+                errorElement.innerHTML = 'Error: ' + what + '<br><br>Please check the browser console for more details.';
+            },
+            
+            // Preload files (if you have WZ data files to preload)
+            preloadedFiles: [],
+            
+            // Memory settings - these should be set at compile time with Emscripten flags
+            // INITIAL_MEMORY is set via -sINITIAL_MEMORY=268435456 during compilation
+            // ALLOW_MEMORY_GROWTH is set via -sALLOW_MEMORY_GROWTH=1 during compilation
+            
+            // File system settings
+            noInitialRun: false,
+            
+            // SDL settings
+            SDL2: {
+                audioContext: new (window.AudioContext || window.webkitAudioContext)()
+            }
+        };
+        
+        // Handle window resize
+        window.addEventListener('resize', function() {
+            if (Module.ctx) {
+                Module.setCanvasSize(window.innerWidth, window.innerHeight);
+            }
+        });
+        
+        // Fullscreen toggle
+        function toggleFullscreen() {
+            var canvas = Module.canvas;
+            if (!document.fullscreenElement) {
+                canvas.requestFullscreen().catch(err => {
+                    alert(`Error attempting to enable fullscreen: ${err.message}`);
+                });
+            } else {
+                document.exitFullscreen();
+            }
+        }
+        
+        // Debug toggle
+        var debugEnabled = false;
+        function toggleDebug() {
+            debugEnabled = !debugEnabled;
+            Module.print = debugEnabled ? console.log.bind(console) : function() {};
+            Module.printErr = debugEnabled ? console.error.bind(console) : function() {};
+            console.log('Debug logging', debugEnabled ? 'enabled' : 'disabled');
+        }
+        
+        // Initial status
+        Module.setStatus('Downloading...');
+        
+        window.onerror = function(event) {
+            Module.setStatus('Exception thrown, see JavaScript console');
+            Module.setStatus = function(text) {
+                if (text) console.error('[post-exception status] ' + text);
+            };
+        };
+    </script>
+    
+    <!-- Load the compiled JavaScript file -->
+    <script async type="text/javascript" src="target/wasm32-unknown-emscripten/release/client.js"></script>
+</body>
+</html>

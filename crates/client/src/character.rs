@@ -8,7 +8,7 @@ use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::sync::Arc;
 use ui::{Drawable, Renderer};
-use wz_reader::WzNodeCast;
+use wz_parser::WzNodeCast;
 
 #[derive(Debug)]
 pub struct AvatarFramePart {

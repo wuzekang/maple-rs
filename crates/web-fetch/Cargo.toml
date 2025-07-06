@@ -8,17 +8,19 @@ description = "Web fetch utilities for Emscripten target"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 futures = { version = "0.3", default-features = false, features = ["alloc", "std"] }
+async-runtime = { path = "../async-runtime" }
 
 # Platform-specific async runtime
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { version = "1", default-features = false, features = ["macros", "rt", "time"] }
 # libc = "0.2"
 
-[lib]
-crate-type = ["cdylib", "rlib"]
+[target.'cfg(target_os = "emscripten")'.dependencies]
+libc = "0.2"
+futures-channel = "0.3"
 
-[[example]]
-name = "minimal_fetch"
+[lib]
+crate-type = ["rlib"]
 
 [[example]]
 name = "future_demo"
