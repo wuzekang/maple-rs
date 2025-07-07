@@ -1,8 +1,8 @@
+use ::ui::reactive::provide_context;
+use ::ui::Root;
 use glam::vec2;
 use sdl3_sys::everything::*;
 use std::error::Error;
-use ::ui::reactive::provide_context;
-use ::ui::Root;
 use wz::Node;
 
 mod animation;
@@ -26,12 +26,16 @@ struct WzBase {
     pub node: Node,
 }
 
+#[derive(Clone)]
+pub struct WzSplitReaderContext {
+    pub reader: std::sync::Arc<wz_splitter::reader::SplitWzReader>,
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     async_runtime::block_on(run_app())
 }
 
 async fn run_app() -> Result<(), Box<dyn Error>> {
-
     unsafe {
         SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO);
     }
@@ -63,76 +67,33 @@ async fn run_app() -> Result<(), Box<dyn Error>> {
     };
     let renderer = unsafe { SDL_CreateRenderer(window, std::ptr::null()) };
 
-    // Handle WZ data loading
-    #[cfg(all(target_arch = "wasm32", target_os = "emscripten"))]
-    {
-        log::info!("Emscripten: Loading WZ data asynchronously");
-        
-        // Configure WZ loading with network support for all WZ files
-        let mut config = wz::WzConfig::default();
-        config.use_network = true;
-        config.fallback_to_preload = true;
-        
-        // You can customize the base URL if needed
-        // config.base_url = Some("https://your-server.com/Data".to_string());
-        
-        // Try to load WZ data asynchronously with network support
-        match wz::resolve_base_with_config(&config).await {
-            Ok(node) => {
-                log::info!("Successfully loaded WZ data (including network resources)");
-                // Debug: Check if Sound node exists
-                if let Some(sound_node) = node.try_get("Sound") {
-                    
-                    // Check if Sound node has actual content
-                    let sound_read = sound_node.wz_node.read().unwrap();
-                    if sound_read.children.is_empty() {
-                    }
-                    drop(sound_read);
-                    
-                    // Try to access a known sound path
-                    if let Ok(_test_sound) = node.at_path("Sound/UI.img/BtMouseOver") {
-                        
-                        // Try to see what's in Sound node
-                        if let Ok(ui_node) = node.at_path("Sound/UI.img") {
-                        }
-                    }
-                }
-                
-                provide_context(WzBase { node });
-                Root::new(app::app, renderer).launch().await;
-            }
-            Err(e) => {
-                log::error!("Failed to load WZ data: {}. Make sure to preload Base.wz with --preload-file or serve it via HTTP", e);
-                // Create mock data and start anyway for testing
-                use std::sync::{Arc, RwLock, Weak};
-                use wz_parser::{WzNode, WzObjectType, property::WzSubProperty, WzNodeName};
-                use indexmap::IndexMap;
-                
-                let mock_property = WzSubProperty::Property;
-                let mock_node = WzNode {
-                    name: WzNodeName::from("MockBase"),
-                    object_type: WzObjectType::Property(mock_property),
-                    parent: Weak::new(),
-                    children: IndexMap::new(),
-                };
-                
-                let wz_node = Arc::new(RwLock::new(mock_node));
-                provide_context(WzBase {
-                    node: wz_node.into(),
-                });
-                Root::new(app::app, renderer).launch().await;
-            }
+    // Initialize SplitWzReader for async loading
+    let reader_future = {
+        #[cfg(all(target_os = "emscripten"))]
+        {
+            wz_splitter::reader::SplitWzReader::from_http("./Data")
         }
-        return Ok(());
+        #[cfg(not(target_os = "emscripten"))]
+        {
+            wz_splitter::reader::SplitWzReader::from_local("./Data")
+        }
+    };
+
+    match reader_future.await {
+        Ok(reader) => {
+            log::info!("Successfully initialized SplitWzReader");
+            provide_context(WzSplitReaderContext {
+                reader: std::sync::Arc::new(reader.with_iv([0x4D, 0x23, 0xC7, 0x2B])),
+            });
+        }
+        Err(e) => {
+            log::warn!("Failed to initialize SplitWzReader: {:?}", e);
+        }
     }
-    
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let node = wz::resolve_base().await.unwrap();
-        
-        
-        provide_context(WzBase { node });
-        Root::new(app::app, renderer).launch().await;
-        Ok(())
-    }
+
+    let node = wz::resolve_base().await.unwrap();
+    provide_context(WzBase { node });
+
+    Root::new(app::app, renderer).launch().await;
+    Ok(())
 }

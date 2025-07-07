@@ -994,6 +994,7 @@ dependencies = [
  "ui",
  "web-fetch",
  "wz-parser",
+ "wz-splitter",
 ]
 
 [[package]]

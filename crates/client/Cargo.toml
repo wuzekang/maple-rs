@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 glam = "0.29.2"
 wz-parser = { path = "../wz-parser", default-features = false}
+wz-splitter = { path = "../wz-splitter" }
 ui = { path = "../ui" }
 web-fetch = { path = "../web-fetch" }
 async-runtime = { path = "../async-runtime" }

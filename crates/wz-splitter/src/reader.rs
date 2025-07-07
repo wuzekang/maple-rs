@@ -60,6 +60,9 @@ pub trait ResourceLoader {
 // 主读取器结构
 pub struct SplitWzReader {
     /// 资源加载器
+    #[cfg(not(target_arch = "wasm32"))]
+    loader: Box<dyn ResourceLoader>,
+    #[cfg(target_arch = "wasm32")]
     loader: Box<dyn ResourceLoader>,
     
     /// 从 manifest.json 加载的文件映射
@@ -73,6 +76,12 @@ pub struct SplitWzReader {
     /// 可选的 WZ 版本信息（用于解密）
     wz_iv: Option<[u8; 4]>,
 }
+
+// 在非 wasm32 平台上，确保 SplitWzReader 是 Send + Sync
+#[cfg(not(target_arch = "wasm32"))]
+unsafe impl Send for SplitWzReader {}
+#[cfg(not(target_arch = "wasm32"))]
+unsafe impl Sync for SplitWzReader {}
 
 // 节点句柄
 pub struct NodeHandle {
@@ -144,13 +153,6 @@ impl ResourceLoader for LocalResourceLoader {
     }
 }
 
-// 在 WASM 环境下，LocalResourceLoader 不可用
-#[cfg(target_arch = "wasm32")]
-impl LocalResourceLoader {
-    pub fn new(_split_dir: impl AsRef<Path>) -> Self {
-        panic!("LocalResourceLoader is not available in WASM environment");
-    }
-}
 
 // HttpResourceLoader - 基于 web-fetch 的网络加载器
 pub struct HttpResourceLoader {
@@ -299,10 +301,10 @@ impl SplitWzReader {
         if let Some(idx) = img_index {
             // 构建 IMG 路径
             let img_path = parts[..=idx].join("/");
-            
+
             // 获取或加载 IMG
             let img_node = self.get_or_load_img(&img_path).await?;
-            
+
             // 如果还有剩余路径，继续导航
             if idx + 1 < parts.len() {
                 let remaining_path = parts[idx + 1..].join("/");
@@ -382,7 +384,7 @@ impl SplitWzReader {
         // 从 manifest 查找哈希
         let hash = self.manifest.find_hash(img_path)
             .ok_or_else(|| SplitReaderError::ImgNotInManifest(img_path.to_string()))?;
-        
+
         // 通过 loader 加载数据
         let img_data = self.loader.load_object(hash).await?;
         

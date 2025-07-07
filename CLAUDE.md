@@ -14,5 +14,6 @@
 ## Emscripten
 - emsdk 在 ../emsdk
 
-## Crates
-- @crates/ui 基于 thread_local，不支持 Send
+## Async
+- use_context 不能在异步作用域使用
+- @crates/ui 基于 thread_local，不支持 Send 不能在异步作用域使用

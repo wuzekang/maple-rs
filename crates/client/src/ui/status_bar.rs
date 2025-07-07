@@ -1,4 +1,5 @@
 use crate::ui::button;
+use crate::ui::async_image::AsyncImage;
 use crate::WzBase;
 use glam::vec2;
 use image::DynamicImage;
@@ -216,7 +217,7 @@ pub fn status_bar() -> View {
                                             .justify_content(JustifyContent::Center)
                                             .align_items(AlignItems::Center)
                                     })
-                                    .children(level_no(|| 18)),
+                                    .children(level_no_async(|| 18)),
                             ),
                         // job name
                         view()
@@ -298,4 +299,27 @@ pub fn status_bar() -> View {
                     button(img.get("BtShort")),
                 )),
         ))
+}
+
+pub fn level_no_async<F>(value: F) -> impl IntoElement 
+where
+    F: Fn() -> i32 + 'static,
+{
+    view()
+        .style(|s| {
+            s.justify_content(JustifyContent::FlexStart)
+                .align_items(AlignItems::FlexStart)
+                .gap_row(1.0)
+                .gap_column(1.0)
+        })
+        .children(dynamic(move || {
+            let val = value();
+            let digit1 = (val / 10) % 10;
+            let digit2 = val % 10;
+            
+            fragment((
+                AsyncImage::new(format!("UI/Basic.img/LevelNo/{}", digit1)),
+                AsyncImage::new(format!("UI/Basic.img/LevelNo/{}", digit2)),
+            ))
+        }))
 }
