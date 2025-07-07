@@ -8,13 +8,13 @@ use crate::sprite::SpriteRenderer;
 use glam::{vec2, Vec2};
 use sdl3_sys::everything::*;
 use std::sync::Arc;
-use ui::element::Node;
-use ui::event::{use_key, Event};
-use ui::geometry::Rect;
-use ui::reactive::{create_rw_signal, RwSignal, SignalGet, SignalUpdate};
-use ui::style::Styleable;
-use ui::{dynamic, fragment, input, view, Element, IntoElement, Renderer, ViewId};
-use ui::{geometry, Drawable};
+use ::ui::element::Node;
+use ::ui::event::{use_key, Event};
+use ::ui::geometry::Rect;
+use ::ui::reactive::{create_rw_signal, RwSignal, SignalGet, SignalUpdate};
+use ::ui::style::Styleable;
+use ::ui::{dynamic, fragment, input, view, Element, IntoElement, Renderer, ViewId};
+use ::ui::{geometry, Drawable};
 
 #[derive(Default)]
 pub struct Cooldown {

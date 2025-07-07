@@ -2,9 +2,9 @@ use crate::wz::Node;
 use glam::Vec2;
 use image::DynamicImage;
 use std::sync::Arc;
-use ui::geometry::Rect;
-use ui::{Element, Interactive, Renderer, ViewId};
-use ui::style::Styleable;
+use ::ui::geometry::Rect;
+use ::ui::{Element, Interactive, Renderer, ViewId};
+use ::ui::style::Styleable;
 
 pub struct Tiled {
     id: ViewId,

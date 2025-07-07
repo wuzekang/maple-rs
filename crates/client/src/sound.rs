@@ -9,8 +9,8 @@ use symphonia::core::codecs::CODEC_TYPE_NULL;
 use symphonia::core::errors::Error;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::probe::Hint;
-use ui::reactive::{on_cleanup, use_context};
-use ui::resource::use_resource;
+use ::ui::reactive::{on_cleanup, use_context};
+use ::ui::resource::use_resource;
 use wz_parser::WzNodeCast;
 
 struct AudioStream(*mut SDL_AudioStream);

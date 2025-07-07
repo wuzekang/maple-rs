@@ -2,9 +2,9 @@ use crate::sprite::SpriteAnimation;
 use crate::WzBase;
 use glam::Vec2;
 use sdl3_sys::everything::*;
-use ui::reactive::use_context;
-use ui::style::Cursor;
-use ui::{input, Bounds, Drawable, Renderer};
+use ::ui::reactive::use_context;
+use ::ui::style::Cursor;
+use ::ui::{input, Bounds, Drawable, Renderer};
 
 #[derive(Debug, Copy, Clone)]
 pub enum CursorState {

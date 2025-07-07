@@ -5,7 +5,7 @@ use image::DynamicImage;
 use sdl3_sys::surface::SDL_FlipMode;
 use std::fmt::Debug;
 use std::sync::Arc;
-use ui::{Bounds, Drawable, Renderer, Texture};
+use ::ui::{Bounds, Drawable, Renderer, Texture};
 
 pub struct SpriteRenderer<'a> {
     pub renderer: &'a mut Renderer,

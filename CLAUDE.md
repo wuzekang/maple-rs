@@ -13,3 +13,6 @@
 
 ## Emscripten
 - emsdk 在 ../emsdk
+
+## Crates
+- @crates/ui 基于 thread_local，不支持 Send
