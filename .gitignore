@@ -1,5 +1,6 @@
 /target
 /data
+/split
 .idea
 .vscode
 .DS_Store
