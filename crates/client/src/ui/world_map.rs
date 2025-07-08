@@ -4,7 +4,7 @@ use crate::sprite::Sprite;
 use crate::ui::async_image::AsyncImage;
 use crate::ui::button;
 use crate::wz::{Node, WzSplitReaderExt};
-use crate::{WzBase, WzSplitReaderContext};
+use crate::WzSplitReaderContext;
 use ::ui::event::{use_key, Interactive};
 use ::ui::reactive::{
   create_rw_signal, use_context, RwSignal, SignalGet, SignalUpdate, SignalWith,
