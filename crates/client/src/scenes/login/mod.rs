@@ -93,7 +93,7 @@ pub fn login_scene(on_enter: impl Fn() + Clone + 'static) -> impl IntoElement {
       let reader = reader.clone();
       async move {
         let ui_img = reader.get_node("UI/Login.img").await.ok()?;
-        let map = map::Map::new_async(reader, "login".to_string()).await.ok()?;
+        let map = map::Map::new(reader, "login".to_string()).await.ok()?;
         Some((ui_img, map))
       }
     },

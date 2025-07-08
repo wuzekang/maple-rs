@@ -437,9 +437,11 @@ pub struct MainScene {
 }
 
 impl MainScene {
-    pub fn resource(map_name: &str, spawn: Option<String>, base: crate::wz::Node) -> Result<(Player, map::Map), Box<dyn std::error::Error>> {
+    pub async fn resource(map_name: &str, spawn: Option<String>, reader: std::sync::Arc<wz_splitter::reader::SplitWzReader>) -> Result<(Player, map::Map), Box<dyn std::error::Error>> {
+        use crate::wz::WzSplitReaderExt;
+        
         dbg!(map_name);
-        let map = map::Map::new(base.clone(), map_name.to_string()).map_err(|_| "Failed to create map")?;
+        let map = map::Map::new(reader.clone(), map_name.to_string()).await.map_err(|_| "Failed to create map")?;
         let spawn = spawn.unwrap_or("sp".to_string());
         let position = map.portals.iter().fold(None, |acc: Option<Vec2>, item| {
             if item.pn != spawn {
@@ -455,29 +457,35 @@ impl MainScene {
                 Some(item.position + vec2(0.0, -10.0))
             }
         });
-        let z_map: Arc<ZMap> = Arc::new(base.at_path("zmap.img")?.try_into().map_err(|_| "Failed to parse zmap")?);
+        
+        let z_map_node = reader.get_node("zmap.img").await.map_err(|_| "Failed to load zmap")?;
+        let z_map: Arc<ZMap> = Arc::new(z_map_node.try_into().map_err(|_| "Failed to parse zmap")?);
 
-        // for item in map.npc.keys() {
-        //     dbg!(item);
-        // }
+        // 并行加载所有角色部件
+        let character_paths = [
+            "00002000",
+            "00012000", 
+            "Hair/00030020",
+            "Coat/01040002",
+            "Pants/01060002",
+            "Shoes/01072005",
+            "Face/00020000",
+            "Weapon/01302000",
+        ];
+        
+        let character_futures = character_paths.iter().map(|path| {
+            let reader = reader.clone();
+            let path = path.to_string();
+            async move {
+                reader.get_node(&format!("Character/{path}.img")).await
+                    .map_err(|_| format!("Failed to load character part: {}", path))
+            }
+        });
+        
+        let character_nodes = futures::future::try_join_all(character_futures).await?;
 
         let player = Player {
-            avatar: Character::new(
-                [
-                    "00002000",
-                    "00012000",
-                    "Hair/00030020",
-                    "Coat/01040002",
-                    "Pants/01060002",
-                    "Shoes/01072005",
-                    "Face/00020000",
-                    "Weapon/01302000",
-                ]
-                .iter()
-                .map(|path| base.at_path(&format!("Character/{path}.img")))
-                .collect::<Result<Vec<_>, _>>()?,
-                z_map,
-            ),
+            avatar: Character::new(character_nodes, z_map),
             position: position.unwrap_or_default(),
             direction: Vec2::ZERO,
             speed: Vec2::ZERO,

@@ -2,12 +2,12 @@ use crate::scene::MainScene;
 use crate::scenes::login::login_scene;
 use crate::scenes::logo_scene;
 use crate::ui::{dialog, status_bar, world_map_window};
-use crate::WzBase;
+use crate::WzSplitReaderContext;
 use ::ui::event::{use_event, Interactive};
 use ::ui::reactive::{use_context, RwSignal, SignalGet, SignalUpdate};
 use ::ui::style::Styleable;
 use ::ui::Element;
-use ::ui::{dynamic, fragment, view, widget::debug::debug, IntoElement};
+use ::ui::{dynamic, fragment, lazy, text, view, widget::debug::debug, IntoElement};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -57,16 +57,34 @@ pub fn app() -> impl IntoElement {
 }
 
 pub fn map_scene(map_name: RwSignal<(String, Option<String>)>) -> impl IntoElement {
-  let (_map_name, spawn) = map_name.get();
-  let WzBase { node: base } = use_context().unwrap();
-  let (player, map) = MainScene::resource(&_map_name, spawn, base).unwrap();
-  let main_scene = Rc::new(RefCell::new(MainScene::new(map, Some(map_name))));
-  main_scene.borrow_mut().set_player(player);
-  use_event({
-    let main_scene = main_scene.clone();
-    move |event| {
-      main_scene.borrow_mut().event(&mut *event);
+  let WzSplitReaderContext { reader } = use_context().unwrap();
+  
+  fragment(lazy(
+    move || {
+      let reader = reader.clone();
+      let (_map_name, spawn) = map_name.get();
+      async move {
+        MainScene::resource(&_map_name, spawn, reader).await.ok()
+      }
+    },
+    move |data_opt: Option<(crate::scene::Player, crate::map::Map)>| {
+      let Some((player, map)) = data_opt else {
+        return fragment(
+          view()
+            .style(|s| s.w_full().h_full().bg_black())
+            .children(text(|| "Loading map..."))
+        );
+      };
+      
+      let main_scene = Rc::new(RefCell::new(MainScene::new(map, Some(map_name))));
+      main_scene.borrow_mut().set_player(player);
+      use_event({
+        let main_scene = main_scene.clone();
+        move |event| {
+          main_scene.borrow_mut().event(&mut *event);
+        }
+      });
+      fragment(main_scene)
     }
-  });
-  fragment(main_scene)
+  ))
 }

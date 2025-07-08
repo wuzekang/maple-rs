@@ -279,7 +279,7 @@ impl BackgroundSprite {
 }
 
 impl MapBackground {
-    pub async fn new_async(reader: WzSplitReader, node: Node) -> Result<Self, ()> {
+    pub async fn new(reader: WzSplitReader, node: Node) -> Result<Self, ()> {
         let bs: String = node.get("bS").try_into()?;
         let ani: i32 = node
             .try_get("ani")
@@ -336,62 +336,6 @@ impl MapBackground {
         Ok(background)
     }
 
-    pub fn new(root: Node, node: Node) -> Result<Self, ()> {
-        let bs: String = node.get("bS").try_into()?;
-        let ani: i32 = node
-            .try_get("ani")
-            .map(TryInto::try_into)
-            .transpose()?.unwrap_or(0);
-        let no: i32 = node.get("no").try_into()?;
-
-        let path = format!(
-            "Map/Back/{}.img/{}/{}",
-            bs,
-            match ani {
-                0 => "back",
-                1 => "ani",
-                2 => "spine",
-                _ => panic!("unknown ani: {}", ani),
-            },
-            no
-        );
-
-        let back_node = root.at_path(&path).or(Err(()))?;
-
-        let x = i32::try_from(node.get("x"))? as f32;
-        let y = i32::try_from(node.get("y"))? as f32;
-        let background = Self {
-            sprite: if ani == 0 {
-                BackgroundSprite::Sprite(Sprite::try_from(back_node)?)
-            } else {
-                BackgroundSprite::SpriteAnimation(SpriteAnimation::try_from(back_node)?)
-            },
-            offset_x: x,
-            offset_y: y,
-            bs,
-            front: node.get("front").try_into()?,
-            ani,
-            no,
-            flip: node.get("f").try_into()?,
-            x,
-            y,
-            cx: node.get("cx").try_into()?,
-            cy: node.get("cy").try_into()?,
-            r#type: node.get("type").try_into()?,
-            rx: node.get("rx").try_into()?,
-            ry: node.get("ry").try_into()?,
-            a: node.get("a").try_into()?,
-        };
-        // 0 无平铺
-        // 1 水平平铺
-        // 2 垂直平铺
-        // 3 双向平铺
-        // 4 水平平铺+水平滚动
-        // 5 垂直平铺+垂直滚动
-        // 6 双向平铺+水平滚动
-        // 7 双向平铺+垂直滚动
-        Ok(background)
-    }
 }
 pub struct Map {
     pub npc: HashMap<String, Npc>,
@@ -409,7 +353,7 @@ pub struct Map {
 }
 
 impl Map {
-    pub async fn new_async(reader: WzSplitReader, name: String) -> Result<Self, ()> {
+    pub async fn new(reader: WzSplitReader, name: String) -> Result<Self, ()> {
         let map_img = if name == "login" {
             reader.get_node("UI/MapLogin.img").await.or(Err(()))?
         } else {
@@ -422,7 +366,7 @@ impl Map {
         let mut backgrounds = Vec::new();
         for i in 0..children.len() {
             if let Some(child) = children.get(i.to_string().as_str()) {
-                if let Ok(background) = MapBackground::new_async(reader.clone(), child.clone()).await {
+                if let Ok(background) = MapBackground::new(reader.clone(), child.clone()).await {
                     backgrounds.push(background);
                 }
             }
@@ -594,196 +538,4 @@ impl Map {
         })
     }
 
-    pub fn new(root: Node, name: String) -> Result<Self, ()> {
-        let map_img = if name == "login" {
-            root.at_path("UI/MapLogin.img").unwrap()
-        } else {
-            root.at_path(&format!("Map/Map/Map{}/{name}.img", &name[0..1]))
-                .unwrap()
-        };
-
-        let children = map_img.get("back").children();
-        let backgrounds: Vec<_> = (0..children.len())
-            .filter_map(|i| {
-                let result = MapBackground::new(root.clone(), children[i.to_string().as_str()].clone());
-                match &result {
-                    Ok(_) => {},
-                    Err(_) => {},
-                }
-                result.ok()
-            })
-            .collect();
-
-        let mut layers = vec![];
-        for i in '0'..'7' {
-            let mut tiles = vec![];
-            let mut objects = vec![];
-
-            let node = map_img.get(i.to_string().as_str());
-
-            if let Some(obj) = node.try_get("obj") {
-                for (id, item) in obj.children() {
-                    let id = id.to_string().parse::<i32>().unwrap();
-                    let flip: bool = item.get("f").try_into()?;
-                    let x: i32 = item.get("x").try_into()?;
-                    let y: i32 = item.get("y").try_into()?;
-                    let z: i32 = item.get("z").try_into()?;
-
-                    let path = format!(
-                        "Map/Obj/{}.img/{}/{}/{}",
-                        String::try_from(item.get("oS"))?,
-                        String::try_from(item.get("l0"))?,
-                        String::try_from(item.get("l1"))?,
-                        String::try_from(item.get("l2"))?
-                    );
-
-                    let node = root.at_path(&path).unwrap();
-                    let repeat = node
-                        .try_get("repeat")
-                        .map(i32::try_from)
-                        .transpose()?
-                        .map(|i| i != -1)
-                        .unwrap_or(true);
-
-                    let sprites: Vec<Sprite> = node.try_into().unwrap();
-                    let mut timer =
-                        Timer::new(sprites.iter().map(|item| item.delay as f32).collect());
-                    if !repeat {
-                        timer.repeat = Repeat::Finite(1)
-                    }
-                    objects.push(MapObject {
-                        id,
-                        flip,
-                        position: vec2(x as f32, y as f32),
-                        z,
-                        timer,
-                        sprites,
-                    });
-                }
-            }
-
-            if let Some(info) = node.try_get("info") {
-                if info.has("tS") {
-                    let ts: String = info.get("tS").try_into()?;
-                    for (key, value) in node.get("tile").children().iter() {
-                        let id = key.to_string().parse::<i32>().unwrap();
-                        let x: i32 = value.get("x").try_into()?;
-                        let y: i32 = value.get("y").try_into()?;
-                        let no: i32 = value.get("no").try_into()?;
-                        let u: String = value.get("u").try_into()?;
-                        // let zm: i32 = value.get("zM").try_into()?;
-                        let tile_path = format!("Map/Tile/{ts}.img/{u}/{no}");
-
-                        tiles.push(MapTile {
-                            id,
-                            tile: root.at_path(&tile_path).unwrap().try_into().unwrap(),
-                            position: vec2(x as f32, y as f32),
-                        });
-                    }
-                }
-            }
-
-            tiles.sort_by_key(|item| item.tile.z);
-            objects.sort_by_key(|item| item.z);
-
-            layers.push(MapLayer { tiles, objects });
-        }
-
-        let mut footholds = HashMap::<i32, Foothold>::new();
-        for (layer, val) in &map_img.get("foothold").children() {
-            let layer = layer.to_string().parse::<i32>().unwrap();
-            for (z_mass, val) in &val.children() {
-                let z_mass = z_mass.to_string().parse::<i32>().unwrap();
-                for (key, val) in &val.children() {
-                    let x1: i32 = val.get("x1").try_into()?;
-                    let x2: i32 = val.get("x2").try_into()?;
-                    let y1: i32 = val.get("y1").try_into()?;
-                    let y2: i32 = val.get("y2").try_into()?;
-                    let next: i32 = val.get("next").try_into()?;
-                    let prev: i32 = val.get("prev").try_into()?;
-                    let id = key.to_string().parse::<i32>().unwrap();
-                    footholds.insert(
-                        id,
-                        Foothold {
-                            id,
-                            start: vec2(x1 as f32, y1 as f32),
-                            end: vec2(x2 as f32, y2 as f32),
-                            next,
-                            prev,
-                            layer,
-                            z_mass,
-                        },
-                    );
-                }
-            }
-        }
-
-        let ladders: Vec<Ladder> = map_img.get("ladderRope").try_into()?;
-
-        let mut lt = Vec2::INFINITY;
-        let mut rb = Vec2::NEG_INFINITY;
-        for item in footholds.values() {
-            lt = lt.min(item.start).min(item.end);
-            rb = rb.max(item.start).max(item.end);
-        }
-        lt.y -= 320.0;
-        rb.y += 160.0;
-
-        let wall = Wall {
-            left: lt.x + 25.0,
-            right: rb.x - 25.0,
-            top: lt.y,
-            bottom: rb.y,
-        };
-
-        let helper: MapHelper = root.at_path("Map/MapHelper.img").or(Err(()))?.try_into()?;
-        let life: Vec<MapLife> = map_img.get("life").try_into()?;
-        let npc: HashMap<String, Npc> = life
-            .iter()
-            .filter(|item| item.r#type == "n")
-            .filter_map(|item| {
-                Some((
-                    item.id.to_string(),
-                    root.at_path(&format!("Npc/{}.img", item.id))
-                        .unwrap()
-                        .try_into()
-                        .ok()?,
-                ))
-            })
-            .collect();
-
-        let mobs: HashMap<String, Mob> = life
-            .iter()
-            .filter(|item| item.r#type == "m")
-            .filter_map(|item| {
-                Some((
-                    item.id.to_string(),
-                    root.at_path(&format!("Mob/{}.img", item.id))
-                        .unwrap()
-                        .try_into()
-                        .ok()?,
-                ))
-            })
-            .collect();
-        let mut info: MapInfo = map_img.get("info").try_into()?;
-        info.vr_left = info.vr_left.or(Some(lt.x as i32));
-        info.vr_top = info.vr_top.or(Some(lt.y as i32));
-        info.vr_right = info.vr_right.or(Some(rb.x as i32));
-        info.vr_bottom = info.vr_bottom.or(Some(rb.y as i32));
-
-        Ok(Self {
-            life,
-            npc,
-            mobs,
-            backgrounds,
-            layers,
-            footholds,
-            wall,
-            ladders,
-            portals: map_img.get("portal").try_into()?,
-            info,
-            portal_timer: Timer::new((1..helper.pv.len()).map(|_| 100.0).collect()),
-            helper,
-        })
-    }
 }
