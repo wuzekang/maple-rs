@@ -1,10 +1,11 @@
-use crate::Manifest;
+use crate::{Manifest, resource_loader::ResourceLoader};
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use wz_parser::{WzNode, WzNodeArc, WzObjectType, WzReader, WzImage, WzNodeName};
+use wz_parser::{WzNode, WzNodeArc, WzObjectType, WzReader, WzImage, WzNodeName, WzDirectory};
 use std::sync::RwLock;
 use lru::LruCache;
+use std::collections::HashMap;
 
 // 错误类型定义
 #[derive(Debug, thiserror::Error)]
@@ -40,30 +41,12 @@ pub enum SplitReaderError {
     WzNodeParseError(wz_parser::node::Error),
 }
 
-// ResourceLoader trait - 资源加载抽象
-#[cfg(not(target_arch = "wasm32"))]
-#[async_trait::async_trait]
-pub trait ResourceLoader: Send + Sync {
-    async fn load_manifest(&self) -> Result<Manifest, SplitReaderError>;
-    async fn load_object(&self, hash: &str) -> Result<Vec<u8>, SplitReaderError>;
-    async fn object_exists(&self, hash: &str) -> bool;
-}
-
-#[cfg(target_arch = "wasm32")]
-#[async_trait::async_trait(?Send)]
-pub trait ResourceLoader {
-    async fn load_manifest(&self) -> Result<Manifest, SplitReaderError>;
-    async fn load_object(&self, hash: &str) -> Result<Vec<u8>, SplitReaderError>;
-    async fn object_exists(&self, hash: &str) -> bool;
-}
 
 // 主读取器结构
 pub struct SplitWzReader {
     /// 资源加载器
-    #[cfg(not(target_arch = "wasm32"))]
     loader: Box<dyn ResourceLoader>,
-    #[cfg(target_arch = "wasm32")]
-    loader: Box<dyn ResourceLoader>,
+
     
     /// 从 manifest.json 加载的文件映射
     manifest: Manifest,
@@ -75,6 +58,11 @@ pub struct SplitWzReader {
     
     /// 可选的 WZ 版本信息（用于解密）
     wz_iv: Option<[u8; 4]>,
+    
+    /// 目录节点映射
+    /// Key: 目录路径 (如 "Map", "Map/Map0")
+    /// Value: 目录节点
+    directory_nodes: HashMap<String, WzNodeArc>,
 }
 
 // 在非 wasm32 平台上，确保 SplitWzReader 是 Send + Sync
@@ -107,153 +95,6 @@ pub enum NodeValue {
     Image(NodeHandle),
 }
 
-// LocalResourceLoader - 本地文件系统加载器
-pub struct LocalResourceLoader {
-    split_dir: PathBuf,
-}
-
-impl LocalResourceLoader {
-    pub fn new(split_dir: impl AsRef<Path>) -> Self {
-        Self {
-            split_dir: split_dir.as_ref().to_path_buf(),
-        }
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[async_trait::async_trait]
-impl ResourceLoader for LocalResourceLoader {
-    async fn load_manifest(&self) -> Result<Manifest, SplitReaderError> {
-        let manifest_path = self.split_dir.join("manifest.json");
-        let content = tokio::fs::read_to_string(manifest_path).await?;
-        Manifest::from_json(&content)
-            .map_err(|e| SplitReaderError::ManifestParseError(e))
-    }
-    
-    async fn load_object(&self, hash: &str) -> Result<Vec<u8>, SplitReaderError> {
-        let subdir = &hash[..2];
-        let object_path = self.split_dir
-            .join("objects")
-            .join(subdir)
-            .join(hash);
-        
-        tokio::fs::read(object_path)
-            .await
-            .map_err(|_| SplitReaderError::ObjectNotFound(hash.to_string()))
-    }
-    
-    async fn object_exists(&self, hash: &str) -> bool {
-        let subdir = &hash[..2];
-        let object_path = self.split_dir
-            .join("objects")
-            .join(subdir)
-            .join(hash);
-        
-        object_path.exists()
-    }
-}
-
-
-// HttpResourceLoader - 基于 web-fetch 的网络加载器
-pub struct HttpResourceLoader {
-    base_url: String,
-}
-
-impl HttpResourceLoader {
-    pub fn new(base_url: impl Into<String>) -> Self {
-        Self {
-            base_url: base_url.into(),
-        }
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[async_trait::async_trait]
-impl ResourceLoader for HttpResourceLoader {
-    async fn load_manifest(&self) -> Result<Manifest, SplitReaderError> {
-        let url = format!("{}/manifest.json", self.base_url);
-        
-        let response = web_fetch::WebFetch::get(&url)
-            .await
-            .map_err(|e| SplitReaderError::NetworkError(format!("{:?}", e)))?;
-        
-        if response.status != 200 {
-            return Err(SplitReaderError::NetworkError(
-                format!("HTTP {}: {}", response.status, response.status_text)
-            ));
-        }
-        
-        let content = String::from_utf8(response.data)
-            .map_err(|e| SplitReaderError::ManifestParseError(anyhow::anyhow!("Invalid UTF-8: {}", e)))?;
-        
-        Manifest::from_json(&content)
-            .map_err(|e| SplitReaderError::ManifestParseError(e))
-    }
-    
-    async fn load_object(&self, hash: &str) -> Result<Vec<u8>, SplitReaderError> {
-        let subdir = &hash[..2];
-        let url = format!("{}/objects/{}/{}", self.base_url, subdir, hash);
-        
-        let response = web_fetch::WebFetch::get(&url)
-            .await
-            .map_err(|e| SplitReaderError::NetworkError(format!("{:?}", e)))?;
-        
-        if response.status != 200 {
-            return Err(SplitReaderError::ObjectNotFound(hash.to_string()));
-        }
-        
-        Ok(response.data)
-    }
-    
-    async fn object_exists(&self, _hash: &str) -> bool {
-        // 对于 HTTP，我们依赖 manifest 或在加载时处理 404
-        true
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-#[async_trait::async_trait(?Send)]
-impl ResourceLoader for HttpResourceLoader {
-    async fn load_manifest(&self) -> Result<Manifest, SplitReaderError> {
-        let url = format!("{}/manifest.json", self.base_url);
-        
-        let response = web_fetch::WebFetch::get(&url)
-            .await
-            .map_err(|e| SplitReaderError::NetworkError(format!("{:?}", e)))?;
-        
-        if response.status != 200 {
-            return Err(SplitReaderError::NetworkError(
-                format!("HTTP {}: {}", response.status, response.status_text)
-            ));
-        }
-        
-        let content = String::from_utf8(response.data)
-            .map_err(|e| SplitReaderError::ManifestParseError(anyhow::anyhow!("Invalid UTF-8: {}", e)))?;
-        
-        Manifest::from_json(&content)
-            .map_err(|e| SplitReaderError::ManifestParseError(e))
-    }
-    
-    async fn load_object(&self, hash: &str) -> Result<Vec<u8>, SplitReaderError> {
-        let subdir = &hash[..2];
-        let url = format!("{}/objects/{}/{}", self.base_url, subdir, hash);
-        
-        let response = web_fetch::WebFetch::get(&url)
-            .await
-            .map_err(|e| SplitReaderError::NetworkError(format!("{:?}", e)))?;
-        
-        if response.status != 200 {
-            return Err(SplitReaderError::ObjectNotFound(hash.to_string()));
-        }
-        
-        Ok(response.data)
-    }
-    
-    async fn object_exists(&self, _hash: &str) -> bool {
-        // 对于 HTTP，我们依赖 manifest 或在加载时处理 404
-        true
-    }
-}
 
 // SplitWzReader 实现
 impl SplitWzReader {
@@ -261,10 +102,14 @@ impl SplitWzReader {
     pub async fn new(loader: Box<dyn ResourceLoader>) -> Result<Self, SplitReaderError> {
         let manifest = loader.load_manifest().await?;
         
+        // 构建目录节点树
+        let directory_nodes = Self::build_directory_tree(&manifest);
+        
         Ok(Self {
             loader,
             manifest,
             img_cache: Arc::new(Mutex::new(LruCache::new(100.try_into().unwrap()))),
+            directory_nodes,
             wz_iv: None,
         })
     }
@@ -272,13 +117,13 @@ impl SplitWzReader {
     /// 从本地目录创建
     #[cfg(not(target_arch = "wasm32"))]
     pub async fn from_local(split_dir: impl AsRef<Path>) -> Result<Self, SplitReaderError> {
-        let loader = Box::new(LocalResourceLoader::new(split_dir));
+        let loader = Box::new(crate::resource_loader::LocalResourceLoader::new(split_dir));
         Self::new(loader).await
     }
     
     /// 从 HTTP URL 创建
     pub async fn from_http(base_url: impl Into<String>) -> Result<Self, SplitReaderError> {
-        let loader = Box::new(HttpResourceLoader::new(base_url));
+        let loader = Box::new(crate::resource_loader::HttpResourceLoader::new(base_url));
         Self::new(loader).await
     }
     
@@ -399,21 +244,170 @@ impl SplitWzReader {
             reader
         };
         
+        // 获取父目录路径和 IMG 文件名
+        let (parent_path, img_name) = match img_path.rfind('/') {
+            Some(pos) => (&img_path[..pos], &img_path[pos + 1..]),
+            None => ("", img_path),
+        };
+        
+        // 从已构建的目录树中获取父节点
+        let parent_node = if !parent_path.is_empty() {
+            self.directory_nodes.get(parent_path)
+        } else {
+            None
+        };
+        
         let img = WzImage {
             reader: Arc::new(reader),
-            name: img_path.into(),
+            name: img_name.into(),
             offset: 0,
             block_size: data_len,
             is_parsed: false,
         };
         
         // 创建节点并解析
-        let img_node = WzNode::from_str(img_path, img, None);
+        let img_node = WzNode::from_str(img_name, img, parent_node);
         let img_arc = Arc::new(RwLock::new(img_node));
+        
+        // 如果有父节点，将 IMG 节点添加到父节点的 children 中
+        if let Some(parent) = parent_node {
+            let mut parent = parent.write().unwrap();
+            parent.children.insert(img_name.into(), Arc::clone(&img_arc));
+        }
+        
         img_arc.write().unwrap().parse(&img_arc)
             .map_err(SplitReaderError::WzNodeParseError)?;
         
         Ok(img_arc)
+    }
+    
+    /// 从 manifest 构建完整的目录节点树
+    fn build_directory_tree(manifest: &crate::Manifest) -> HashMap<String, WzNodeArc> {
+        let mut directory_nodes = HashMap::new();
+        
+        // 递归构建目录树
+        Self::build_directory_nodes(
+            &manifest.imgs,
+            "",
+            None,
+            &mut directory_nodes
+        );
+        
+        directory_nodes
+    }
+    
+    /// 递归构建目录节点
+    fn build_directory_nodes(
+        node: &crate::ManifestNode,
+        current_path: &str,
+        parent: Option<&WzNodeArc>,
+        directory_nodes: &mut HashMap<String, WzNodeArc>
+    ) {
+        match node {
+            crate::ManifestNode::Directory(children) => {
+                for (name, child) in children {
+                    let child_path = if current_path.is_empty() {
+                        name.clone()
+                    } else {
+                        format!("{}/{}", current_path, name)
+                    };
+                    
+                    match child {
+                        crate::ManifestNode::Directory(_) => {
+                            // 创建目录节点
+                            let reader = Arc::new(WzReader::new(vec![]));
+                            let dir = WzDirectory::new(0, 0, &reader, false);
+                            let dir_node = WzNode::from_str(name, dir, parent).into_lock();
+                            
+                            // 如果有父节点，添加到父节点的 children
+                            if let Some(parent_node) = parent {
+                                let mut parent_write = parent_node.write().unwrap();
+                                parent_write.children.insert(name.as_str().into(), Arc::clone(&dir_node));
+                            }
+                            
+                            // 保存到映射中
+                            directory_nodes.insert(child_path.clone(), Arc::clone(&dir_node));
+                            
+                            // 递归处理子目录
+                            Self::build_directory_nodes(
+                                child,
+                                &child_path,
+                                Some(&dir_node),
+                                directory_nodes
+                            );
+                        }
+                        crate::ManifestNode::File(_) => {
+                            // IMG 文件节点将在实际加载时创建
+                            // 这里不需要处理
+                        }
+                    }
+                }
+            }
+            crate::ManifestNode::File(_) => {
+                // 这种情况不应该出现在顶层
+            }
+        }
+    }
+    
+    /// 获取目录节点
+    pub fn get_directory(&self, path: &str) -> Option<&WzNodeArc> {
+        self.directory_nodes.get(path)
+    }
+    
+    /// 获取所有顶级目录
+    pub fn get_root_directories(&self) -> Vec<(&String, &WzNodeArc)> {
+        self.directory_nodes
+            .iter()
+            .filter(|(path, _)| !path.contains('/'))
+            .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Manifest;
+    
+    #[tokio::test]
+    async fn test_directory_tree_building() {
+        // 创建测试 manifest
+        let mut manifest = Manifest::new();
+        manifest.add_img("Map/Map0/000000000.img".to_string(), "hash1".to_string());
+        manifest.add_img("Map/Map1/000010000.img".to_string(), "hash2".to_string());
+        manifest.add_img("UI/Basic.img".to_string(), "hash3".to_string());
+        
+        // 构建目录树
+        let directory_nodes = SplitWzReader::build_directory_tree(&manifest);
+        
+        // 验证目录节点存在
+        assert!(directory_nodes.contains_key("Map"));
+        assert!(directory_nodes.contains_key("Map/Map0"));
+        assert!(directory_nodes.contains_key("Map/Map1"));
+        assert!(directory_nodes.contains_key("UI"));
+        
+        // 验证父子关系
+        let map_node = directory_nodes.get("Map").unwrap();
+        let map0_node = directory_nodes.get("Map/Map0").unwrap();
+        
+        // 检查 Map0 的父节点是否指向 Map
+        {
+            let map0_read = map0_node.read().unwrap();
+            let parent_weak = &map0_read.parent;
+            assert!(parent_weak.upgrade().is_some());
+            
+            // 验证父节点名称
+            if let Some(parent_arc) = parent_weak.upgrade() {
+                let parent_read = parent_arc.read().unwrap();
+                assert_eq!(parent_read.name.as_str(), "Map");
+            }
+        }
+        
+        // 检查 Map 节点是否包含 Map0 子节点
+        {
+            let map_read = map_node.read().unwrap();
+            assert!(map_read.children.contains_key(&WzNodeName::from("Map0")));
+            assert!(map_read.children.contains_key(&WzNodeName::from("Map1")));
+        }
     }
 }
 

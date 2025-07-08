@@ -1,10 +1,12 @@
 mod splitter;
 mod inspector;
 pub mod reader;
+pub mod resource_loader;
 
 pub use splitter::WzSplitter;
 pub use inspector::WzInspector;
-pub use reader::{SplitWzReader, NodeHandle, NodeValue, ResourceLoader, SplitReaderError};
+pub use reader::{SplitWzReader, NodeHandle, NodeValue, SplitReaderError};
+pub use resource_loader::{ResourceLoader, LocalResourceLoader, HttpResourceLoader};
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
