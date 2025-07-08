@@ -20,7 +20,7 @@ enum Stage {
 }
 
 pub fn app() -> impl IntoElement {
-  let stage = RwSignal::new(Stage::Main);
+  let stage = RwSignal::new(Stage::Pause);
   let open = RwSignal::new(false);
   // 000010000
   // 910000000

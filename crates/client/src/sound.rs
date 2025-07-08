@@ -1,4 +1,4 @@
-use crate::WzBase;
+use crate::{wz::WzSplitReaderExt, WzSplitReaderContext};
 use sdl3_sys::everything::*;
 use std::ffi::c_void;
 use std::io::Cursor;
@@ -26,11 +26,8 @@ impl AudioStream {
 unsafe impl Send for AudioStream {}
 
 pub fn play_sound(path: &str) {
-    let WzBase { node: base } = use_context().unwrap();
-    let sound = base.at_path(path).unwrap();
-    let node = sound.wz_node.read().unwrap();
-    let sound = node.try_as_sound().unwrap();
-    let buffer = sound.get_buffer();
+    let WzSplitReaderContext { reader } = use_context().unwrap();
+    let path = path.to_string();
 
     let cancelled = Arc::new(AtomicBool::new(false));
     let (tx, rx) = std::sync::mpsc::channel::<AudioStream>();
@@ -47,10 +44,18 @@ pub fn play_sound(path: &str) {
 
     use_resource(
         move || {
-            let buffer = buffer.clone();
+            let reader = reader.clone();
+            let path = path.clone();
             let cancelled = cancelled.clone();
             let tx = tx.clone();
             async move {
+                let sound_node = match reader.get_node(&path).await {
+                    Ok(node) => node,
+                    Err(_) => return,
+                };
+                let node = sound_node.wz_node.read().unwrap();
+                let sound = node.try_as_sound().unwrap();
+                let buffer = sound.get_buffer();
                 // Probe the media source.
                 let probed = symphonia::default::get_probe()
                     .format(

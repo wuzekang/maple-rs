@@ -1,7 +1,7 @@
 use crate::animation::SequenceAnimation;
 use crate::sound::play_sound;
 use crate::sprite::ASpriteAnimation;
-use crate::WzBase;
+use crate::{wz::WzSplitReaderExt, WzSplitReaderContext};
 use ::ui::event::Interactive;
 use ::ui::reactive::{create_ref, create_rw_signal, use_context, SignalGet, SignalUpdate};
 use ::ui::style::Styleable;
@@ -12,16 +12,15 @@ pub fn logo_scene(on_finished: impl Fn() + 'static) -> impl IntoElement {
 
     lazy(
         move || {
-            let WzBase { node: base } = use_context().unwrap();
+            let WzSplitReaderContext { reader } = use_context().unwrap();
             async move {
-                let nexon: ASpriteAnimation = base
-                    .at_path("UI/Logo.img/Nexon")
-                    .unwrap()
+                let logo_node = reader.get_node("UI/Logo.img").await.ok()?;
+                let nexon: ASpriteAnimation = logo_node
+                    .get("Nexon")
                     .try_into()
                     .unwrap();
-                let wizet: ASpriteAnimation = base
-                    .at_path("UI/Logo.img/Wizet")
-                    .unwrap()
+                let wizet: ASpriteAnimation = logo_node
+                    .get("Wizet")
                     .try_into()
                     .unwrap();
                 Some((nexon, wizet))
