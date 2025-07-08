@@ -17,3 +17,6 @@
 ## Async
 - use_context 不能在异步作用域使用
 - @crates/ui 基于 thread_local，不支持 Send 不能在异步作用域使用
+
+## Layout
+- 不要随意增删 view 会导致布局变化，可以在 view 外层加 fragment，不会影响布局
