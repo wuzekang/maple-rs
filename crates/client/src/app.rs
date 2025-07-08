@@ -49,7 +49,7 @@ pub fn app() -> impl IntoElement {
           map_scene(current_map),
           status_bar(),
           world_map_window(open, current_map),
-          dialog(),
+          // dialog(),
         )),
       })),
     // debug().style(|s| s.absolute().top(0).right(0).width(800).height(600)),

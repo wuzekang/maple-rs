@@ -167,6 +167,10 @@ impl Future for FetchFuture {
     }
 }
 
+// 在 wasm32 环境中单线程，因此是安全的
+unsafe impl Send for FetchFuture {}
+unsafe impl Sync for FetchFuture {}
+
 // 回调函数
 #[cfg(target_os = "emscripten")]
 unsafe extern "C" fn on_success(fetch: *mut EmscriptenFetch) {

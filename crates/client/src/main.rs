@@ -3,7 +3,6 @@ use ::ui::Root;
 use glam::vec2;
 use sdl3_sys::everything::*;
 use std::error::Error;
-use wz::Node;
 
 mod animation;
 mod app;
@@ -22,78 +21,85 @@ mod widget;
 mod wz;
 
 #[derive(Clone)]
-struct WzBase {
-    pub node: Node,
+pub struct WzSplitReaderContext {
+  pub reader: std::sync::Arc<wz_splitter::reader::SplitWzReader>,
 }
 
 #[derive(Clone)]
-pub struct WzSplitReaderContext {
-    pub reader: std::sync::Arc<wz_splitter::reader::SplitWzReader>,
+pub struct CursorImageContext {
+  pub basic_img: wz::Node,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    async_runtime::block_on(run_app())
+  async_runtime::block_on(run_app())
 }
 
 async fn run_app() -> Result<(), Box<dyn Error>> {
-    unsafe {
-        SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO);
+  unsafe {
+    SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO);
+  }
+
+  // let size = vec2(1920.0, 1080.0);
+  // let size = vec2(1366.0, 768.0);
+  // let size = unsafe {
+  //     let mut num = MaybeUninit::<i32>::uninit();
+  //     let displays = SDL_GetDisplays(num.as_mut_ptr());
+  //     let mode = SDL_GetCurrentDisplayMode(*displays.offset(0));
+  //     let w = (*mode).w;
+  //     let h = (*mode).h;
+  //     vec2(w as f32, h as f32)
+  // };
+
+  // let size = vec2(1600.0, 600.0);
+  let size = vec2(800.0, 600.0);
+  // let size = vec2(1024.0, 768.0);
+  // let size = vec2(1366.0, 1024.0);
+
+  let window = unsafe {
+    SDL_CreateWindow(
+      c"Maple RS".as_ptr(),
+      size.x as i32,
+      size.y as i32,
+      // SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_BORDERLESS | SDL_WINDOW_MAXIMIZED | SDL_WINDOW_FULLSCREEN,
+      SDL_WINDOW_HIGH_PIXEL_DENSITY,
+    )
+  };
+  let renderer = unsafe { SDL_CreateRenderer(window, std::ptr::null()) };
+
+  // Initialize SplitWzReader for async loading
+  let reader_future = {
+    #[cfg(all(target_os = "emscripten"))]
+    {
+      wz_splitter::reader::SplitWzReader::from_http("./data")
     }
-
-    // let size = vec2(1920.0, 1080.0);
-    // let size = vec2(1366.0, 768.0);
-    // let size = unsafe {
-    //     let mut num = MaybeUninit::<i32>::uninit();
-    //     let displays = SDL_GetDisplays(num.as_mut_ptr());
-    //     let mode = SDL_GetCurrentDisplayMode(*displays.offset(0));
-    //     let w = (*mode).w;
-    //     let h = (*mode).h;
-    //     vec2(w as f32, h as f32)
-    // };
-
-    // let size = vec2(1600.0, 600.0);
-    let size = vec2(800.0, 600.0);
-    // let size = vec2(1024.0, 768.0);
-    // let size = vec2(1366.0, 1024.0);
-
-    let window = unsafe {
-        SDL_CreateWindow(
-            c"Maple RS".as_ptr(),
-            size.x as i32,
-            size.y as i32,
-            // SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_BORDERLESS | SDL_WINDOW_MAXIMIZED | SDL_WINDOW_FULLSCREEN,
-            SDL_WINDOW_HIGH_PIXEL_DENSITY,
-        )
-    };
-    let renderer = unsafe { SDL_CreateRenderer(window, std::ptr::null()) };
-
-    // Initialize SplitWzReader for async loading
-    let reader_future = {
-        #[cfg(all(target_os = "emscripten"))]
-        {
-            wz_splitter::reader::SplitWzReader::from_http("./Data")
-        }
-        #[cfg(not(target_os = "emscripten"))]
-        {
-            wz_splitter::reader::SplitWzReader::from_local("./Data")
-        }
-    };
-
-    match reader_future.await {
-        Ok(reader) => {
-            log::info!("Successfully initialized SplitWzReader");
-            provide_context(WzSplitReaderContext {
-                reader: std::sync::Arc::new(reader.with_iv([0x4D, 0x23, 0xC7, 0x2B])),
-            });
-        }
-        Err(e) => {
-            log::warn!("Failed to initialize SplitWzReader: {:?}", e);
-        }
+    #[cfg(not(target_os = "emscripten"))]
+    {
+      wz_splitter::reader::SplitWzReader::from_local("./data")
     }
+  };
 
-    let node = wz::resolve_base().await.unwrap();
-    provide_context(WzBase { node });
+  match reader_future.await {
+    Ok(reader) => {
+      log::info!("Successfully initialized SplitWzReader");
+      let reader = std::sync::Arc::new(reader.with_iv([0x4D, 0x23, 0xC7, 0x2B]));
+      provide_context(WzSplitReaderContext {
+        reader: reader.clone(),
+      });
 
-    Root::new(app::app, renderer).launch().await;
-    Ok(())
+      // Load basic.img through splitreader
+      if let Ok(basic_handle) = reader.get("UI/Basic.img").await {
+        log::info!("Successfully loaded basic.img through splitreader");
+        let basic_img: wz::Node = basic_handle.into();
+        provide_context(CursorImageContext { basic_img });
+      } else {
+        log::warn!("Failed to load basic.img through splitreader");
+      }
+    }
+    Err(e) => {
+      log::warn!("Failed to initialize SplitWzReader: {:?}", e);
+    }
+  }
+
+  Root::new(app::app, renderer).launch().await;
+  Ok(())
 }

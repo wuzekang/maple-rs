@@ -10,23 +10,6 @@ use ::ui::taffy::{AlignItems, Display, FlexDirection, JustifyContent, Position};
 use ::ui::view_tuple::ViewTuple;
 use ::ui::{dynamic, fragment, lazy, text, view, IntoElement, View};
 
-pub fn level_no<F>(_value: F) -> View
-where
-  F: Fn() -> i32 + 'static,
-{
-  view()
-    .style(|s| {
-      s.justify_content(JustifyContent::FlexStart)
-        .align_items(AlignItems::FlexStart)
-        .gap_row(1.0)
-        .gap_column(1.0)
-    })
-    .children((
-      AsyncImage::new("UI/Basic.img/LevelNo/1"),
-      AsyncImage::new("UI/Basic.img/LevelNo/8"),
-    ))
-}
-
 pub fn bracket_wrap(children: impl ViewTuple) -> View {
   view()
     .style(|s| {
@@ -202,7 +185,7 @@ pub fn status_bar() -> impl IntoElement {
                               .justify_content(JustifyContent::Center)
                               .align_items(AlignItems::Center)
                           })
-                          .children(level_no_async(|| 18)),
+                          .children(level_no(|| 18)),
                       ),
                     // job name
                     view()
@@ -292,7 +275,7 @@ pub fn status_bar() -> impl IntoElement {
   )
 }
 
-pub fn level_no_async<F>(value: F) -> impl IntoElement
+pub fn level_no<F>(value: F) -> impl IntoElement
 where
   F: Fn() -> i32 + 'static,
 {

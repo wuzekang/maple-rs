@@ -12,8 +12,8 @@ pub trait ResourceLoader: Send + Sync {
 }
 
 #[cfg(target_arch = "wasm32")]
-#[async_trait::async_trait(?Send)]
-pub trait ResourceLoader {
+#[async_trait::async_trait]
+pub trait ResourceLoader: Send + Sync {
     async fn load_manifest(&self) -> Result<Manifest, SplitReaderError>;
     async fn load_object(&self, hash: &str) -> Result<Vec<u8>, SplitReaderError>;
     async fn object_exists(&self, hash: &str) -> bool;
@@ -23,6 +23,10 @@ pub trait ResourceLoader {
 pub struct LocalResourceLoader {
     split_dir: PathBuf,
 }
+
+// 在 wasm32 环境中单线程，因此是安全的
+unsafe impl Send for LocalResourceLoader {}
+unsafe impl Sync for LocalResourceLoader {}
 
 impl LocalResourceLoader {
     pub fn new(split_dir: impl AsRef<Path>) -> Self {
@@ -69,6 +73,10 @@ impl ResourceLoader for LocalResourceLoader {
 pub struct HttpResourceLoader {
     base_url: String,
 }
+
+// 在 wasm32 环境中单线程，因此是安全的
+unsafe impl Send for HttpResourceLoader {}
+unsafe impl Sync for HttpResourceLoader {}
 
 impl HttpResourceLoader {
     pub fn new(base_url: impl Into<String>) -> Self {
@@ -123,7 +131,7 @@ impl ResourceLoader for HttpResourceLoader {
 }
 
 #[cfg(target_arch = "wasm32")]
-#[async_trait::async_trait(?Send)]
+#[async_trait::async_trait]
 impl ResourceLoader for HttpResourceLoader {
     async fn load_manifest(&self) -> Result<Manifest, SplitReaderError> {
         let url = format!("{}/manifest.json", self.base_url);

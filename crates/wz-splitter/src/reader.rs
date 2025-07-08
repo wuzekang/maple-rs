@@ -65,10 +65,8 @@ pub struct SplitWzReader {
     directory_nodes: HashMap<String, WzNodeArc>,
 }
 
-// 在非 wasm32 平台上，确保 SplitWzReader 是 Send + Sync
-#[cfg(not(target_arch = "wasm32"))]
+// 确保 SplitWzReader 是 Send + Sync（在 wasm32 环境中单线程，因此是安全的）
 unsafe impl Send for SplitWzReader {}
-#[cfg(not(target_arch = "wasm32"))]
 unsafe impl Sync for SplitWzReader {}
 
 // 节点句柄

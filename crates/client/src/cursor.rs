@@ -1,5 +1,5 @@
 use crate::sprite::SpriteAnimation;
-use crate::WzBase;
+use crate::CursorImageContext;
 use glam::Vec2;
 use sdl3_sys::everything::*;
 use ::ui::reactive::use_context;
@@ -68,9 +68,8 @@ impl From<CursorState> for Cursor {
 }
 
 pub fn cursor_image(state: CursorState) -> SpriteAnimation {
-    let WzBase { node: base } = use_context().unwrap();
-    let basic = base.at_path("UI/Basic.img").unwrap();
-    let cursor: SpriteAnimation = basic
+    let CursorImageContext { basic_img } = use_context().unwrap();
+    let cursor: SpriteAnimation = basic_img
         .at_path(&format!("Cursor/{}", state.index()))
         .unwrap()
         .try_into()
