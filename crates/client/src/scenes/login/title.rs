@@ -1,8 +1,7 @@
 use crate::sprite::SpriteAnimation;
 use crate::ui::button;
+use crate::ui::async_image::AsyncImage;
 use crate::WzBase;
-use image::DynamicImage;
-use std::sync::Arc;
 use ::ui::event::Interactive;
 use ::ui::peniko::Color;
 use ::ui::reactive::{create_rw_signal, use_context, SignalGet, SignalUpdate};
@@ -14,8 +13,6 @@ pub fn title_view(on_login: impl Fn() + 'static) -> impl IntoElement {
     let img = base.at_path("UI/Login.img").unwrap();
     let title = img.get("Title");
     let checked = create_rw_signal(false);
-    let check_image: Vec<Arc<::image::DynamicImage>> =
-        title.at_path("check").unwrap().try_into().unwrap();
 
     let position = [(562, 2), (561, 4), (565, 5), (558, 4), (552, 4), (555, 3)];
 
@@ -60,12 +57,9 @@ pub fn title_view(on_login: impl Fn() + 'static) -> impl IntoElement {
                 .style(|s| s.absolute().left(4).top(78).width(274).height(24))
                 .children((
                     dynamic(move || {
-                        let image = if checked.get() {
-                            Image::new(check_image[1].clone())
-                        } else {
-                            Image::new(check_image[0].clone())
-                        };
-                        image.style(|s| s.margin_top(1))
+                        let index = if checked.get() { 1 } else { 0 };
+                        view().children(AsyncImage::new(format!("UI/Login.img/Title/check/{}", index)))
+                            .style(|s| s.margin_top(1))
                     }),
                     button(title.get("BtLoginIDSave"))
                         .style(|s| s.absolute().top(1).left(19))

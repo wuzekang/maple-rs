@@ -980,6 +980,7 @@ name = "client"
 version = "0.1.0"
 dependencies = [
  "async-runtime",
+ "async-trait",
  "futures",
  "glam",
  "hecs",
@@ -992,6 +993,7 @@ dependencies = [
  "symphonia",
  "thiserror",
  "ui",
+ "weak-table",
  "web-fetch",
  "wz-parser",
  "wz-splitter",
@@ -4905,6 +4907,12 @@ dependencies = [
  "once_cell",
  "pkg-config",
 ]
+
+[[package]]
+name = "weak-table"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "323f4da9523e9a669e1eaf9c6e763892769b1d38c623913647bfdc1532fe4549"
 
 [[package]]
 name = "web-fetch"

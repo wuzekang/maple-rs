@@ -1,26 +1,18 @@
 use crate::ui::button;
 use crate::ui::async_image::AsyncImage;
 use crate::WzBase;
-use glam::vec2;
-use image::DynamicImage;
-use std::sync::Arc;
 use ::ui::peniko::Color;
-use ::ui::reactive::{use_context, SignalGet};
+use ::ui::reactive::use_context;
 use ::ui::style::dimension::{length, percent};
 use ::ui::style::Styleable;
 use ::ui::taffy::{AlignItems, Display, FlexDirection, JustifyContent, Position};
 use ::ui::view_tuple::ViewTuple;
-use ::ui::{dynamic, fragment, text, view, Image, IntoElement, View};
+use ::ui::{dynamic, fragment, text, view, IntoElement, View};
 
 pub fn level_no<F>(_value: F) -> View
 where
     F: Fn() -> i32 + 'static,
 {
-    let WzBase { node: base } = use_context().unwrap();
-    let node = base.at_path("UI/Basic.img/LevelNo").unwrap();
-    let images: Vec<Arc<DynamicImage>> = (0..9)
-        .map(|i| node.get(&i.to_string()).try_into().unwrap())
-        .collect();
     view()
         .style(|s| {
             s.justify_content(JustifyContent::FlexStart)
@@ -28,14 +20,10 @@ where
                 .gap_row(1.0)
                 .gap_column(1.0)
         })
-        .children((Image::new(images[1].clone()), Image::new(images[8].clone())))
+        .children((AsyncImage::new("UI/Basic.img/LevelNo/1"), AsyncImage::new("UI/Basic.img/LevelNo/8")))
 }
 
 pub fn bracket_wrap(children: impl ViewTuple) -> View {
-    let WzBase { node: base } = use_context().unwrap();
-    let node = base.at_path("UI/StatusBar.img/number").unwrap();
-    let left: Arc<DynamicImage> = node.get("Lbracket").try_into().unwrap();
-    let right: Arc<DynamicImage> = node.get("Rbracket").try_into().unwrap();
     view()
         .style(|s| {
             s.justify_content(JustifyContent::FlexStart)
@@ -44,21 +32,13 @@ pub fn bracket_wrap(children: impl ViewTuple) -> View {
                 .gap_column(1.0)
         })
         .children(fragment((
-            Image::new(left),
+            AsyncImage::new("UI/StatusBar.img/number/Lbracket"),
             fragment(children),
-            Image::new(right),
+            AsyncImage::new("UI/StatusBar.img/number/Rbracket"),
         )))
 }
 
 pub fn status_bar_number(f: impl (Fn() -> String) + 'static) -> View {
-    let WzBase { node: base } = use_context().unwrap();
-    let node = base.at_path("UI/StatusBar.img/number").unwrap();
-    let images: Vec<Arc<DynamicImage>> = (0..10)
-        .map(|i| node.get(&i.to_string()).try_into().unwrap())
-        .collect();
-    let slash: Arc<DynamicImage> = node.get("slash").try_into().unwrap();
-    let percent: Arc<DynamicImage> = node.get("percent").try_into().unwrap();
-
     view()
         .style(|s| {
             s.justify_content(JustifyContent::FlexStart)
@@ -68,16 +48,16 @@ pub fn status_bar_number(f: impl (Fn() -> String) + 'static) -> View {
             f().chars()
                 .filter_map(|ch: char| {
                     if ch.is_ascii_digit() {
-                        Some(images[ch as usize - '0' as usize].clone())
+                        Some(format!("UI/StatusBar.img/number/{}", ch as usize - '0' as usize))
                     } else if ch == '/' {
-                        Some(slash.clone())
+                        Some("UI/StatusBar.img/number/slash".to_string())
                     } else if ch == '%' {
-                        Some(percent.clone())
+                        Some("UI/StatusBar.img/number/percent".to_string())
                     } else {
                         None
                     }
                 })
-                .map(Image::new)
+                .map(AsyncImage::new)
                 .collect::<Vec<_>>()
         }))
 }
@@ -85,27 +65,6 @@ pub fn status_bar_number(f: impl (Fn() -> String) + 'static) -> View {
 pub fn status_bar() -> View {
     let WzBase { node: base } = use_context().unwrap();
     let img = base.at_path("UI/StatusBar.img").unwrap();
-    let background: Arc<DynamicImage> = img
-        .at_path("base")
-        .unwrap()
-        .get("backgrnd")
-        .try_into()
-        .unwrap();
-    let background2: Arc<DynamicImage> = img
-        .at_path("base")
-        .unwrap()
-        .get("backgrnd2")
-        .try_into()
-        .unwrap();
-
-    let gauge = img.at_path("gauge").unwrap();
-    let graduation: Arc<DynamicImage> = gauge.get("graduation").try_into().unwrap();
-    let bar: Arc<DynamicImage> = gauge.get("bar").try_into().unwrap();
-
-    let base_box: Arc<DynamicImage> = img.at_path("base/box").unwrap().try_into().unwrap();
-
-    let icon_memo: Arc<DynamicImage> = img.at_path("base/iconMemo").unwrap().try_into().unwrap();
-    let icon_blue: Arc<DynamicImage> = img.at_path("base/iconBlue").unwrap().try_into().unwrap();
 
     view()
         .style(|s| {
@@ -117,8 +76,8 @@ pub fn status_bar() -> View {
                 .bottom(length(0.0))
         })
         .children((
-            Image::new(background),
-            Image::new(background2).style(|s| {
+            AsyncImage::new("UI/StatusBar.img/base/backgrnd"),
+            view().children(AsyncImage::new("UI/StatusBar.img/base/backgrnd2")).style(|s| {
                 s.position(Position::Absolute)
                     .left(length(4.0))
                     .bottom(length(0.0))
@@ -140,7 +99,7 @@ pub fn status_bar() -> View {
                                 .align_items(AlignItems::FlexStart)
                         })
                         .children((
-                            Image::new(base_box),
+                            AsyncImage::new("UI/StatusBar.img/base/box"),
                             view()
                                 .style(|s| {
                                     s.position(Position::Absolute)
@@ -156,14 +115,14 @@ pub fn status_bar() -> View {
                                                 .justify_content(JustifyContent::Center)
                                                 .align_items(AlignItems::Center)
                                         })
-                                        .children(Image::new(icon_blue)),
+                                        .children(AsyncImage::new("UI/StatusBar.img/base/iconBlue")),
                                     view()
                                         .style(|s| {
                                             s.width(length(20.0))
                                                 .justify_content(JustifyContent::Center)
                                                 .align_items(AlignItems::Center)
                                         })
-                                        .children(Image::new(icon_memo)),
+                                        .children(AsyncImage::new("UI/StatusBar.img/base/iconMemo")),
                                 )),
                         )),
                     view()
@@ -255,8 +214,8 @@ pub fn status_bar() -> View {
                         .bottom(length(1.0))
                 })
                 .children((
-                    Image::new(bar),
-                    Image::new(graduation)
+                    AsyncImage::new("UI/StatusBar.img/gauge/bar"),
+                    view().children(AsyncImage::new("UI/StatusBar.img/gauge/graduation"))
                         .style(|s| s.position(Position::Absolute).bottom(length(0.0))),
                     view()
                         .style(|s| {

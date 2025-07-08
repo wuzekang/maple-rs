@@ -1,7 +1,10 @@
 use glam::Vec2;
 use indexmap::IndexMap;
+use std::sync::Arc;
 
-use crate::{sprite::Sprite, wz::Node};
+use crate::{sprite::Sprite, wz::{Node, WzSplitReaderExt}, WzSplitReaderContext};
+use ::ui::{lazy, fragment, text, view, View};
+use ::ui::reactive::use_context;
 
 #[allow(dead_code)]
 pub struct Item {
@@ -61,4 +64,16 @@ impl TryFrom<Node> for WorldMap {
             map_link: node.try_get("MapLink").and_then(|v| v.try_into().ok()),
         })
     }
+}
+
+// 异步加载 WorldMap
+pub async fn load_world_map(
+    reader: Arc<wz_splitter::reader::SplitWzReader>, 
+    path: &str
+) -> Result<WorldMap, Box<dyn std::error::Error>> {
+    // 使用扩展方法直接获取 Node
+    let node = reader.get_node(path).await?;
+    
+    // 使用现有的 TryFrom<Node> 实现
+    WorldMap::try_from(node).map_err(|_| "Failed to parse WorldMap".into())
 }

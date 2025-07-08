@@ -3,7 +3,6 @@ use crate::wz;
 use glam::Vec2;
 use sdl3_sys::everything::SDL_FlipMode;
 use ::ui::geometry::Rect;
-use ::ui::widget::image::IntoDrawable as UIIntoDrawable;
 use ::ui::{Bounds, Drawable, Renderer};
 
 pub trait IntoDrawable {

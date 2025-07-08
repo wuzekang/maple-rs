@@ -2,17 +2,16 @@ use crate::scenes::login::helpers::ClipImage;
 use crate::sprite::SpriteAnimation;
 use crate::timer::Repeat;
 use crate::ui::button;
+use crate::ui::async_image::AsyncImage;
 use crate::WzBase;
 use async_runtime::sleep;
-use image::DynamicImage;
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::time::Duration;
 use ::ui::animation::use_raf;
 use ::ui::event::{Interactive, MouseEvent};
 use ::ui::reactive::{
-    create_ref, create_rw_signal, use_context, RwSignal, SignalGet, SignalUpdate, SignalWith,
+    create_ref, create_rw_signal, use_context, RwSignal, SignalGet, SignalUpdate,
 };
 use ::ui::style::Styleable;
 use ::ui::{dynamic, fragment, use_resource, view, Drawable, Image, IntoElement};
@@ -36,10 +35,7 @@ pub fn notice_loading(
         })
         .children(
             view().children((
-                Image::new({
-                    let backgrnd: Arc<DynamicImage> = img.at_path("Notice/Loading/backgrnd").unwrap().try_into().unwrap();
-                    backgrnd
-                }),
+                AsyncImage::new("UI/Login.img/Notice/Loading/backgrnd"),
                 button(img.at_path("Notice/Loading/BtCancel").unwrap())
                     .style(|s| s.absolute().right(28).top(44))
                     .on_click(move |_| on_cancel()),
@@ -66,13 +62,7 @@ pub fn channel_option(
     progress.borrow_mut().clip.x = i as f32 * 2.0;
 
     view().on_click(move |_| on_select()).children((
-        Image::new({
-            let normal: Arc<DynamicImage> = img.at_path(&format!("WorldSelect/channel/{i}/normal"))
-                .unwrap()
-                .try_into()
-                .unwrap();
-            normal
-        }),
+        AsyncImage::new(format!("UI/Login.img/WorldSelect/channel/{i}/normal")),
         Image::new(progress as Rc<RefCell<dyn Drawable>>)
             .style(|s| s.pointer_events_none().absolute().left(43).top(20)),
         dynamic({
@@ -154,12 +144,6 @@ pub fn world_select_view(on_enter: impl Fn() + 'static) -> impl IntoElement {
                     let img = img.clone();
                     move || {
                         if let Some(world) = selected_world.get() {
-                            let title: Arc<DynamicImage> = img
-                                .at_path(&format!("WorldSelect/world/{world}"))
-                                .unwrap()
-                                .try_into()
-                                .unwrap();
-
                             let delay = 350.0;
                             let duration = 500.0;
                             let elapsed = Rc::new(RefCell::new(0.0));
@@ -180,7 +164,7 @@ pub fn world_select_view(on_enter: impl Fn() + 'static) -> impl IntoElement {
                                 .composite()
                                 .style(move |s| s.opacity(alpha.get()))
                                 .children((
-                                    Image::new(title).style(|s| s.absolute().left(33).top(8)),
+                                    view().children(AsyncImage::new(format!("UI/Login.img/WorldSelect/world/{world}"))).style(|s| s.absolute().left(33).top(8)),
                                     view()
                                         .style(|s| {
                                             s.absolute()
@@ -254,13 +238,11 @@ pub fn world_select_sidebar(
 ) -> impl IntoElement {
     let WzBase { node: base } = use_context().unwrap();
     let img = base.at_path("UI/Login.img").unwrap();
-    let step_1: Arc<::image::DynamicImage> =
-        img.at_path("Common/step/1").unwrap().try_into().unwrap();
     fragment(
         view()
             .style(|s| s.absolute().left(0).top(0).width(0).height(0))
             .children((
-                Image::new(step_1).style(|s| s.absolute().left(0).top(33)),
+                view().children(AsyncImage::new("UI/Login.img/Common/step/1")).style(|s| s.absolute().left(0).top(33)),
                 button(img.at_path("WorldSelect/BtViewChoice").unwrap())
                     .style(|s| s.absolute().left(0).top(125)),
                 button(img.at_path("ViewAllChar/BtVAC").unwrap())

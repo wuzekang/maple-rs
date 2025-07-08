@@ -1,10 +1,9 @@
 use crate::npc::Npc;
 use crate::sprite::Sprite;
 use crate::ui::button;
+use crate::ui::async_image::AsyncImage;
 use crate::widget::tiled;
 use crate::WzBase;
-use image::DynamicImage;
-use std::sync::Arc;
 use ::ui::peniko::Color;
 use ::ui::reactive::{create_rw_signal, use_context, SignalGet, SignalUpdate};
 use ::ui::event::Interactive;
@@ -22,8 +21,6 @@ pub fn dialog() -> impl IntoElement {
 
         let WzBase { node: base } = use_context().ok_or(()).unwrap();
         let node = base.at_path("UI/UIWindow.img/UtilDlgEx").unwrap();
-        let t: Arc<DynamicImage> = node.get("t").try_into().unwrap();
-        let s: Arc<DynamicImage> = node.get("s").try_into().unwrap();
 
         let npc: Npc = base.at_path("Npc/9010000.img").unwrap().try_into().unwrap();
 
@@ -45,7 +42,7 @@ pub fn dialog() -> impl IntoElement {
                     view()
                         .style(|s| s.pointer_events_auto().flex_col().items_stretch())
                         .children((
-                            Image::new(t),
+                            AsyncImage::new("UI/UIWindow.img/UtilDlgEx/t"),
                             view().children((
                                 tiled(node.get("c")).style(|s| s.absolute().w_full().h_full()),
                                 view().children((
@@ -57,10 +54,7 @@ pub fn dialog() -> impl IntoElement {
                                                 .children(Image::new(image).style(move |s| {
                                                     s.translate_x(-origin.x).translate_y(-origin.y)
                                                 })),
-                                            Image::new({
-                                                let bar: Arc<DynamicImage> = node.get("bar").try_into().unwrap();
-                                                bar
-                                            }),
+                                            AsyncImage::new("UI/UIWindow.img/UtilDlgEx/bar"),
                                             view()
                                                 .style(|s| {
                                                     s.absolute()
@@ -84,14 +78,11 @@ pub fn dialog() -> impl IntoElement {
                                         .children((
                                             text(|| "Basic Configuration for MapleStory")
                                                 .style(|s| s.margin_bottom(13)),
-                                            Image::new({
-                                                let notice: Arc<DynamicImage> = node.get("notice").try_into().unwrap();
-                                                notice
-                                            }),
+                                            AsyncImage::new("UI/UIWindow.img/UtilDlgEx/notice"),
                                         )),
                                 )),
                             )),
-                            Image::new(s),
+                            AsyncImage::new("UI/UIWindow.img/UtilDlgEx/s"),
                             button(node.get("BtClose"))
                                 .style(|s| s.absolute().left(9).bottom(8))
                                 .on_click(move |_| open.set(false)),

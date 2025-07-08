@@ -3,7 +3,7 @@ use crate::sound::play_sound;
 use crate::sprite::ASpriteAnimation;
 use crate::WzBase;
 use ::ui::event::Interactive;
-use ::ui::reactive::{create_ref, create_rw_signal, use_context, SignalGet, SignalUpdate, SignalWith};
+use ::ui::reactive::{create_ref, create_rw_signal, use_context, SignalGet, SignalUpdate};
 use ::ui::style::Styleable;
 use ::ui::{dynamic, fragment, lazy, view, Image, IntoElement};
 

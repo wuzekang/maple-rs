@@ -6,29 +6,26 @@ mod world_select;
 
 use crate::map;
 use crate::scene::MainScene;
+use crate::ui::async_image::AsyncImage;
 use crate::WzBase;
 use glam::vec2;
-use image::DynamicImage;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::sync::Arc;
 use ::ui::animation::use_raf;
-use ::ui::event::MouseEvent;
 use ::ui::geometry::CubicBezier;
 use ::ui::reactive::{
     create_effect, create_ref, create_rw_signal, provide_context, use_context, Ref, RwSignal,
-    SignalGet, SignalUpdate, SignalTrack, SignalWith,
+    SignalGet, SignalUpdate, SignalTrack,
 };
 use ::ui::style::Styleable;
 use ::ui::widget::focus_trap::focus_trap;
-use ::ui::{dynamic, fragment, view, Fragment, Image, View};
+use ::ui::{dynamic, fragment, view, Fragment, View};
 
 pub use character_create::create_normal;
 pub use character_select::{select_character_view, select_race_view};
-pub use helpers::{ClipImage, IntoDrawable};
 pub use title::title_view;
 pub use world_select::{
-    channel_option, notice_loading, world_select_sidebar, world_select_view,
+    world_select_sidebar, world_select_view,
 };
 
 #[derive(Debug, Copy, Clone)]
@@ -92,9 +89,7 @@ impl LoginContext {
 
 pub fn login_scene(on_enter: impl Fn() + 'static) -> View {
     let WzBase { node: base } = use_context().unwrap();
-    let img = base.at_path("UI/Login.img").unwrap();
-    let frame: Arc<::image::DynamicImage> =
-        img.at_path("Common/frame").unwrap().try_into().unwrap();
+    let _img = base.at_path("UI/Login.img").unwrap();
 
     let step: RwSignal<usize> = create_rw_signal(LoginStep::Title.into());
 
@@ -169,7 +164,7 @@ pub fn login_scene(on_enter: impl Fn() + 'static) -> View {
                     })
                     .collect::<Vec<_>>(),
             ),
-        Image::new(frame).style(move |s| {
+        view().children(AsyncImage::new("UI/Login.img/Common/frame")).style(move |s| {
             s.pointer_events_none()
                 .absolute()
                 .left(0)

@@ -1,14 +1,13 @@
 use crate::ui::button;
+use crate::ui::async_image::AsyncImage;
 use crate::WzBase;
-use image::DynamicImage;
-use std::sync::Arc;
 use ::ui::event::{use_key, Interactive};
 use ::ui::peniko::Color;
 use ::ui::reactive::{create_rw_signal, use_context, SignalGet, SignalUpdate};
 use ::ui::style::dimension::{length, percent};
 use ::ui::style::Styleable;
 use ::ui::taffy::{AlignItems, JustifyContent, Position};
-use ::ui::{dynamic, fragment, text, view, Image, IntoElement, TextInput, View};
+use ::ui::{dynamic, fragment, text, view, IntoElement, TextInput, View};
 
 pub fn chat_box() -> impl IntoElement {
     let WzBase { node: base } = use_context().unwrap();
@@ -98,14 +97,11 @@ pub fn chat_box() -> impl IntoElement {
 }
 
 pub fn scroll_vertical() -> View {
-    let WzBase { node: base } = use_context().unwrap();
-    let node = base.at_path("UI/Basic.img/VScr5/enabled").unwrap();
-    let prev: Arc<DynamicImage> = node.get("prev0").try_into().unwrap();
-    let next: Arc<DynamicImage> = node.get("next0").try_into().unwrap();
+    let WzBase { node: _base } = use_context().unwrap();
     view()
         .style(|s| s.width(length(15.0)).height(length(25.0)))
         .children((
-            Image::new(prev).style(|s| s.position(Position::Absolute).top(length(0.0))),
-            Image::new(next).style(|s| s.position(Position::Absolute).bottom(length(0.0))),
+            view().children(AsyncImage::new("UI/Basic.img/VScr5/enabled/prev0")).style(|s| s.position(Position::Absolute).top(length(0.0))),
+            view().children(AsyncImage::new("UI/Basic.img/VScr5/enabled/next0")).style(|s| s.position(Position::Absolute).bottom(length(0.0))),
         ))
 }

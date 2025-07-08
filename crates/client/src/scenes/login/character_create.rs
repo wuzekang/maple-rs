@@ -1,8 +1,8 @@
 use crate::character::{Character, ZMap};
 use crate::scenes::login::{LoginContext, LoginStep};
 use crate::ui::button;
+use crate::ui::async_image::AsyncImage;
 use crate::WzBase;
-use image::DynamicImage;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -161,10 +161,7 @@ pub fn create_normal() -> impl IntoElement {
                 view()
                     .style(|s| s.absolute().left(481).top(95).width(201).height(224))
                     .children((
-                        Image::new({
-                            let char_name: Arc<DynamicImage> = node.get("charName").try_into().unwrap();
-                            char_name
-                        }),
+                        AsyncImage::new("UI/Login.img/NewChar/charName"),
                         TextInput::new().style(|s| {
                             s.absolute()
                                 .left(29)
@@ -188,10 +185,7 @@ pub fn create_normal() -> impl IntoElement {
                 view()
                     .style(|s| s.absolute().left(481).top(95).width(225).height(377))
                     .children((
-                        Image::new({
-                            let char_set: Arc<DynamicImage> = node.get("charSet").try_into().unwrap();
-                            char_set
-                        }),
+                        AsyncImage::new("UI/Login.img/NewChar/charSet"),
                         view()
                             .style(|s| {
                                 s.absolute()
@@ -207,13 +201,7 @@ pub fn create_normal() -> impl IntoElement {
                                     .map(|i| {
                                         let len = options[gender.get()][i].len();
                                         view().children((
-                                            Image::new({
-                                                let avatar: Arc<DynamicImage> = node.at_path(&format!("avatarSel/{i}/normal"))
-                                                    .unwrap()
-                                                    .try_into()
-                                                    .unwrap();
-                                                avatar
-                                            }),
+                                            AsyncImage::new(format!("UI/Login.img/NewChar/avatarSel/{i}/normal")),
                                             view()
                                                 .style(|s| {
                                                     s.absolute()

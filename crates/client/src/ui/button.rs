@@ -1,6 +1,6 @@
 use crate::cursor::CursorState;
 use crate::sound::play_sound;
-use crate::sprite::{Sprite, SpriteAnimation};
+use crate::sprite::SpriteAnimation;
 use crate::timer::Repeat;
 use crate::wz::Node;
 use std::cell::RefCell;
