@@ -632,10 +632,11 @@ impl Element for MainScene {
         }
 
         map.portal_timer.tick(delta);
+
+        let footholds = &map.footholds;
+        let wall = &map.wall;
         for mob in map.mobs.values_mut() {
-            if let Some(action) = mob.actions.get_mut("move") {
-                action.update(delta);
-            }
+            mob.update(delta, footholds, wall);
         }
 
         let mut clickable = false;
@@ -752,7 +753,7 @@ impl Element for MainScene {
                 .render_debug_text(item.position - camera_position, &format!("{:?}", item.pt))
         }
 
-        for item in &map.life {
+        for (index, item) in map.life.iter().enumerate() {
             if item.r#type == "n" {
                 let npc = map.npc.get(&item.id).unwrap();
                 if npc.actions.is_empty() {
@@ -767,18 +768,18 @@ impl Element for MainScene {
                 );
             }
             if item.r#type == "m" {
-                let npc = map.mobs.get(&item.id).unwrap();
+                let npc = map.mobs.get(&index.to_string()).unwrap();
                 if npc.actions.is_empty() {
                     continue;
                 }
-                let action = npc.actions.get("move").unwrap();
-
-                let sprite = &action.frames[action.timer.index];
-                sprite_renderer.draw_flip(
-                    sprite,
-                    vec2(item.x as f32, item.cy as f32) - camera_position,
-                    item.f == 1,
-                );
+                if let Some(action) = npc.actions.get(npc.get_current_animation()) {
+                    let sprite = &action.frames[action.timer.index];
+                    sprite_renderer.draw_flip(
+                        sprite,
+                        vec2(npc.position.x as f32, npc.position.y as f32) - camera_position,
+                        npc.flip
+                    );
+                }
             }
         }
 
