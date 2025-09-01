@@ -508,10 +508,18 @@ impl Map {
         }
 
         let mut mobs = HashMap::new();
-        for item in life.iter().filter(|item| item.r#type == "m") {
+        for (index, item) in life.iter().enumerate().filter(|(_, item)| item.r#type == "m") {
             if let Ok(mob_node) = reader.get_node(&format!("Mob/{}.img", item.id)).await {
-                if let Ok(mob_data) = mob_node.try_into() {
-                    mobs.insert(item.id.clone(), mob_data);
+                if let Ok(mob_data) = TryInto::<Mob>::try_into(mob_node) {
+                    let mob_x = item.x as f32;
+                    let mob_y = item.cy as f32;
+                    let foothold = item.fh;
+                    let layer = item.f;
+                    let min_x = item.rx0 as f32;
+                    let max_x = item.rx1 as f32;
+          
+                    let mob = mob_data.spawn_mob(mob_x, mob_y, foothold, layer, min_x, max_x);
+                    mobs.insert(index.to_string(), mob);
                 }
             }
         }
