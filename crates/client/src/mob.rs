@@ -67,6 +67,7 @@ pub enum State {
     #[default]
     MOVE,
     FALL,
+    JUMP,
 }
 
 pub struct Mob {
@@ -84,6 +85,8 @@ pub struct Mob {
     pub change_probability: f32,
     pub last_change: Instant,
     pub change_delay: Duration,
+    pub can_jump: bool,
+    pub jump_probability: f32,
 }
 
 impl TryFrom<Node> for Mob {
@@ -110,7 +113,9 @@ impl TryFrom<Node> for Mob {
             flip: false,
             change_probability: 0.02,
             last_change: Instant::now() - Duration::from_millis(300),
-            change_delay: Duration::from_millis(300)
+            change_delay: Duration::from_millis(300),
+            can_jump: false,
+            jump_probability: 0.05,
         })
     }
 }
@@ -139,7 +144,7 @@ impl Mob {
     pub fn walk_drag(&self) -> f32 {
         8000.0
     }
-    
+        
     pub fn fall_speed(&self) -> f32 {
         670.0
     }
@@ -148,17 +153,24 @@ impl Mob {
         2000.0
     }
 
+    pub fn jump_speed(&self) -> f32 {
+        555.0
+    }
+    
     pub fn set_random_direction(&mut self) {
         let mut rng = rand::rng();
+        let rand = rng.random::<f32>();
 
-        if matches!(self.state, State::FALL) {
+        if matches!(self.state, State::FALL | State::JUMP) {
             return;
         }
 
-        if rng.random::<f32>() < 0.2 {
+        if rand < self.jump_probability && self.can_jump {
+            self.state = State::JUMP;
+        } else if rand < 0.2 {
             self.direction.x = 0.0;
             self.state = State::STAND;
-        } else if rng.random::<f32>() < 0.5 {
+        } else if rand < 0.6 {
             self.direction.x = -1.0;
             self.state = State::MOVE;
         } else {
@@ -175,7 +187,7 @@ impl Mob {
             self.last_change = now;
         }
     }
-    
+
     pub fn step(&mut self, delta: f32, footholds: &HashMap<i32, Foothold>, wall: &Wall) {
         let delta = delta / 1000.0;
         let mut rng = rand::rng();
@@ -223,11 +235,9 @@ impl Mob {
                 if x < self.min_x {
                     self.position.x = self.min_x;
                     self.direction.x = 1.0;
-                    self.state = State::MOVE;
-                } else if x >= self.max_x {
+                } else if x > self.max_x {
                     self.position.x = self.max_x;
                     self.direction.x = -1.0;
-                    self.state = State::MOVE;
                 }
 
                 let mut next = None;
@@ -305,6 +315,23 @@ impl Mob {
                     }
                 }
             }
+            State::JUMP => {
+                let jump_x = if self.direction.x != 0.0 {
+                    self.walk_force() * 8.0 / 1000.0 * self.direction.x
+                } else {
+                    0.0
+                };
+            
+                let x = self.position.x + jump_x;            
+                if x < self.min_x || x > self.max_x {
+                    self.state = State::MOVE;
+                    return;
+                }
+            
+                self.velocity.x = jump_x;
+                self.velocity.y = -self.jump_speed();
+                self.state = State::FALL;
+            }
         }
     }
 
@@ -314,6 +341,7 @@ impl Mob {
         self.layer = layer;
         self.min_x = min_x;
         self.max_x = max_x;
+        self.can_jump = self.actions.contains_key("jump");
         self.change_direction();
         self
     }
@@ -323,6 +351,7 @@ impl Mob {
             State::STAND => "stand",
             State::MOVE => "move",
             State::FALL => "move",
+            State::JUMP => "jump",
         }
     }
 
