@@ -20,6 +20,7 @@ pub struct MobInfo {
     pub level: i32,
     pub max_hp: i32,
     pub max_mp: i32,
+    pub no_flip: i32,
     pub mob_type: i32,
     pub pushed: i32,
     pub speed: i32,
@@ -44,6 +45,11 @@ impl TryFrom<Node> for MobInfo {
             level: value.get("level").try_into()?,
             max_hp: value.get("maxHP").try_into()?,
             max_mp: value.get("maxMP").try_into()?,
+            no_flip: value
+                .try_get("noFlip")
+                .map(TryInto::try_into)
+                .transpose()?
+                .unwrap_or_default(),
             mob_type: value
                 .try_get("mobType")
                 .map(TryInto::try_into)
@@ -196,7 +202,9 @@ impl Mob {
             self.change_direction();
         }
 
-        if self.direction.x > 0.0 {
+        if self.info.no_flip != 0 {
+            self.flip = false;
+        } else if self.direction.x > 0.0 {
             self.flip = true;
         } else if self.direction.x < 0.0 {
             self.flip = false;
