@@ -203,15 +203,25 @@ pub fn status_bar() -> impl IntoElement {
                               .gap_column(length(2.0))
                           })
                           .children((
-                            (text(|| "魔法师")
-                              .style(|s| s.color(Color::WHITE).font_size(12.0).line_height(15.0))),
-                            bracket_wrap(
-                              text(|| "魔法师")
-                                .style(|s| s.color(Color::WHITE).font_size(12.0).line_height(15.0)),
-                            ),
+                            (text(|| "魔法师").style(|s| {
+                              s.color(Color::WHITE)
+                                .text_nowrap()
+                                .font_size(12.0)
+                                .line_height(15.0)
+                            })),
+                            bracket_wrap(text(|| "魔法师").style(|s| {
+                              s.color(Color::WHITE)
+                                .text_nowrap()
+                                .font_size(12.0)
+                                .line_height(15.0)
+                            })),
                           )),
-                        text(|| "三个榔头")
-                          .style(|s| s.color(Color::WHITE).font_size(12.0).line_height(15.0)),
+                        text(|| "三个榔头").style(|s| {
+                          s.color(Color::WHITE)
+                            .text_nowrap()
+                            .font_size(12.0)
+                            .line_height(15.0)
+                        }),
                       )),
                   )),)),
               view()
