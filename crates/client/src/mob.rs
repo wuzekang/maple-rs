@@ -204,10 +204,8 @@ impl Mob {
 
         if self.info.no_flip != 0 {
             self.flip = false;
-        } else if self.direction.x > 0.0 {
-            self.flip = true;
-        } else if self.direction.x < 0.0 {
-            self.flip = false;
+        } else if self.direction.x != 0.0 {
+            self.flip = self.direction.x > 0.0;
         }
         
         match self.state {
