@@ -236,9 +236,23 @@ impl ViewId {
         let location = layout.location + viewport;
         let size = layout.size;
 
+        // 考虑 transform 偏移
+        let translate = match self.state().borrow().style.translate {
+            Point { x, y } => Point {
+                x: match x {
+                    LengthPercentage::Length(value) => value,
+                    LengthPercentage::Percent(value) => value * layout.size.width,
+                },
+                y: match y {
+                    LengthPercentage::Length(value) => value,
+                    LengthPercentage::Percent(value) => value * layout.size.height,
+                },
+            },
+        };
+
         Rect {
-            x: location.x,
-            y: location.y,
+            x: location.x + translate.x,
+            y: location.y + translate.y,
             width: size.width,
             height: size.height,
         }

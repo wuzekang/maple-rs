@@ -27,6 +27,7 @@ pub use crate::widget::image::Image;
 pub use crate::widget::text_input::*;
 pub use crate::widget::text::{text, Text};
 pub use crate::widget::view::{view, View};
+pub use crate::widget::draggable::{DraggableBox, use_draggable};
 pub use peniko;
 pub use reactive;
 pub use render::renderer::DynamicImageDrawable;

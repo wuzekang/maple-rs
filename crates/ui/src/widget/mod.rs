@@ -7,3 +7,4 @@ pub mod view;
 pub mod debug;
 pub mod focus_trap;
 pub mod scroll_view;
+pub mod draggable;

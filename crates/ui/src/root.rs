@@ -25,6 +25,27 @@ use std::time::Duration;
 
 
 #[derive(Clone)]
+pub struct DragState {
+    pub is_dragging: bool,
+    pub start_position: Vec2,
+    pub last_position: Vec2,
+    pub target: Option<ViewId>,
+    pub threshold: f32,
+}
+
+impl Default for DragState {
+    fn default() -> Self {
+        Self {
+            is_dragging: false,
+            start_position: Vec2::ZERO,
+            last_position: Vec2::ZERO,
+            target: None,
+            threshold: 5.0, // 5 pixels threshold
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct AppContext {
     root: ViewId,
     hovered: Rc<RefCell<HashSet<ViewId>>>,
@@ -35,6 +56,7 @@ pub struct AppContext {
     queue: Rc<RefCell<Vec<Event>>>,
     style_dirty: Rc<RefCell<HashSet<ViewId>>>,
     pub inspect_element: RwSignal<Option<ViewId>>,
+    drag_state: Rc<RefCell<DragState>>,
 }
 
 impl AppContext {
@@ -49,6 +71,7 @@ impl AppContext {
             queue: Rc::new(RefCell::new(vec![])),
             style_dirty: Rc::new(RefCell::new(Default::default())),
             inspect_element: RwSignal::new(None),
+            drag_state: Rc::new(RefCell::new(DragState::default())),
         }
     }
 
@@ -86,7 +109,100 @@ impl AppContext {
             root.event_capture(event.client(), &mut event.target);
             let target = event.target;
 
-            if event.r#type == MouseEventType::MouseMove {
+            if event.r#type == MouseEventType::MouseDown {
+                // Start tracking potential drag
+                let mut drag_state = self.drag_state.borrow_mut();
+                drag_state.start_position = event.motion;
+                drag_state.last_position = event.motion;
+                drag_state.target = Some(target);
+                drag_state.is_dragging = false;
+                drop(drag_state);
+                
+                let mut event = Event::Mouse(event);
+                target.dispatch_event(&mut event, true);
+                self.focus(target);
+            } else if event.r#type == MouseEventType::MouseUp {
+                // End drag if dragging
+                let drag_event = {
+                    let mut drag_state = self.drag_state.borrow_mut();
+                    let drag_event = if drag_state.is_dragging {
+                        if let Some(drag_target) = drag_state.target {
+                            Some(Event::Drag(crate::event::DragEvent {
+                                r#type: crate::event::DragEventType::DragEnd,
+                                start_position: drag_state.start_position,
+                                current_position: event.motion,
+                                delta: event.motion - drag_state.last_position,
+                                total_delta: event.motion - drag_state.start_position,
+                                target: drag_target,
+                                current: None,
+                                propagation: true,
+                            }))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                    
+                    // Reset drag state
+                    *drag_state = DragState::default();
+                    drag_event
+                };
+                
+                if let Some(drag_event) = drag_event {
+                    self.queue(drag_event);
+                }
+                
+                let mut event = Event::Mouse(event);
+                target.dispatch_event(&mut event, true);
+            } else if event.r#type == MouseEventType::MouseMove {
+                // Check for drag start or continue drag
+                let drag_events = {
+                    let mut drag_state = self.drag_state.borrow_mut();
+                    let mut events = Vec::new();
+                    
+                    if let Some(drag_target) = drag_state.target {
+                        let distance = (event.motion - drag_state.start_position).length();
+                        
+                        if !drag_state.is_dragging && distance > drag_state.threshold {
+                            // Start dragging
+                            drag_state.is_dragging = true;
+                            events.push(Event::Drag(crate::event::DragEvent {
+                                r#type: crate::event::DragEventType::DragStart,
+                                start_position: drag_state.start_position,
+                                current_position: event.motion,
+                                delta: event.motion - drag_state.last_position,
+                                total_delta: event.motion - drag_state.start_position,
+                                target: drag_target,
+                                current: None,
+                                propagation: true,
+                            }));
+                            drag_state.last_position = event.motion;
+                        } else if drag_state.is_dragging {
+                            // Continue dragging
+                            events.push(Event::Drag(crate::event::DragEvent {
+                                r#type: crate::event::DragEventType::Drag,
+                                start_position: drag_state.start_position,
+                                current_position: event.motion,
+                                delta: event.motion - drag_state.last_position,
+                                total_delta: event.motion - drag_state.start_position,
+                                target: drag_target,
+                                current: None,
+                                propagation: true,
+                            }));
+                            drag_state.last_position = event.motion;
+                        }
+                    }
+                    
+                    events
+                };
+                
+                // Queue drag events
+                for drag_event in drag_events {
+                    self.queue(drag_event);
+                }
+                
+                // Continue with normal mouse move processing
                 let prev = mem::take(&mut *self.hovered.borrow_mut());
                 let mut node = event.target;
                 self.hovered.borrow_mut().insert(node);
@@ -127,13 +243,6 @@ impl AppContext {
                 for item in hovered.iter() {
                     item.dispatch_event(&mut event, false)
                 }
-            } else if event.r#type == MouseEventType::MouseDown {
-                let mut event = Event::Mouse(event);
-                target.dispatch_event(&mut event, true);
-                self.focus(target);
-            } else if event.r#type == MouseEventType::MouseUp {
-                let mut event = Event::Mouse(event);
-                target.dispatch_event(&mut event, true);
             } else if event.r#type == MouseEventType::MouseWheel {
                 let mut event = Event::Mouse(event);
                 target.dispatch_event(&mut event, true);
@@ -148,6 +257,9 @@ impl AppContext {
             id.dispatch_event(&mut Event::TextInput(event), false);
         } else if let Event::Focus(event) = event {
             self.focus(event.target);
+        } else if let Event::Drag(event) = event {
+            let target = event.target;
+            target.dispatch_event(&mut Event::Drag(event), true);
         }
     }
 

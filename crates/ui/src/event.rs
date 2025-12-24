@@ -57,6 +57,13 @@ pub enum MouseEventType {
     Click,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum DragEventType {
+    DragStart,
+    Drag,
+    DragEnd,
+}
+
 impl TryFrom<SDL_EventType> for MouseEventType {
     type Error = ();
     fn try_from(value: SDL_EventType) -> Result<Self, Self::Error> {
@@ -81,6 +88,31 @@ pub struct MouseEvent {
     pub current: Option<ViewId>,
     pub propagation: bool,
 }
+
+#[derive(Debug)]
+pub struct DragEvent {
+    pub r#type: DragEventType,
+    pub start_position: Vec2,
+    pub current_position: Vec2,
+    pub delta: Vec2,
+    pub total_delta: Vec2,
+    pub target: ViewId,
+    pub current: Option<ViewId>,
+    pub propagation: bool,
+}
+impl DragEvent {
+    pub fn client(&self) -> Vec2 {
+        self.current_position
+    }
+
+    pub fn offset(&self) -> Vec2 {
+        let target = self.current.unwrap();
+        let location = target.layout().location;
+        let viewport = target.state().borrow().viewport;
+        self.client() - vec2(viewport.x, viewport.y) - vec2(location.x, location.y)
+    }
+}
+
 impl MouseEvent {
     pub fn client(&self) -> Vec2 {
         Vec2 {
@@ -178,6 +210,7 @@ pub enum Event {
     Focus(FocusEvent),
     TextInput(TextInputEvent),
     Lifecycle(LifecycleEvent),
+    Drag(DragEvent),
 }
 
 impl TryFrom<(&SDL_Event, ViewId)> for Event {
@@ -233,6 +266,7 @@ impl Event {
         match self {
             Event::Mouse(event) => event.propagation,
             Event::Keyboard(event) => event.propagation,
+            Event::Drag(event) => event.propagation,
             _ => false,
         }
     }
@@ -240,6 +274,7 @@ impl Event {
         match self {
             Event::Mouse(event) => event.current = Some(target),
             Event::Keyboard(event) => event.current = Some(target),
+            Event::Drag(event) => event.current = Some(target),
             _ => (),
         }
     }
@@ -284,6 +319,31 @@ impl Event {
     }
     pub fn is_click(&mut self) -> Option<&mut MouseEvent> {
         self.is_mouse(MouseEventType::Click)
+    }
+
+    pub fn is_drag(&mut self, r#type: DragEventType) -> Option<&mut DragEvent> {
+        match self {
+            Event::Drag(event) => {
+                if event.r#type == r#type {
+                    Some(event)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    pub fn is_drag_start(&mut self) -> Option<&mut DragEvent> {
+        self.is_drag(DragEventType::DragStart)
+    }
+
+    pub fn is_drag_move(&mut self) -> Option<&mut DragEvent> {
+        self.is_drag(DragEventType::Drag)
+    }
+
+    pub fn is_drag_end(&mut self) -> Option<&mut DragEvent> {
+        self.is_drag(DragEventType::DragEnd)
     }
 
     pub fn is_keyboard_event(&mut self, r#type: KeyboardEventType) -> Option<&mut KeyboardEvent> {
@@ -479,6 +539,47 @@ pub trait Interactive: Sized + Element {
         self.on_mouse_event(MouseEventType::MouseWheel, move |event| f(event))
     }
 
+    fn on_drag_event<F>(self, r#type: DragEventType, f: F) -> Self
+    where
+        F: (Fn(&mut DragEvent)) + 'static,
+    {
+        let _ = self.id().add_event_listener(Box::new(move |event| {
+            if let Event::Drag(event) = event {
+                if event.r#type == r#type {
+                    f(event)
+                }
+            }
+        }));
+        self
+    }
+
+    fn on_drag_start<F>(self, f: F) -> Self
+    where
+        F: (Fn(&mut DragEvent)) + 'static,
+    {
+        self.on_drag_event(DragEventType::DragStart, move |event| {
+            f(event);
+        })
+    }
+
+    fn on_drag<F>(self, f: F) -> Self
+    where
+        F: (Fn(&mut DragEvent)) + 'static,
+    {
+        self.on_drag_event(DragEventType::Drag, move |event| {
+            f(event);
+        })
+    }
+
+    fn on_drag_end<F>(self, f: F) -> Self
+    where
+        F: (Fn(&mut DragEvent)) + 'static,
+    {
+        self.on_drag_event(DragEventType::DragEnd, move |event| {
+            f(event);
+        })
+    }
+
     fn on_focus<F>(self, f: F) -> Self
     where
         F: (Fn(&FocusEvent)) + 'static,
@@ -605,4 +706,38 @@ where
             f()
         }
     })
+}
+
+pub fn use_drag_event<F>(r#type: DragEventType, f: F)
+where
+    F: (Fn(&mut DragEvent)) + 'static,
+{
+    use_event(move |event| {
+        if let Event::Drag(event) = event {
+            if event.r#type == r#type {
+                f(event);
+            }
+        }
+    })
+}
+
+pub fn use_drag_start<F>(f: F)
+where
+    F: (Fn(&mut DragEvent)) + 'static,
+{
+    use_drag_event(DragEventType::DragStart, f)
+}
+
+pub fn use_drag<F>(f: F)
+where
+    F: (Fn(&mut DragEvent)) + 'static,
+{
+    use_drag_event(DragEventType::Drag, f)
+}
+
+pub fn use_drag_end<F>(f: F)
+where
+    F: (Fn(&mut DragEvent)) + 'static,
+{
+    use_drag_event(DragEventType::DragEnd, f)
 }
