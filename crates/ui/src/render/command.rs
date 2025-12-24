@@ -55,13 +55,51 @@ impl Command for RenderTextureCommand {
                 SDL_SetTextureAlphaModFloat(self.texture, a);
             }
             if self.tiled {
-                SDL_RenderTextureTiled(
-                    ctx.renderer,
-                    self.texture,
-                    &self.src_rect.into(),
-                    1.0,
-                    &(self.dst_rect).into(),
-                );
+                // 计算源纹理的尺寸
+                let src_width = self.src_rect.width;
+                let src_height = self.src_rect.height;
+
+                // 计算需要重复的次数
+                let x_count = (self.dst_rect.width / src_width).ceil() as i32;
+                let y_count = (self.dst_rect.height / src_height).ceil() as i32;
+
+                // 遍历绘制每个纹理块
+                for y in 0..y_count {
+                    for x in 0..x_count {
+                        // 计算当前块的目标位置
+                        let x_offset = x as f32 * src_width;
+                        let y_offset = y as f32 * src_height;
+
+                        // 计算当前块需要绘制的宽度和高度
+                        let tile_width = src_width.min(self.dst_rect.width - x_offset);
+                        let tile_height = src_height.min(self.dst_rect.height - y_offset);
+
+                        // 计算源纹理中需要绘制的区域
+                        let tile_src_width = src_width * (tile_width / src_width);
+                        let tile_src_height = src_height * (tile_height / src_height);
+
+                        let tile_src_rect = Rect::new(
+                            self.src_rect.x,
+                            self.src_rect.y,
+                            tile_src_width,
+                            tile_src_height,
+                        );
+
+                        let tile_dst_rect = Rect::new(
+                            self.dst_rect.x + x_offset,
+                            self.dst_rect.y + y_offset,
+                            tile_width,
+                            tile_height,
+                        );
+
+                        SDL_RenderTexture(
+                            ctx.renderer,
+                            self.texture,
+                            &tile_src_rect.into(),
+                            &tile_dst_rect.into(),
+                        );
+                    }
+                }
             } else {
                 SDL_RenderTexture(
                     ctx.renderer,

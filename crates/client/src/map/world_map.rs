@@ -2,9 +2,7 @@ use glam::Vec2;
 use indexmap::IndexMap;
 use std::sync::Arc;
 
-use crate::{sprite::Sprite, wz::{Node, WzSplitReaderExt}, WzSplitReaderContext};
-use ::ui::{lazy, fragment, text, view, View};
-use ::ui::reactive::use_context;
+use crate::{sprite::Sprite, wz::{Node, WzSplitReaderExt}};
 
 #[allow(dead_code)]
 pub struct Item {

@@ -3902,9 +3902,9 @@ dependencies = [
 
 [[package]]
 name = "sdl3-sys"
-version = "0.4.6+SDL3-3.2.8"
+version = "0.4.9+SDL3-3.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13aa26235cbf336f5b273dc18a873142285529e4fef503882e05a6f986466939"
+checksum = "8cfee7f8f83070eff43260fece9c814a4c438e3ab754cf7846ccf31d370340ec"
 
 [[package]]
 name = "self_cell"

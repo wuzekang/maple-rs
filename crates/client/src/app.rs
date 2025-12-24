@@ -7,7 +7,7 @@ use ::ui::event::{use_event, Interactive};
 use ::ui::reactive::{use_context, RwSignal, SignalGet, SignalUpdate};
 use ::ui::style::Styleable;
 use ::ui::Element;
-use ::ui::{dynamic, fragment, lazy, text, view, widget::debug::debug, IntoElement};
+use ::ui::{dynamic, fragment, lazy, text, view, IntoElement};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -49,7 +49,7 @@ pub fn app() -> impl IntoElement {
           map_scene(current_map),
           status_bar(),
           world_map_window(open, current_map),
-          // dialog(),
+          dialog(),
         )),
       })),
     // debug().style(|s| s.absolute().top(0).right(0).width(800).height(600)),

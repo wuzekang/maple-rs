@@ -21,7 +21,7 @@ pub fn select_character_view() -> impl IntoElement {
         return fragment(());
       };
       fragment(
-        (view().style(|s| s.w_full().h_full()).children((
+        view().style(|s| s.w_full().h_full()).children((
           fragment(
             (0..3)
               .map(|i| {
@@ -51,7 +51,7 @@ pub fn select_character_view() -> impl IntoElement {
                 .on_click(move |_| ctx.scroll_to(LoginStep::SelectRace)),
               button(node.get("BtDelete")).style(|s| s.margin_top(14)),
             )),
-        ))),
+        )),
       )
     },
   )

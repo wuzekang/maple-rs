@@ -4,7 +4,6 @@ use crate::style::Styleable;
 use crate::{view, Element, ViewId};
 use glam::Vec2;
 use peniko::Color;
-use taffy::Point;
 
 pub struct DraggableBox {
   initial_position: Vec2,

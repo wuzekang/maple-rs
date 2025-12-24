@@ -6,7 +6,6 @@ pub mod status_bar;
 pub mod world_map;
 
 pub use button::button;
-pub use chat::chat_box;
 pub use dialog::dialog;
 pub use status_bar::status_bar;
 pub use world_map::world_map_window;

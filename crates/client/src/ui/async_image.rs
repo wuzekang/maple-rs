@@ -99,12 +99,7 @@ fn async_image_view(
           if let Some(ref placeholder) = placeholder {
             fragment(Image::new(placeholder.clone()))
           } else {
-            // 默认加载占位符
-            fragment(
-              view()
-                .style(|s| s.width(32).height(32).background([200, 200, 200]))
-                .children(text(|| "...")),
-            )
+            fragment(())
           }
         }
         LoadState::Loaded(image) => fragment(Image::new(image)),

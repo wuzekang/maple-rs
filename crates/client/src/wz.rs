@@ -4,11 +4,10 @@ use indexmap::{Equivalent, IndexMap};
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 use std::num::ParseIntError;
-use std::sync::{Arc, Mutex, OnceLock, RwLock, Weak};
-use weak_table::PtrWeakKeyHashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 use wz_parser::node::Error;
 use wz_parser::{property::Vector2D, WzNodeArc};
-use wz_parser::{WzNode, WzNodeCast, WzNodeName};
+use wz_parser::{WzNodeCast, WzNodeName};
 
 #[derive(Clone)]
 pub struct Node {

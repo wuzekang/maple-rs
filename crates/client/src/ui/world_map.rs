@@ -13,7 +13,7 @@ use ::ui::style::dimension::{length, percent};
 use ::ui::style::Styleable;
 use ::ui::taffy::Position;
 use ::ui::widget::draggable::use_draggable;
-use ::ui::{dynamic, fragment, lazy, text, view, Image, IntoElement, NineGridTexture, Surface};
+use ::ui::{dynamic, fragment, lazy, view, Image, IntoElement, NineGridTexture, Surface};
 use glam::vec2;
 use image::DynamicImage;
 use sdl3_sys::everything::{SDL_Renderer, SDLK_W};
@@ -72,7 +72,9 @@ pub fn world_map_window(
   open: RwSignal<bool>,
   current_map: RwSignal<(String, Option<String>)>,
 ) -> impl IntoElement {
-  use_key(SDLK_W, move || open.set(!open.get()));
+  use_key(SDLK_W, move || {
+    open.set(true);
+  });
 
   dynamic(move || {
     if !open.get() {
@@ -180,33 +182,36 @@ pub fn world_map_window(
             });
 
             let active_link_view = dynamic(move || {
-              if let Some(key) = hovered_link.get() {
-                let (path, position, link_map) = world_map_signal.with(move |world_map| {
-                  let map_link = world_map.map_link.as_ref().unwrap();
-                  let link = &map_link[&key];
-                  let link_img = &link.link_img;
-                  let link_map = link.link_map.clone();
-                  let path = link_img.path.clone();
-                  let position = content_size / 2.0 - link_img.origin;
-                  (path, position, link_map)
-                });
-                fragment(
-                  view()
-                    .children(AsyncImage::new(path))
-                    .style(move |s| {
-                      s.position(Position::Absolute)
-                        .left(length(position.x))
-                        .top(length(position.y))
-                        .cursor(CursorState::LClick)
-                    })
-                    .on_click(move |_| {
-                      hovered_link.set(None);
-                      world_map_path.set(format!("Map/WorldMap/{}.img", link_map));
-                    }),
-                )
-              } else {
-                fragment(())
-              }
+              let Some(key) = hovered_link.get() else {
+                return fragment(());
+              };
+
+              let Some((path, position, link_map)) = world_map_signal.with(move |world_map| {
+                let map_link = world_map.map_link.as_ref()?;
+                let link = &map_link[&key];
+                let link_img = &link.link_img;
+                let link_map = link.link_map.clone();
+                let path = link_img.path.clone();
+                let position = content_size / 2.0 - link_img.origin;
+                Some((path, position, link_map))
+              }) else {
+                return fragment(());
+              };
+
+              fragment(
+                view()
+                  .children(AsyncImage::new(path))
+                  .style(move |s| {
+                    s.position(Position::Absolute)
+                      .left(length(position.x))
+                      .top(length(position.y))
+                      .cursor(CursorState::LClick)
+                  })
+                  .on_click(move |_| {
+                    hovered_link.set(None);
+                    world_map_path.set(format!("Map/WorldMap/{}.img", link_map));
+                  }),
+              )
             });
 
             let close_button = match data.close_button_node {
