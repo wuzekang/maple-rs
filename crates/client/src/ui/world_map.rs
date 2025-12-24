@@ -12,6 +12,7 @@ use ::ui::reactive::{
 use ::ui::style::dimension::{length, percent};
 use ::ui::style::Styleable;
 use ::ui::taffy::Position;
+use ::ui::widget::draggable::use_draggable;
 use ::ui::{dynamic, fragment, lazy, text, view, Image, IntoElement, NineGridTexture, Surface};
 use glam::vec2;
 use image::DynamicImage;
@@ -85,8 +86,10 @@ pub fn world_map_window(
     let world_map_path = create_rw_signal("Map/WorldMap/WorldMap.img".to_string());
     let hovered_link = create_rw_signal(None);
     let content_size = vec2(640.0, 470.0);
+    // 窗口偏移量
+    let window_offset = create_rw_signal(vec2(0.0, 0.0));
 
-    fragment(view().children(lazy(
+    fragment(lazy(
       move || {
         let reader = reader.clone();
         let path = world_map_path.get();
@@ -213,7 +216,8 @@ pub fn world_map_window(
 
             fragment(
               view()
-                .style(|s| {
+                .style(move |s| {
+                  let offset = window_offset.get();
                   s.absolute()
                     .left(0)
                     .top(0)
@@ -221,6 +225,8 @@ pub fn world_map_window(
                     .h_full()
                     .justify_center()
                     .items_center()
+                    .translate_x(offset.x)
+                    .translate_y(offset.y)
                 })
                 .children(
                   view().children((
@@ -288,26 +294,31 @@ pub fn world_map_window(
                             spots,
                           )),
                       ),
-                    view()
-                      .style(move |s| {
-                        s.position(Position::Absolute)
-                          .w_full()
-                          .height(14)
-                          .margin_top(5)
-                          .padding_right(padding.right)
-                          .padding_left(padding.left)
-                          .flex_row()
-                          .justify_between()
-                          .items_center()
-                      })
-                      .children((AsyncImage::new(data.title.path), close_button)),
+                    use_draggable(
+                      view()
+                        .style(move |s| {
+                          s.position(Position::Absolute)
+                            .w_full()
+                            .height(14)
+                            .margin_top(5)
+                            .padding_right(padding.right)
+                            .padding_left(padding.left)
+                            .flex_row()
+                            .justify_between()
+                            .items_center()
+                        })
+                        .children((AsyncImage::new(data.title.path), close_button)),
+                      move |offset| {
+                        window_offset.set(offset);
+                      },
+                    ),
                   )),
                 ),
             )
           }
-          None => fragment(text(|| "Loading world map...")),
+          None => fragment(()),
         }
       },
-    )))
+    ))
   })
 }
