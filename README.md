@@ -1,29 +1,33 @@
 # Maple RS - GMS 083
 
-- 一个探索用现代 Rust 技术栈重建 GMS 083 客户端的实验性项目。
-- 当前为概念验证阶段，仅实现基础框架与核心模块原型，尚未达到可玩状态。
+- An experimental project exploring the reconstruction of GMS 083 client using modern Rust technology stack.
+- Currently in proof-of-concept stage, only basic framework and core module prototypes are implemented, not yet playable.
 
-## 🚀 快速开始
+## 🚀 Quick Start
 
 
-### 1. 克隆仓库
+### 1. Clone Repository
 ```bash
-git clone --recursive https://github.com/wuzekang/maple-rs.git
+git clone https://github.com/wuzekang/maple-rs.git --depth 1
 ```
 
-### 2. 资源下载
+### 2. Download Resources
 
-- QQ群：1042028998
-- 群分享下载 Data.zip 解压到 maple-rs/Data 目录
+- QQ Group: 1042028998
+- Download data.zip from group shared files and extract to maple-rs/data directory
 
-### 3. 构建运行
+### 3. Build and Run
 ```bash
 cd maple-rs
+
+# Split WZ files into individual IMG files for on-demand loading
+cargo run --bin wz-splitter split --output ./data ./data/Base.wz
+
 cargo run --bin client
 cargo run --bin editor
 ```
 
-## 🖥️ 运行效果
+## 🖥️ Running Screenshots
  
 ### crates/client
 ![](./client-login.png)
@@ -32,46 +36,46 @@ cargo run --bin editor
 ### crates/editor
 ![](./editor.png)
 
-## ⚙️ 技术栈
+## ⚙️ Tech Stack
 
-- **界面布局**：taffy
-- **图形渲染**：sdl3-sys
-- **文本渲染**：cosmic-text
+- **Layout**: taffy
+- **Graphics Rendering**: sdl3-sys
+- **Text Rendering**: cosmic-text
 
-## 🏗️ 项目结构
+## 🏗️ Project Structure
 
 ```text
 crates
-├── client              # 主客户端实现（游戏主循环核心）
-│   ├── app             # 根组件（登录/角色选择/地图切换）
-│   ├── scene           # 地图场景渲染
-│   ├── map             # 地图加载
-│   └── wz              # 资源加载
-├── editor              # WZ结构预览
-├── reactive            # 响应式核心（类Solid）
-├── ui                  # 响应式UI框架
-│   ├── render          # 渲染抽象层
-│   │   └── command.rs  # 绘制指令
-│   ├── widget          # 组件化UI系统
-│   │   ├── debug       # DevTools（元素审查/FPS面板）
-│   │   ├── dynamic     # 动态内容渲染器（支持条件渲染/异步加载）
-│   │   ├── focus_trap  # 焦点管理
-│   │   ├── text        # 文本渲染
-│   │   ├── text_input  # 文本输入组件
-│   │   ├── dynamic     # 动态内容渲染器（支持条件渲染/异步加载）
-│   │   └── scroll_view # 滚动容器
-│   └── geometry/       # 数学基础库（含贝塞尔曲线计算）
-└── wz-reader-rs        # WZ解析库
+├── client              # Main client implementation (game loop core)
+│   ├── app             # Root component (login/character selection/map switching)
+│   ├── scene           # Map scene rendering
+│   ├── map             # Map loading
+│   └── wz              # Resource loading
+├── editor              # WZ structure preview
+├── reactive            # Reactive core (Solid-like)
+├── ui                  # Reactive UI framework
+│   ├── render          # Rendering abstraction layer
+│   │   └── command.rs  # Drawing commands
+│   ├── widget          # Component-based UI system
+│   │   ├── debug       # DevTools (element inspection/FPS panel)
+│   │   ├── dynamic     # Dynamic content renderer (supports conditional rendering/async loading)
+│   │   ├── focus_trap  # Focus management
+│   │   ├── text        # Text rendering
+│   │   ├── text_input  # Text input component
+│   │   ├── dynamic     # Dynamic content renderer (supports conditional rendering/async loading)
+│   │   └── scroll_view # Scroll container
+│   └── geometry/       # Mathematical foundation library (including Bézier curve calculations)
+└── wz-reader-rs        # WZ parser library
 ```
 
-## 🤝 贡献指南
+## 🤝 Contribution Guide
 
-欢迎通过 Issue 和 PR 参与以下方向：
-- 新功能开发
-- 性能优化
-- 平台兼容性改进
-- 文档翻译
+Welcome to participate through Issues and PRs in the following areas:
+- New feature development
+- Performance optimization
+- Platform compatibility improvements
+- Documentation translation
 
-## 📜 免责声明
+## 📜 Disclaimer
 
-本项目为学习研究目的开发，不包含任何游戏资源文件。游戏版权归 NEXON 所有，请通过合法渠道获取游戏客户端。
+This project is developed for learning and research purposes only, and does not contain any game resource files. Game copyrights belong to NEXON. Please obtain the game client through legal channels.
