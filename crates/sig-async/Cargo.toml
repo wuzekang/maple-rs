@@ -1,0 +1,20 @@
+[package]
+name = "sig-async"
+version = "0.1.0"
+edition = "2024"
+description = "Event-loop agnostic async runtime for sig-reactive: trait-based task management and resources"
+
+[dependencies]
+# Core reactive system
+sig-reactive = { path = "../sig-reactive" }
+
+# Async runtime
+futures-util = "0.3"
+futures-channel = "0.3"
+slotmap = "1.1.1"
+
+# Generational box for Copy types
+generational-box = "0.7.2"
+
+[dev-dependencies]
+tokio = { version = "1.0", features = ["time", "rt", "macros"] }

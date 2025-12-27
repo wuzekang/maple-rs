@@ -6,3 +6,5 @@ resolver = "2"
 opt-level = "s"
 lto = true
 
+debug = 1 # 启用调试信息
+strip = false # 不要去除 symbols

@@ -1,0 +1,41 @@
+[package]
+name = "sig"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+# 可选的 image 支持
+image = ["dep:image"]
+
+[dependencies]
+generational-box = "0.7.2"
+taffy = { version = "0.7", features = ["content_size"] }
+# For performance optimizations
+bumpalo = "3.16"
+hashbrown = "0.15"
+strum = { version = "0.26", features = ["derive"] }
+
+# Reactive system
+sig-reactive = { path = "../sig-reactive" }
+sig-async = { path = "../sig-async" }
+
+# Text rendering
+parley = "0.7.0"
+# Vello rendering
+vello = { version = "0.6.0" }
+anyhow = "1.0.98"
+pollster = "0.4.0"
+winit = "0.30.10"
+glam = "0.30.9"
+slotmap = "1.1.1"
+
+# Async runtime for tasks
+futures-util = "0.3"
+futures-timer = "3.0"
+tokio = { version = "1.0", features = ["full"] }
+
+# Optional dependencies
+image = { version = "0.25", optional = true }
+
+[dev-dependencies]
+wz-parser = { path = "../wz-parser", features = ["json", "serde"] }

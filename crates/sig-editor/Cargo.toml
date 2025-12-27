@@ -1,0 +1,13 @@
+[package]
+name = "sig-editor"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sig = { path = "../sig", features = ["image"] }
+wz-parser = { path = "../wz-parser", features = ["json", "serde"] }
+vello = "0.6.0"
+image = "0.25"
+serde_json = "1.0"
+anyhow = "1.0"
+clipboard-rs = "0.1.11"
