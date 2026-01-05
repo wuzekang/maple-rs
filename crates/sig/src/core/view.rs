@@ -89,9 +89,16 @@ fn flatten(node: &Node, children: &mut Vec<ViewId>) {
       }
     }
     Node::Dynamic(signal) => {
-      let nodes = signal.read();
-      for (node, _) in nodes.iter() {
-        flatten(node, children);
+      // Try to read the signal - it might have been dropped if the scope was destroyed
+      if let Some(nodes) = signal.try_read() {
+        for (node, _) in nodes.iter() {
+          flatten(node, children);
+        }
+      } else {
+        // Signal was dropped - this can happen when a Dynamic is created in a scope
+        // that gets destroyed before the View's effect runs
+        // This is safe to ignore as the content should be cleaned up
+        eprintln!("Warning: Attempted to read a dropped Dynamic signal in View::flatten");
       }
     }
   }

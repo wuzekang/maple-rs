@@ -17,7 +17,9 @@ type PortalItemId = u64;
 #[derive(Clone)]
 struct PortalItem {
   id: PortalItemId,
-  node: crate::Node,
+  /// Store a factory function instead of the node directly
+  /// This allows the node to be created in the portal context's scope
+  factory: Rc<dyn Fn() -> crate::Node>,
 }
 
 // Manual PartialEq implementation - compare by ID only
@@ -39,18 +41,19 @@ impl PortalContext {
     let items: crate::Signal<Vec<PortalItem>> = crate::Signal::new(Vec::new());
 
     // Use dynamic::each for efficient rendering
-    let target = each(move || items.read().clone(), |item| item.node);
+    // The factory is called here, in the portal context's scope
+    let target = each(move || items.read().clone(), |item| (item.factory)());
 
     PortalContext { target, items }
   }
 
-  fn add_child(&self, node: crate::Node) -> PortalItemId {
+  fn add_child(&self, factory: Rc<dyn Fn() -> crate::Node>) -> PortalItemId {
     use std::sync::atomic::{AtomicU64, Ordering};
     static ITEM_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 
     let id = ITEM_ID_COUNTER.fetch_add(1, Ordering::SeqCst);
 
-    self.items.write().push(PortalItem { id, node });
+    self.items.write().push(PortalItem { id, factory });
 
     id
   }
@@ -101,10 +104,11 @@ pub fn provide() -> crate::Dynamic {
 /// Render a view into the portal with automatic cleanup
 ///
 /// This function consumes the portal context and renders the view into it.
-/// The view is automatically removed when the current scope is destroyed.
+/// The content factory will be called in the portal context's scope, ensuring
+/// that any Signals created (e.g., from Dynamic) have the correct lifecycle.
 ///
 /// # Arguments
-/// * `content` - The view to render into the portal
+/// * `content_factory` - A function that produces the view to render into the portal
 ///
 /// # Panics
 /// Panics if called outside a scope with portal context.
@@ -115,24 +119,32 @@ pub fn provide() -> crate::Dynamic {
 /// use sig::portal;
 ///
 /// fn show_modal() {
-///     // Render modal to portal
-///     portal::child(
-///         view()
-///             .style(|s| s.padding(20.0).background(Color::WHITE))
-///             .child(text("Modal Content"))
-///     );
+///     // Render modal to portal using a closure
+///     portal::child(move || {
+///         dynamic(move || {
+///             view()
+///                 .style(|s| s.padding(20.0).background(Color::WHITE))
+///                 .child(text("Modal Content"))
+///         })
+///     });
 ///     
 ///     // Automatically cleaned up when this scope is destroyed!
 /// }
 /// ```
-pub fn child<VT: ViewTuple>(content: VT) {
+pub fn child<F, VT>(content_factory: F)
+where
+  F: Fn() -> VT + 'static,
+  VT: ViewTuple,
+{
   // Consume context
   let ctx = consume_context::<PortalContext>()
     .expect("portal::child() called without portal::provide() in parent scope");
 
+  // Wrap the factory to convert ViewTuple to Node
+  let factory = Rc::new(move || content_factory().into_node());
+
   // Add child and get ID for cleanup
-  let node = content.into_node();
-  let item_id = ctx.add_child(node);
+  let item_id = ctx.add_child(factory);
 
   // Auto cleanup when scope is destroyed
   crate::on_cleanup(move || {
@@ -162,13 +174,12 @@ mod tests {
       let _container = provide();
 
       create_scope(|| {
-        let view = crate::view().name("test-view");
-        child(view);
+        // Use closure to create view
+        child(move || crate::view().name("test-view"));
 
         // Child should be added to portal
         let ctx = consume_context::<PortalContext>().unwrap();
-        let items = ctx.items.borrow();
-        assert_eq!(items.read().len(), 1);
+        assert_eq!(ctx.items.read().len(), 1);
       });
     });
   }
@@ -182,8 +193,8 @@ mod tests {
 
       {
         create_scope(|| {
-          let view = crate::view().name("temp-view");
-          child(view);
+          // Use closure to create view
+          child(move || crate::view().name("temp-view"));
         });
         // Scope destroyed, cleanup should have run
       }
@@ -192,8 +203,7 @@ mod tests {
       std::thread::sleep(std::time::Duration::from_millis(10));
 
       // Child should be removed
-      let items = ctx_outer.items.borrow();
-      assert_eq!(items.read().len(), 0);
+      assert_eq!(ctx_outer.items.read().len(), 0);
     });
   }
 }

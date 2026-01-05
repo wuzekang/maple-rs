@@ -4671,7 +4671,9 @@ dependencies = [
  "image",
  "serde_json",
  "sig",
+ "tokio",
  "vello",
+ "winit 0.30.12",
  "wz-parser",
 ]
 
