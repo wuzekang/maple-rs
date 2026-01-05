@@ -225,7 +225,7 @@ impl<T: Element> Popper<T> {
     let ref_id = reference.id();
 
     // Render popper content to portal
-    portal::child(dynamic(move || {
+    portal::child(move || dynamic(move || {
       if !*open.read() {
         return fragment(());
       }

@@ -17,7 +17,8 @@ use serde_json::{Map, Value};
 use sig::prelude::*;
 use sig::render::{run, AppConfig};
 use sig::theme::{Border, FontSize, Radius, Size, Spacing};
-use sig::{button, dynamic, Image, Signal, TreeNode, TreeView};
+use sig::{button, dynamic, Image, Signal, TreeNode, TreeView, Popper, Placement};
+use sig::event::Cursor;
 use std::rc::Rc;
 use vello::peniko::Color;
 use wz_parser::util::{node_util, resolve_base};
@@ -97,6 +98,34 @@ impl TreeNode for WzTreeNode {
 }
 
 // ============================================================================
+// Data Structures for Search
+// ============================================================================
+
+/// Search result item
+#[derive(Clone)]
+struct SearchResult {
+    path: String,           // 节点完整路径
+    node_name: String,      // 节点名称
+    value_type: String,     // 值类型（"Int", "String", "Vector" 等）
+    value_display: String,  // 值的可读表示
+    node: WzNodeArc,       // 节点引用（用于定位）
+}
+
+impl PartialEq for SearchResult {
+    fn eq(&self, other: &Self) -> bool {
+        // Compare by Arc pointer equality for the node
+        std::sync::Arc::ptr_eq(&self.node, &other.node)
+    }
+}
+
+/// Serializable value representation
+#[derive(Clone)]
+struct SerializableValue {
+    type_name: String,
+    display: String,
+}
+
+// ============================================================================
 // Application State
 // ============================================================================
 
@@ -106,6 +135,14 @@ struct AppState {
   left_width: Signal<f32>,
   error_message: Signal<Option<String>>,
   search_text: Signal<String>, // Search text for filtering
+
+  // New fields for search feature
+  tree_view: Signal<Option<Rc<TreeView<WzTreeNode>>>>,
+  search_results: Signal<Vec<SearchResult>>,
+  show_search_dropdown: Signal<bool>,
+  selected_result_index: Signal<Option<usize>>,
+  saved_open_states: Signal<std::collections::HashMap<u64, bool>>,
+  location_success: Signal<Option<String>>,
 }
 
 impl AppState {
@@ -116,19 +153,443 @@ impl AppState {
       left_width: Signal::new(DEFAULT_LEFT_WIDTH),
       error_message: Signal::new(None),
       search_text: Signal::new(String::new()),
+
+      // Initialize new fields
+      tree_view: Signal::new(None),
+      search_results: Signal::new(Vec::new()),
+      show_search_dropdown: Signal::new(false),
+      selected_result_index: Signal::new(None),
+      saved_open_states: Signal::new(std::collections::HashMap::new()),
+      location_success: Signal::new(None),
     })
   }
+}
+
+// ============================================================================
+// WZ Search Functions
+// ============================================================================
+
+/// 搜索 WZ 树中的所有可序列化值（最多返回 50 条）
+///
+/// 遍历整个 WZ 树，查找所有包含搜索文本的节点值。
+/// 使用异步方式避免阻塞 UI。
+/// 
+/// **注意**：此函数会解析所有节点（包括未展开的），可能耗时较长。
+fn search_wz_values(root: &WzNodeArc, search_term: &str) -> Vec<SearchResult> {
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::collections::HashSet;
+
+    let results = Mutex::new(Vec::new());
+    let search_term = search_term.to_lowercase();
+    let nodes_visited = AtomicUsize::new(0);
+    let visited_ids = Mutex::new(HashSet::new());
+    let parse_errors = AtomicUsize::new(0);
+
+    println!("  🔎 [Search] Walking tree for term: '{}' (parsing all nodes...)", search_term);
+
+    // 手动实现非递归遍历，避免栈溢出和循环引用
+    let mut stack = vec![root.clone()];
+    
+    while let Some(node_arc) = stack.pop() {
+        // 检查是否已访问（通过指针地址判断）
+        let node_id = std::sync::Arc::as_ptr(&node_arc) as usize;
+        {
+            let mut visited = visited_ids.lock().unwrap();
+            if visited.contains(&node_id) {
+                // println!("  ⚠️  [Search] Detected circular reference, skipping node");
+                continue;
+            }
+            visited.insert(node_id);
+        }
+
+        let count = nodes_visited.fetch_add(1, Ordering::Relaxed);
+        if count % 5000 == 0 && count > 0 {
+            let matches = results.lock().unwrap().len();
+            // println!("  📊 [Search] Visited {} nodes, found {} matches so far...", count, matches);
+        }
+
+        // 限制最大访问节点数，防止无限循环或超长搜索
+        // Base.wz 通常有 10-20 万个节点
+        if count > 500000 {
+            eprintln!("  ⚠️  [Search] Exceeded maximum node limit (500000), stopping search");
+            break;
+        }
+
+        // 🔑 关键修复：在访问节点前先解析它（懒加载）
+        // 这样未展开的节点也能被搜索到
+        if let Err(_e) = node_util::parse_node(&node_arc) {
+            // 解析失败不是致命错误，继续处理
+            // 大多数失败是因为节点已经被解析过了
+            parse_errors.fetch_add(1, Ordering::Relaxed);
+        }
+
+        let node_read = node_arc.read().unwrap();
+
+        // 提取可序列化的值
+        let value_info = extract_serializable_value(&node_read);
+
+        if let Some(info) = value_info {
+            // 不区分大小写的文本匹配
+            let value_lower = info.display.to_lowercase();
+
+            if value_lower.contains(&search_term) {
+                let mut results = results.lock().unwrap();
+                if results.len() < 50 {
+                    results.push(SearchResult {
+                        path: node_read.get_full_path(),
+                        node_name: node_read.name.to_string(),
+                        value_type: info.type_name,
+                        value_display: info.display,
+                        node: node_arc.clone(),
+                    });
+                    
+                    // 早停：如果已经找到 50 个结果，可以提前结束
+                    // 但继续处理当前栈中的节点，以防遗漏更相关的结果
+                    if results.len() >= 50 {
+                        println!("  ✅ [Search] Found 50 matches, continuing to process remaining nodes in stack...");
+                    }
+                }
+            }
+        }
+
+        // 添加子节点到栈中（即使已经找到 50 个结果也继续，以获得更全面的搜索）
+        for child in node_read.children.values() {
+            stack.push(child.clone());
+        }
+    }
+
+    // 限制结果数量为 50
+    let mut results = results.into_inner().unwrap();
+    let total_visited = nodes_visited.load(Ordering::Relaxed);
+    let total_errors = parse_errors.load(Ordering::Relaxed);
+    println!("  📊 [Search] Complete: visited {} nodes, {} parse errors, found {} matches", 
+             total_visited, total_errors, results.len());
+    
+    results.truncate(50);
+
+    results
+}
+
+/// 提取节点的可序列化值
+///
+/// 尝试从 WzNode 中提取所有可序列化的值类型。
+/// 如果节点不包含可序列化的值，返回 None。
+fn extract_serializable_value(node: &wz_parser::WzNode) -> Option<SerializableValue> {
+    use wz_parser::WzNodeCast;
+
+    // 尝试获取 WzValue
+    if let Some(wz_value) = node.try_as_value() {
+        match wz_value {
+            // 跳过的类型
+            WzValue::Null => None,
+            WzValue::RawData(_) => None,
+            WzValue::Lua(_) => None,
+
+            // 数字类型
+            WzValue::Short(v) => Some(SerializableValue {
+                type_name: "Short".to_string(),
+                display: v.to_string(),
+            }),
+
+            WzValue::Int(v) => Some(SerializableValue {
+                type_name: "Int".to_string(),
+                display: v.to_string(),
+            }),
+
+            WzValue::Long(v) => Some(SerializableValue {
+                type_name: "Long".to_string(),
+                display: v.to_string(),
+            }),
+
+            WzValue::Float(v) => Some(SerializableValue {
+                type_name: "Float".to_string(),
+                display: v.to_string(),
+            }),
+
+            WzValue::Double(v) => Some(SerializableValue {
+                type_name: "Double".to_string(),
+                display: v.to_string(),
+            }),
+
+            // Vector 类型
+            WzValue::Vector(v) => Some(SerializableValue {
+                type_name: "Vector".to_string(),
+                display: format!("({}, {})", v.0, v.1),
+            }),
+
+            // 字符串类型
+            WzValue::String(s) | WzValue::UOL(s) => {
+                s.get_string().ok().map(|text| SerializableValue {
+                    type_name: if matches!(wz_value, WzValue::String(_)) {
+                        "String"
+                    } else {
+                        "UOL"
+                    }.to_string(),
+                    display: text,
+                })
+            }
+
+            WzValue::ParsedString(s) => Some(SerializableValue {
+                type_name: "String".to_string(),
+                display: s.clone(),
+            }),
+        }
+    } else {
+        None
+    }
+}
+/// 设置搜索防抖效果
+fn setup_search_effect(state: &Rc<AppState>) {
+    let search_text = state.search_text.clone();
+    let root_node = state.root_node.clone();
+    let search_results = state.search_results.clone();
+    let show_dropdown = state.show_search_dropdown.clone();
+    let selected_index = state.selected_result_index.clone();
+
+    sig::create_effect(move || {
+        let text = search_text.read().clone();
+
+        // 空搜索或太短时不搜索
+        if text.len() < 2 {
+            *show_dropdown.write() = false;
+            *search_results.write() = Vec::new();
+            *selected_index.write() = None;
+            return;
+        }
+
+        *show_dropdown.write() = true;
+        *selected_index.write() = None; // 重置选择
+
+        let root = root_node.read();
+
+        if let Some(tree_root) = root.as_ref() {
+            let term = text.clone();
+            let results_signal = search_results.clone();
+            let tree_root_arc = tree_root.0.clone();
+
+            println!("🔍 [Search] Starting search for term: '{}'", term);
+
+            // 使用 spawn 异步搜索，避免阻塞 UI
+            sig::spawn(async move {
+                println!("🚀 [Search] sig::spawn task started");
+                
+                // 在后台线程执行耗时的搜索操作
+                let start = std::time::Instant::now();
+                let results = tokio::task::spawn_blocking(move || {
+                    println!("⚙️  [Search] spawn_blocking: executing search in background thread");
+                    let results = search_wz_values(&tree_root_arc, &term);
+                    println!("✅ [Search] spawn_blocking: found {} results", results.len());
+                    results
+                }).await.unwrap_or_else(|e| {
+                    eprintln!("❌ [Search] spawn_blocking failed: {:?}", e);
+                    Vec::new()
+                });
+                
+                let elapsed = start.elapsed();
+                println!("⏱️  [Search] Total search time: {:?}", elapsed);
+                
+                // 在主线程更新 signal
+                *results_signal.write() = results;
+                println!("📝 [Search] Results written to signal");
+            });
+        }
+    });
 }
 
 // ============================================================================
 // UI Components
 // ============================================================================
 
+/// Search box with popper dropdown
+fn search_box_with_dropdown(state: Rc<AppState>) -> sig::Node {
+  let search_text = state.search_text.clone();
+  let show_dropdown = state.show_search_dropdown.clone();
+  let search_results = state.search_results.clone();
+  let selected_index = state.selected_result_index.clone();
+
+  // Reference element (search input)
+  let reference = view()
+    .style(|s| {
+      s.w_full()
+        .padding(Spacing::MD)
+        .border_bottom(Border::THIN)
+        .border_color(BORDER_COLOR)
+        .background(PANEL_HEADER_BG)
+        .flex_shrink(0.0)
+    })
+    .child(
+      sig::text_input()
+        .placeholder("Search WZ values...")
+        .value(search_text.clone())
+        .style(|s| {
+          s.w_full()
+            .height(Size::SM)
+            .padding_left(Spacing::SM)
+            .padding_right(Spacing::SM)
+            .border_radius(Radius::MD)
+            .border_all(Border::THIN, BORDER_COLOR)
+            .background(PANEL_BG)
+            .font_size(FontSize::SM)
+            .color(TEXT_PRIMARY)
+        })
+    );
+
+  // Dropdown content as dynamic
+  let state_for_content = state.clone();
+  let dropdown_content = dynamic(move || {
+    let show = *show_dropdown.read();
+    let results = search_results.read();
+    let selected = *selected_index.read();
+
+    if !show || results.is_empty() {
+      return view();
+    }
+
+    // Build dropdown items
+    let items: Vec<View> = results
+      .iter()
+      .enumerate()
+      .map(|(idx, result)| {
+        let is_selected = selected == Some(idx);
+        let result_clone = result.clone();
+        let state_clone = state_for_content.clone();
+
+        view()
+          .style(move |s| {
+            s.w_full()
+              .padding(Spacing::SM)
+              .background(if is_selected {
+                SUCCESS_COLOR.with_alpha(0.2)
+              } else {
+                PANEL_BG
+              })
+              .cursor(Cursor::Pointer)
+          })
+          .child(
+            text(format!("{}: {}", result.value_type, result.value_display))
+              .style(|s| s.font_size(FontSize::SM).color(TEXT_PRIMARY))
+          )
+          .on_click(move |_| {
+            let state = state_clone.clone();
+            let result = result_clone.clone();
+
+            // Spawn async task for location
+            sig::spawn(async move {
+              if let Some(tree_view) = state.tree_view.read_untracked().as_ref() {
+                let tree_view_clone = tree_view.clone();
+                let node_clone = result.node.clone();
+                let node_for_error = node_clone.clone();
+                
+                let node_name = {
+                  let n = node_clone.read().unwrap();
+                  format!("{} ({})", n.name, n.get_full_path())
+                };
+                println!("🎯 [Location] Starting node location for: {}", node_name);
+                
+                // 在后台线程执行耗时的定位操作
+                println!("🚀 [Location] sig::spawn task started");
+                let start = std::time::Instant::now();
+                
+                let (path_nodes, target_node) = tokio::task::spawn_blocking(move || {
+                  println!("⚙️  [Location] spawn_blocking: building node path in background thread");
+                  // 构建从目标节点到根节点的路径
+                  let mut path_to_root = Vec::new();
+                  let mut current = Some(node_clone.clone());
+
+                  while let Some(node) = current {
+                    path_to_root.push(node.clone());
+
+                    let node_read = node.read().unwrap();
+                    let parent = node_read.parent.upgrade();
+
+                    if parent.is_none() {
+                      break;
+                    }
+
+                    current = parent;
+                  }
+
+                  // 反转路径（从根到目标）
+                  path_to_root.reverse();
+                  
+                  println!("✅ [Location] spawn_blocking: path built with {} nodes", path_to_root.len());
+                  (path_to_root, node_clone)
+                }).await.unwrap_or_else(|e| {
+                  eprintln!("❌ [Location] spawn_blocking failed: {:?}", e);
+                  (Vec::new(), node_for_error)
+                });
+                
+                let elapsed = start.elapsed();
+                println!("⏱️  [Location] Path building time: {:?}", elapsed);
+
+                // 在主线程执行需要访问 Signal 的操作
+                println!("📂 [Location] Expanding {} nodes in path", path_nodes.len());
+                
+                // 保存当前展开状态
+                let current_open_states = tree_view_clone.get_open_states();
+                *state.saved_open_states.write() = current_open_states;
+
+                // 展开路径中的所有节点
+                for (idx, node_arc) in path_nodes.iter().enumerate() {
+                  let tree_node = WzTreeNode(node_arc.clone());
+
+                  // 如果节点有子节点且未展开，则展开它
+                  if tree_node.has_children() && !tree_view_clone.is_open(&tree_node) {
+                    tree_view_clone.toggle_node(&tree_node);
+                    println!("  📂 [Location] Expanded node {}/{}", idx + 1, path_nodes.len());
+                  }
+                }
+
+                // 选中目标节点
+                let target_tree_node = WzTreeNode(target_node.clone());
+                tree_view_clone.select_node(&target_tree_node);
+
+                // 更新 selected_node signal
+                *state.selected_node.write() = Some(target_node.clone());
+
+                // 显示定位成功提示
+                let node_read = target_node.read().unwrap();
+                let full_path = node_read.get_full_path();
+                *state.location_success.write() = Some(format!("✅ 已定位到: {}", full_path));
+                
+                println!("✅ [Location] Node located successfully: {}", full_path);
+              }
+              *state.show_search_dropdown.write() = false;
+            });
+          })
+      })
+      .collect();
+
+    // Create dropdown container
+    view()
+      .style(|s| {
+        s.width(400.0)
+          .max_height(300.0)
+          .border_all(Border::THIN, BORDER_COLOR)
+          .border_radius(Radius::MD)
+          .background(PANEL_BG)
+          .flex()
+          .flex_col()
+          .overflow_y(taffy::Overflow::Scroll)
+      })
+      .child(items)
+  });
+
+  // Create Popper and build to portal
+  Popper::new(reference)
+    .content(dropdown_content)
+    .placement(Placement::BottomStart)
+    .offset(4.0)
+    .open(show_dropdown)
+    .build_to_portal()
+}
+
 /// Left panel with tree view
 fn left_panel(state: &Rc<AppState>) -> View {
   let root_signal = state.root_node.clone();
   let selected = state.selected_node.clone();
-  let search_text = state.search_text.clone();
+  let tree_view_ref = state.tree_view.clone();
 
   view()
     .style(|s| {
@@ -141,42 +602,23 @@ fn left_panel(state: &Rc<AppState>) -> View {
         .border_color(BORDER_COLOR)
     })
     .child((
-      // Search box at the top (no linking logic with tree)
-      view()
-        .style(|s| {
-          s.w_full()
-            .padding(Spacing::MD) // 12px padding
-            .border_bottom(Border::THIN)
-            .border_color(BORDER_COLOR)
-            .background(PANEL_HEADER_BG)
-            .flex_shrink(0.0)
-        })
-        .child(
-          sig::text_input()
-            .placeholder("Search...")
-            .value(search_text)
-            .style(|s| {
-              s.w_full()
-                .height(Size::SM) // 32px
-                .padding_left(Spacing::SM)
-                .padding_right(Spacing::SM)
-                .border_radius(Radius::MD) // 6px
-                .border_all(Border::THIN, BORDER_COLOR)
-                .background(PANEL_BG)
-                .font_size(FontSize::SM)
-                .color(TEXT_PRIMARY)
-            }),
-        ),
+      // Search box with popper dropdown
+      search_box_with_dropdown(state.clone()),
       // Tree view
       dynamic(move || {
         if let Some(root) = root_signal.read().as_ref() {
           let root_clone = root.clone();
           let selected_clone = selected.clone();
 
-          // Create TreeView without search (removed .enable_search())
-          let tree_view = TreeView::new(root_clone)
-            .show_child_count(true)
-            .item_height(Size::SM - 4.0); // 28px - slightly smaller than button height
+          // Create TreeView
+          let tree_view = Rc::new(
+            TreeView::new(root_clone)
+              .show_child_count(true)
+              .item_height(Size::SM - 4.0) // 28px - slightly smaller than button height
+          );
+
+          // Store TreeView reference
+          *tree_view_ref.write() = Some(tree_view.clone());
 
           let tree_selected = tree_view.selected();
 
@@ -187,7 +629,8 @@ fn left_panel(state: &Rc<AppState>) -> View {
             }
           });
 
-          tree_view.build()
+          // Clone the TreeView and call build (since build() takes self)
+          (*tree_view).clone().build()
         } else {
           view()
             .style(|s| s.w_full().h_full().flex().items_center().justify_center())
@@ -202,6 +645,7 @@ fn left_panel(state: &Rc<AppState>) -> View {
 /// Right panel with node details
 fn right_panel(state: &Rc<AppState>) -> View {
   let selected_node = state.selected_node.clone();
+  let location_success = state.location_success.clone();
 
   view()
     .style(|s| {
@@ -213,50 +657,73 @@ fn right_panel(state: &Rc<AppState>) -> View {
         .background(PANEL_BG)
         .min_width(0.0) // Prevent content from expanding beyond container
     })
-    .child(dynamic(move || {
-      if let Some(node) = selected_node.read().as_ref() {
-        let node_data = node.read().unwrap();
-        let full_path = node_data.get_full_path();
-        let object_type = node_data.object_type.clone();
-        drop(node_data);
+    .child((
+      // Location success message (if any)
+      dynamic(move || {
+        if let Some(success_msg) = location_success.read().as_ref() {
+          view()
+            .style(|s| {
+              s.w_full()
+                .padding(Spacing::SM)
+                .background(SUCCESS_COLOR.with_alpha(0.1))
+                .border_bottom(Border::THIN)
+                .border_color(SUCCESS_COLOR)
+                .flex_shrink(0.0)
+            })
+            .child(
+              text(success_msg.clone())
+                .style(|s| s.font_size(FontSize::SM).color(SUCCESS_COLOR))
+            )
+        } else {
+          view().style(|s| s.width(0.0).height(0.0))
+        }
+      }),
+      // Existing content area
+      dynamic(move || {
+        if let Some(node) = selected_node.read().as_ref() {
+          let node_data = node.read().unwrap();
+          let full_path = node_data.get_full_path();
+          let object_type = node_data.object_type.clone();
+          drop(node_data);
 
-        view()
-          .style(|s| s.flex().flex_col().w_full().h_full())
-          .child((
-            // Header with path (fixed at top) - using design tokens
-            view()
-              .style(|s| {
-                s.w_full()
-                  .padding(Spacing::LG) // 16px - consistent padding
-                  .border_bottom(Border::THIN) // 1px border
-                  .border_color(BORDER_COLOR)
-                  .background(PANEL_HEADER_BG)
-                  .flex_shrink(0.0)
-              })
-              .child(
-                text(full_path).style(|s| s.font_size(FontSize::MD).color(TEXT_PRIMARY)), // 14px
-              ),
-            // Content (scrollable) - using design tokens
-            view()
-              .style(|s| {
-                s.w_full()
-                  .flex_grow(1.0)
-                  .min_height(0.0)
-                  .min_width(0.0)
-                  .overflow_y_scroll()
-                  .padding(Spacing::LG) // 16px - consistent padding
-              })
-              .child(render_node_content(node.clone(), object_type)),
-          ))
-      } else {
-        view()
-          .style(|s| s.w_full().h_full().flex().items_center().justify_center())
-          .child(
-            text("Select a node to view details")
-              .style(|s| s.font_size(FontSize::MD).color(TEXT_SECONDARY)), // 14px
-          )
-      }
-    }))
+          view()
+            .style(|s| s.flex().flex_col().w_full().h_full())
+            .child((
+              // Header with path (fixed at top) - using design tokens
+              view()
+                .style(|s| {
+                  s.w_full()
+                    .padding(Spacing::LG) // 16px - consistent padding
+                    .border_bottom(Border::THIN) // 1px border
+                    .border_color(BORDER_COLOR)
+                    .background(PANEL_HEADER_BG)
+                    .flex_shrink(0.0)
+                })
+                .child(
+                  text(full_path).style(|s| s.font_size(FontSize::MD).color(TEXT_PRIMARY)), // 14px
+                ),
+              // Content (scrollable) - using design tokens
+              view()
+                .style(|s| {
+                  s.w_full()
+                    .flex_grow(1.0)
+                    .min_height(0.0)
+                    .min_width(0.0)
+                    .overflow_y_scroll()
+                    .padding(Spacing::LG) // 16px - consistent padding
+                })
+                .child(render_node_content(node.clone(), object_type)),
+            ))
+        } else {
+          view()
+            .style(|s| s.w_full().h_full().flex().items_center().justify_center())
+            .child(
+              text("Select a node to view details")
+                .style(|s| s.font_size(FontSize::MD).color(TEXT_SECONDARY)), // 14px
+            )
+        }
+      }),
+    ))
 }
 
 // ============================================================================
@@ -504,6 +971,9 @@ fn render_node_content(node: WzNodeArc, object_type: WzObjectType) -> View {
 
 /// Main application view
 fn app_view() -> View {
+  // Create portal container (must be at root level)
+  let portal_root = sig::portal::provide();
+
   let state = AppState::new();
 
   // Use use_resource to load WZ file asynchronously
@@ -511,27 +981,45 @@ fn app_view() -> View {
   let root_node_signal = state.root_node.clone();
   let error_signal = state.error_message.clone();
 
+  println!("📂 [Startup] Loading WZ file: {}", wz_file_path);
+
   let wz_resource = use_resource(move || {
     let path = wz_file_path.to_string();
     async move {
+      println!("🔄 [Resource] Starting WZ file load...");
+      let start = std::time::Instant::now();
+      
       // This runs in a background task, not blocking the UI
-      match resolve_base(&path, None) {
-        Ok(node) => Ok(node),
-        Err(e) => Err(format!("Failed to load WZ file: {}", e)),
-      }
+      let result = match resolve_base(&path, None) {
+        Ok(node) => {
+          let elapsed = start.elapsed();
+          println!("✅ [Resource] WZ file loaded successfully in {:?}", elapsed);
+          Ok(node)
+        },
+        Err(e) => {
+          let elapsed = start.elapsed();
+          eprintln!("❌ [Resource] Failed to load WZ file after {:?}: {}", elapsed, e);
+          Err(format!("Failed to load WZ file: {}", e))
+        }
+      };
+      
+      result
     }
   });
 
   // Update state when resource is ready
   create_effect(move || {
     if wz_resource.ready() {
+      println!("📝 [State] Resource ready, updating state...");
       if let Some(result) = wz_resource.value() {
         match result {
           Ok(node) => {
+            println!("✅ [State] Root node set successfully");
             *root_node_signal.write() = Some(WzTreeNode(node));
             *error_signal.write() = None;
           }
           Err(err) => {
+            eprintln!("❌ [State] Setting error: {}", err);
             *error_signal.write() = Some(err);
           }
         }
@@ -539,11 +1027,15 @@ fn app_view() -> View {
     }
   });
 
+  // Setup search effect
+  println!("🔧 [Startup] Setting up search effect...");
+  setup_search_effect(&state);
+
   let error_display = state.error_message.clone();
 
   view()
     .style(|s| s.w_full().h_full().flex().flex_col().background(BG_COLOR))
-    .child(dynamic(move || {
+    .child((dynamic(move || {
       // Show error if any
       if let Some(error) = error_display.read().as_ref() {
         view()
@@ -581,16 +1073,25 @@ fn app_view() -> View {
             right_panel(&state),
           ))
       }
-    }))
+    }),
+    portal_root
+  ))
 }
 
 fn main() -> anyhow::Result<()> {
-  run(
+  println!("🚀 ============================================");
+  println!("🚀 WZ Editor Starting...");
+  println!("🚀 ============================================");
+  
+  let result = run(
     AppConfig {
       title: "WZ Editor (Sig Framework)".to_string(),
       width: 1200.0,
       height: 800.0,
     },
     app_view,
-  )
+  );
+  
+  println!("👋 WZ Editor shutting down");
+  result
 }

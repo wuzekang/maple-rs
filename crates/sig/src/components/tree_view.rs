@@ -289,7 +289,82 @@ impl<T: TreeNode> TreeView<T> {
     pub fn visible_node_count(&self) -> usize {
         self.flat_nodes.read_untracked().len()
     }
-    
+
+    // ===== New Methods for Search Feature =====
+
+    /// Get all open states (keyed by node hash)
+    ///
+    /// Returns a copy of the current open/closed states for all nodes.
+    /// Useful for saving the current view state before performing operations
+    /// that modify the tree structure.
+    pub fn get_open_states(&self) -> HashMap<u64, bool> {
+        self.open_states.read_untracked().clone()
+    }
+
+    /// Set open states (keyed by node hash) and rebuild flat list
+    ///
+    /// Allows bulk setting of node expand/collapse states.
+    /// Automatically rebuilds the flattened node list to reflect changes.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let mut states = tree_view.get_open_states();
+    /// states.insert(node_key, true);  // Expand a specific node
+    /// tree_view.set_open_states(states);
+    /// ```
+    pub fn set_open_states(&self, states: HashMap<u64, bool>) {
+        *self.open_states.write() = states;
+        self.rebuild_flat_list();
+    }
+
+    /// Find index of a node in the flattened list
+    ///
+    /// Returns the position of the node in the currently flattened (visible) list.
+    /// Returns `None` if the node is not currently visible (e.g., parent is collapsed).
+    ///
+    /// # Use Case
+    ///
+    /// Useful for calculating scroll positions when implementing `scroll_to_node()`.
+    pub fn find_node_index(&self, node: &T) -> Option<usize> {
+        self.flat_nodes.read_untracked()
+            .iter()
+            .position(|flat_node| {
+                flat_node.node == *node
+            })
+    }
+
+    /// Scroll to make a node visible in the viewport
+    ///
+    /// Programmatically scrolls the TreeView to ensure the specified node is visible.
+    /// If the node is not currently in the flattened list (e.g., parent collapsed),
+    /// this method does nothing.
+    ///
+    /// # Implementation Note
+    ///
+    /// Currently requires VirtualList to expose `scroll_offset` for full functionality.
+    /// This is a placeholder implementation for future use.
+    ///
+    /// # Parameters
+    ///
+    /// - `node`: The node to scroll into view
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// tree_view.expand_to_node(&target_node);
+    /// tree_view.select_node(&target_node);
+    /// tree_view.scroll_to_node(&target_node);  // Make it visible
+    /// ```
+    pub fn scroll_to_node(&self, node: &T) {
+        // Placeholder: Requires VirtualList to expose scroll_offset
+        // This will be implemented when VirtualList API is extended
+        let _index = self.find_node_index(node);
+        // TODO: Implement scrolling when VirtualList exposes scroll_offset
+    }
+
+    // ===== End New Methods =====
+
     // ------------------------------------------------------------------------
     // Internal Utilities
     // ------------------------------------------------------------------------
