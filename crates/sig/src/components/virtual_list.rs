@@ -116,6 +116,7 @@ where
   item_height: f32,
   buffer_size: usize,
   disabled: bool,
+  scroll_to: Option<Signal<Option<f32>>>,
 }
 
 impl<T> VirtualList<T>
@@ -136,6 +137,7 @@ where
       item_height: 32.0,
       buffer_size: 10,
       disabled: false,
+      scroll_to: None,
     }
   }
 
@@ -168,6 +170,14 @@ where
     self
   }
 
+  /// Set scroll target signal
+  ///
+  /// When this signal emits a value, the list will scroll to that vertical offset.
+  pub fn scroll_to(mut self, signal: Signal<Option<f32>>) -> Self {
+    self.scroll_to = Some(signal);
+    self
+  }
+
   /// Build virtual list view
   ///
   /// # Parameters
@@ -182,10 +192,38 @@ where
     let buffer_size = self.buffer_size;
     let disabled = self.disabled;
     let height = self.height;
+    let scroll_to_signal = self.scroll_to;
+    let view_id = self.view.id;
 
     // Scroll state
     let scroll_offset = Signal::new(0.0);
     let viewport_height = Signal::new(height.unwrap_or(600.0));
+
+    // Handle programmatic scrolling
+    if let Some(signal) = scroll_to_signal {
+      let scroll_offset = scroll_offset.clone();
+      crate::create_effect(move || {
+        if let Some(target_offset) = *signal.read() {
+          // Update scroll offset in view state
+          crate::runtime::with_layout_mut(|runtime| {
+            if let Some(view_state) = runtime.view_states.get_mut(&view_id) {
+              view_state.scroll_offset.1 = target_offset;
+              view_state.dirty = true;
+            }
+          });
+
+          // Request redraw
+          crate::runtime::with_window(|window_state| {
+            if let Some(window) = &window_state.redraw_requester {
+              window.request_redraw();
+            }
+          });
+
+          // Update internal scroll signal to keep in sync
+          *scroll_offset.write() = target_offset;
+        }
+      });
+    }
 
     // Container style
     self.view.style(move |s| {
