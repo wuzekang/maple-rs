@@ -90,7 +90,7 @@ fn flatten(node: &Node, children: &mut Vec<ViewId>) {
     }
     Node::Dynamic(signal) => {
       // Try to read the signal - it might have been dropped if the scope was destroyed
-      if let Some(nodes) = signal.try_read() {
+      if let Some(nodes) = Some(signal.read()) {
         for (node, _) in nodes.iter() {
           flatten(node, children);
         }
