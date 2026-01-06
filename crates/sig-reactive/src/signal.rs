@@ -128,23 +128,27 @@ impl Drop for WriteGuardMetadata {
   fn drop(&mut self) {
     // At this point, WriteGuard.inner has already been dropped,
     // so the signal borrow is released and we can safely run effects
-    RUNTIME.with(|state| {
-      let effects = state.get_signal_subscribers(self.id);
-      let depth = *state.effect_depth.borrow();
-      
-      if depth > 0 {
+    
+    let (effects, depth) = RUNTIME.with(|runtime| {
+        let state = runtime.borrow();
+        (state.get_signal_subscribers(self.id), state.effect_depth)
+    });
+
+    if depth > 0 {
         // We're inside an effect - queue the effects for later (with deduplication)
-        for effect in effects {
-          state.queue_effect(effect);
-        }
-      } else {
+        RUNTIME.with(|runtime| {
+            let mut state = runtime.borrow_mut();
+            for effect in effects {
+                state.queue_effect(effect);
+            }
+        });
+    } else {
         // We're at top level - run effects immediately and flush pending queue
         for effect in effects {
-          super::Effect::run_with_rc(&effect);
+            super::runtime::Effect::run_with_rc(&effect);
         }
-        state.flush_pending_effects();
-      }
-    });
+        super::runtime::flush_pending_effects();
+    }
   }
 }
 
@@ -173,9 +177,11 @@ impl<T: 'static> Signal<T> {
   #[inline]
   pub fn read(&self) -> ReadGuard<T> {
     let guard = self.inner.read();
-    RUNTIME.with(|state| {
-      if let Some(effect_rc) = state.effects.borrow().last() {
-        state.subscribe(guard.id, effect_rc.clone());
+    RUNTIME.with(|runtime| {
+      let mut state = runtime.borrow_mut();
+      if let Some(effect_rc) = state.effects.last() {
+        let effect = effect_rc.clone();
+        state.subscribe(guard.id, effect);
       }
     });
     ReadGuard { inner: guard }
@@ -195,9 +201,11 @@ impl<T: 'static> Signal<T> {
   pub fn try_read(&self) -> Option<ReadGuard<T>> {
     match self.inner.try_read() {
       Ok(guard) => {
-        RUNTIME.with(|state| {
-          if let Some(effect_rc) = state.effects.borrow().last() {
-            state.subscribe(guard.id, effect_rc.clone());
+        RUNTIME.with(|runtime| {
+          let mut state = runtime.borrow_mut();
+          if let Some(effect_rc) = state.effects.last() {
+            let effect = effect_rc.clone();
+            state.subscribe(guard.id, effect);
           }
         });
         Some(ReadGuard { inner: guard })
@@ -273,14 +281,14 @@ impl<T: 'static> Signal<T> {
   
   /// Create a new signal with explicit caller location
   pub fn new_with_caller(initial_value: T, caller: &'static std::panic::Location<'static>) -> Self {
-    let inner = RUNTIME.with(|state| {
+    let inner = RUNTIME.with(|runtime| {
+      let state = runtime.borrow();
       let scope_id = state
         .current_scope_id()
         .expect("No current scope. Use create_scope first.");
       
       state
         .scopes
-        .borrow()
         .get(&scope_id)
         .expect("Scope not found")
         .as_ref()

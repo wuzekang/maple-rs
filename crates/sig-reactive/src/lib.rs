@@ -9,7 +9,8 @@ pub mod runtime;
 pub mod signal;
 
 // Re-export core types
-pub use effect::*;
+pub use effect::{create_effect, create_scope, as_child_scope};
+pub use runtime::{Effect, ScopeId, Scope, Runtime}; // ScopeId and Effect are useful types
 pub use signal::*;
 
 // Re-export runtime functions
@@ -20,6 +21,3 @@ pub use runtime::{
 
 // Re-export context API
 pub use context::{consume_context, has_context, provide_context};
-
-// Re-export ReactiveState for convenience
-pub use effect::Runtime;

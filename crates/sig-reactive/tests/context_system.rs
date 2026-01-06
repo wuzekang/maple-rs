@@ -371,13 +371,15 @@ fn test_context_with_cleanup() {
         };
         provide_context(config.clone());
 
-        on_cleanup(move || {
-            // 🎉 修复后：cleanup 中可以访问 context！
-            if let Some(config) = consume_context::<AppConfig>() {
-                if config.name == "CleanupTest" {
-                    *cleanup_ran_clone.borrow_mut() = true;
+        create_scope(move || {
+             on_cleanup(move || {
+                // Cleanup runs when inner scope is destroyed, but outer scope is still active
+                if let Some(config) = consume_context::<AppConfig>() {
+                    if config.name == "CleanupTest" {
+                        *cleanup_ran_clone.borrow_mut() = true;
+                    }
                 }
-            }
+            });
         });
     });
 
