@@ -53,6 +53,8 @@ pub struct Runtime {
   pub(crate) effect_depth: RefCell<usize>,
   // Track which effects are already in the pending queue (for deduplication)
   pub(crate) pending_effect_ids: RefCell<HashSet<ScopeId>>,
+  // Pending scope disposals queue
+  pub(crate) pending_scope_disposals: RefCell<Vec<ScopeId>>,
 }
 
 impl Drop for Runtime {
@@ -73,6 +75,7 @@ impl Runtime {
       pending_effects: RefCell::new(Vec::new()),
       effect_depth: RefCell::new(0),
       pending_effect_ids: RefCell::new(HashSet::new()),
+      pending_scope_disposals: RefCell::new(Vec::new()),
     };
 
     let global = state.create_scope("global", None);
@@ -111,6 +114,10 @@ impl Runtime {
   }
 
   pub fn remove_scope(&self, id: ScopeId) {
+    self.pending_scope_disposals.borrow_mut().push(id);
+  }
+
+  pub(crate) fn dispose_scope_immediate(&self, id: ScopeId) {
     // Get child scopes from the cached children list
     let children: Vec<ScopeId> = self
       .scopes
@@ -122,7 +129,7 @@ impl Runtime {
 
     // Recursively remove all child scopes first
     for child in children {
-      self.remove_scope(child);
+      self.dispose_scope_immediate(child);
     }
 
     // Extract cleanup functions WITHOUT removing the scope yet
@@ -233,15 +240,34 @@ impl Runtime {
   /// Flush all pending effects (unified logic)
   pub(crate) fn flush_pending_effects(&self) {
     loop {
-      let pending_effects = std::mem::take(&mut *self.pending_effects.borrow_mut());
-      if pending_effects.is_empty() {
-        break;
+      let mut has_work = false;
+
+      // 1. Process all pending effects
+      loop {
+        let pending_effects = std::mem::take(&mut *self.pending_effects.borrow_mut());
+        if pending_effects.is_empty() {
+          break;
+        }
+        has_work = true;
+
+        self.pending_effect_ids.borrow_mut().clear();
+
+        for effect in pending_effects {
+          Effect::run_with_rc(&effect);
+        }
       }
 
-      self.pending_effect_ids.borrow_mut().clear();
+      // 2. Process pending scope disposals
+      let pending_disposals = std::mem::take(&mut *self.pending_scope_disposals.borrow_mut());
+      if !pending_disposals.is_empty() {
+        has_work = true;
+        for scope_id in pending_disposals {
+          self.dispose_scope_immediate(scope_id);
+        }
+      }
 
-      for effect in pending_effects {
-        Effect::run_with_rc(&effect);
+      if !has_work {
+        break;
       }
     }
   }
