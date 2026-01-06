@@ -188,7 +188,7 @@ pub fn resolve_base_from_bytes(
     // Debug: List all top-level nodes in Base.wz
     {
         let base_read = base_node.read().unwrap();
-        for (name, _) in base_read.children.iter() {
+        for (_name, _) in base_read.children.iter() {
         }
         if base_read.children.is_empty() {
         }

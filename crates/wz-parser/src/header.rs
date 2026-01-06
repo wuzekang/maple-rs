@@ -38,7 +38,7 @@ impl WzHeader<'_> {
         let fstart = Self::get_wz_fstart(buf)? as usize;
         buf[16..fstart - 17].pread::<&str>(0).map_err(Error::from)
     }
-    pub fn read_from_buf(buf: &[u8]) -> Result<(WzHeader, usize)> {
+    pub fn read_from_buf(buf: &[u8]) -> Result<(WzHeader<'_>, usize)> {
         let ident = Self::get_ident(buf)?;
 
         let fsize = Self::get_wz_fsize(buf)?;

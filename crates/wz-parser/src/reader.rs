@@ -167,11 +167,11 @@ impl<T: AsRef<[u8]>> WzBaseReader<T> {
         }
     }
 
-    pub fn try_header(&self) -> Result<WzHeader> {
+    pub fn try_header(&self) -> Result<WzHeader<'_>> {
         self.map.as_ref().pread::<WzHeader>(0)
     }
     
-    pub fn create_header(&self) -> WzHeader {
+    pub fn create_header(&self) -> WzHeader<'_> {
         self.map
             .as_ref()
             .pread::<WzHeader>(0)
@@ -194,11 +194,11 @@ impl<T: AsRef<[u8]>> WzBaseReader<T> {
         WzHeader::get_wz_fsize(self.map.as_ref())
     }
     
-    pub fn create_slice_reader_without_hash(&self) -> WzSliceReader {
+    pub fn create_slice_reader_without_hash(&self) -> WzSliceReader<'_> {
         WzSliceReader::new(self.map.as_ref(), &self.keys).with_header(WzHeader::default())
     }
     
-    pub fn create_slice_reader(&self) -> WzSliceReader {
+    pub fn create_slice_reader(&self) -> WzSliceReader<'_> {
         WzSliceReader::new(self.map.as_ref(), &self.keys).with_header(self.create_header())
     }
     

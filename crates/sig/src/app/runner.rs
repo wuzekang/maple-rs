@@ -33,6 +33,8 @@ pub struct Runner {
   drag_state: DragState,          // Drag state
   hover_top_view: Option<ViewId>, // 🎯 Track top-most hovered view for AABB debug
 
+  modifiers: winit::keyboard::ModifiersState,
+
   // Future for waiting on task messages
   wait_for_work: Option<Pin<Box<dyn Future<Output = ()> + 'static>>>,
   waker: std::task::Waker,
@@ -79,6 +81,7 @@ impl Runner {
       hovered: HashSet::new(),
       drag_state: DragState::default(),
       hover_top_view: None, // 🎯 Initialize hover_top_view
+      modifiers: winit::keyboard::ModifiersState::default(),
       wait_for_work: None,
       waker,
     }
@@ -135,6 +138,9 @@ impl Runner {
     event: WindowEvent,
   ) {
     match event {
+      WindowEvent::ModifiersChanged(modifiers) => {
+        self.modifiers = modifiers.state();
+      }
       WindowEvent::CloseRequested => event_loop.exit(),
       WindowEvent::Focused(_focused) => {}
       WindowEvent::Resized(size) => {
@@ -237,6 +243,7 @@ impl Runner {
                   button: None,
                   state: ElementState::Pressed,
                   r#type: MouseEventType::MouseEnter,
+                  modifiers: self.modifiers,
                 },
               );
               dispatch_event_to_view(*view_id, &mut event);
@@ -251,6 +258,7 @@ impl Runner {
                   button: None,
                   state: ElementState::Pressed,
                   r#type: MouseEventType::MouseLeave,
+                  modifiers: self.modifiers,
                 },
               );
               dispatch_event_to_view(*view_id, &mut event);
@@ -275,6 +283,7 @@ impl Runner {
                   button: None,
                   state: ElementState::Pressed,
                   r#type: MouseEventType::MouseMove,
+                  modifiers: self.modifiers,
                 },
               );
               dispatch_event(&view, &mut event);
@@ -389,6 +398,7 @@ impl Runner {
                 button: Some(button),
                 state,
                 r#type: type_,
+                modifiers: self.modifiers,
               },
             );
             dispatch_event(&view, &mut event);
@@ -424,6 +434,7 @@ impl Runner {
                     button: Some(button),
                     state: ElementState::Pressed,
                     r#type: MouseEventType::Click,
+                    modifiers: self.modifiers,
                   },
                 );
                 dispatch_event(&view, &mut click_event);
@@ -485,6 +496,7 @@ impl Runner {
             KeyboardData {
               logical_key: event.logical_key.clone(),
               state: event.state,
+              modifiers: self.modifiers,
             },
           );
           dispatch_event_to_view(focused_view, &mut kb_event);

@@ -4631,6 +4631,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bumpalo",
+ "clipboard-rs",
  "futures-timer",
  "futures-util",
  "generational-box",

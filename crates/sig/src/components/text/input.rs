@@ -24,10 +24,9 @@ use crate::theme::{Border, FontSize, Radius, Size, Spacing};
 use crate::{Interactive, Signal, TextEditor, Widget, create_effect, spawn};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::time::{Duration, Instant};
 use taffy::{AvailableSpace, Size as TaffySize};
 use vello::Scene;
-use vello::kurbo::{Affine, Rect};
+use vello::kurbo::{Affine, Rect, RoundedRect};
 use vello::peniko::{Color, Fill};
 
 // ============================================================================
@@ -87,11 +86,19 @@ pub struct TextInputState {
   // Blink task handle (to cancel when unfocused)
   blink_task: RefCell<Option<crate::Task>>,
 
-  // 🎯 Text change callback (for two-way binding)
+  // Text change callback (for two-way binding)
   on_change: RefCell<Option<Rc<dyn Fn(String)>>>,
 
-  // 🎯 Initial text (set before editor is initialized)
+  // Initial text (set before editor is initialized)
   initial_text: RefCell<Option<String>>,
+
+  // Horizontal scroll offset (physical pixels)
+  scroll_offset: Cell<f64>,
+
+  // Last layout position (logical pixels)
+  last_layout_pos: Cell<(f64, f64)>,
+  // Is selecting text with mouse
+  is_selecting: Cell<bool>,
 }
 
 impl TextInputState {
@@ -102,6 +109,9 @@ impl TextInputState {
       blink_task: RefCell::new(None),
       on_change: RefCell::new(None),
       initial_text: RefCell::new(None),
+      scroll_offset: Cell::new(0.0),
+      last_layout_pos: Cell::new((0.0, 0.0)),
+      is_selecting: Cell::new(false),
     }
   }
 
@@ -121,6 +131,10 @@ impl TextInputState {
 
       // Blink interval: 530ms (standard cursor blink rate)
       let mut interval = interval(Duration::from_millis(530));
+      
+      // 🎯 The first tick completes immediately, so we consume it to avoid
+      // immediately toggling the cursor to invisible.
+      interval.tick().await;
 
       loop {
         interval.tick().await;
@@ -177,7 +191,7 @@ impl TextInputState {
       let physical_font_size = ctx.logical_to_physical(logical_font_size);
       let mut editor = TextEditor::with_physical_font_size(physical_font_size);
 
-      // 🎯 Set initial text if it exists
+      // Set initial text if it exists
       if let Some(initial) = self.initial_text.borrow_mut().take() {
         editor.set_text(&initial);
         editor.move_to_text_end();
@@ -193,7 +207,7 @@ impl TextInput {
   pub fn new() -> Self {
     let id = crate::ViewId::new();
 
-    // 🎯 Set ViewState name to "TextInput"
+    // Set ViewState name to "TextInput"
     crate::runtime::with_layout_mut(|runtime| {
       if let Some(state) = runtime.view_states.get_mut(&id) {
         state.name = "TextInput".to_string();
@@ -236,7 +250,7 @@ impl TextInput {
   pub fn value(self, signal: Signal<String>) -> Self {
     let state = self.state.clone();
 
-    // 🎯 Set text change callback (editor -> Signal)
+    // Set text change callback (editor -> Signal)
     let signal_write = signal.clone();
     *state.on_change.borrow_mut() = Some(Rc::new(move |text: String| {
       *signal_write.write() = text;
@@ -253,14 +267,14 @@ impl TextInput {
         // Only update if text is actually different to avoid loops
         if editor.text() != new_text {
           editor.set_text(&new_text);
-          editor.move_to_text_end(); // 🎯 Move cursor to end
+          editor.move_to_text_end(); // Move cursor to end
 
-          // 🎯 Trigger redraw
+          // Trigger redraw
           drop(editor_opt); // Release borrowing
           view_id.mark_dirty();
         }
       } else {
-        // 🎯 Store for later initialization (editor not ready yet)
+        // Store for later initialization (editor not ready yet)
         *state_read.initial_text.borrow_mut() = Some(new_text);
       }
     });
@@ -286,7 +300,7 @@ impl TextInput {
     // Set default styles using design tokens
     let view_id_for_style = view_id;
     let view = view.style(move |s| {
-      // 🎯 Query focus state directly from runtime
+      // Query focus state directly from runtime
       let is_focused =
         crate::runtime::with_window(|state| state.focused_view == Some(view_id_for_style));
 
@@ -331,7 +345,7 @@ impl Default for TextInput {
 struct TextInputWidget {
   state: Rc<TextInputState>,
   placeholder: String,
-  view_id: crate::ViewId, // 🎯 Store ViewId for focus checking
+  view_id: crate::ViewId, // Store ViewId for focus checking
 }
 
 impl Widget for TextInputWidget {
@@ -352,20 +366,21 @@ impl Widget for TextInputWidget {
   fn paint(
     &self,
     scene: &mut Scene,
-    _width: f32,
+    width: f32,
     height: f32,
     abs_x: f64,
     abs_y: f64,
     style: &crate::style::Style,
     ctx: &crate::RenderContext,
   ) {
-    // 🎯 Use runtime instead of event system
+    // Use runtime instead of event system
     let is_focused = crate::runtime::with_window(|state| state.focused_view == Some(self.view_id));
 
     // Padding values (consistent with style settings using design tokens)
     let padding_left = Spacing::MD;
+    let padding_right = Spacing::MD;
 
-    // 🎯 Ensure editor is initialized (using physical pixel font_size)
+    // Ensure editor is initialized (using physical pixel font_size)
     let font_size = style.font_size.unwrap_or(FontSize::MD);
     self.state.ensure_editor(ctx, font_size);
 
@@ -374,6 +389,65 @@ impl Widget for TextInputWidget {
       Some(ed) => ed,
       None => return, // Editor not initialized, skip rendering
     };
+
+    // Calculate scroll offset
+    let physical_width = ctx.logical_to_physical(width) as f64;
+
+    // Update last layout position for event handling
+    self.state.last_layout_pos.set((abs_x, abs_y));
+
+    let physical_padding_left = ctx.logical_to_physical(padding_left) as f64;
+    let physical_padding_right = ctx.logical_to_physical(padding_right) as f64;
+    let visible_width = (physical_width - physical_padding_left - physical_padding_right).max(0.0);
+
+    let mut current_offset = self.state.scroll_offset.get();
+    let physical_font_size = ctx.logical_to_physical(font_size);
+
+    if is_focused {
+      if let Some((cursor_x, _, _, _)) = editor.cursor_geometry(physical_font_size) {
+        let cursor_x = cursor_x as f64;
+        let margin = 2.0; // Keep a small margin for cursor visibility
+
+        // Scroll if cursor is out of view
+        if cursor_x < current_offset + margin {
+          current_offset = (cursor_x - margin).max(0.0);
+        } else if cursor_x > current_offset + visible_width - margin {
+          current_offset = cursor_x - visible_width + margin;
+        }
+      }
+    }
+
+    // Clamp offset to not scroll past end if text fits
+    // (Note: We allow scrolling past end if text is longer than visible width,
+    // but we can snap back if needed. For now, simple clamping to 0 if text fits)
+    let text_width = editor.layout().width() as f64;
+    if text_width <= visible_width {
+      current_offset = 0.0;
+    }
+
+    // Update state if changed (to persist for next frame or event)
+    if (current_offset - self.state.scroll_offset.get()).abs() > 0.1 {
+      self.state.scroll_offset.set(current_offset);
+    }
+
+    // Coordinate conversion
+    let physical_x = ctx.logical_to_physical(abs_x as f32) as f64;
+    let physical_y = ctx.logical_to_physical(abs_y as f32) as f64;
+
+    // Clip content to input area
+    let clip_rect = RoundedRect::new(
+      physical_x,
+      physical_y,
+      physical_x + physical_width,
+      physical_y + ctx.logical_to_physical(height) as f64,
+      ctx.logical_to_physical(style.border_radius) as f64,
+    );
+    scene.push_layer(
+      vello::peniko::BlendMode::default(),
+      1.0,
+      Affine::IDENTITY,
+      &clip_rect,
+    );
 
     // Get content
     let text = editor.text();
@@ -385,7 +459,6 @@ impl Widget for TextInputWidget {
     } else {
       &text
     };
-
     // Temporarily set text if placeholder needs to be displayed
     let placeholder_mode = is_empty && !is_focused && !self.placeholder.is_empty();
     if placeholder_mode {
@@ -412,14 +485,14 @@ impl Widget for TextInputWidget {
         style.color
       };
 
-      // 🎯 Coordinate conversion: abs_x/abs_y are logical coordinates, need to convert to physical coordinates
+      // Coordinate conversion: abs_x/abs_y are logical coordinates, need to convert to physical coordinates
       // Glyph coordinates are already in physical pixels (because parley uses physical font_size for layout)
       let physical_x = ctx.logical_to_physical(abs_x as f32) as f64;
       let physical_y = ctx.logical_to_physical(abs_y as f32) as f64;
       let physical_padding_left = ctx.logical_to_physical(padding_left);
       let physical_padding_top = ctx.logical_to_physical(padding_top);
 
-      let text_x = physical_x + physical_padding_left as f64;
+      let text_x = physical_x + physical_padding_left as f64 - current_offset;
       let text_y = physical_y + physical_padding_top as f64;
       let transform = Affine::translate((text_x, text_y));
 
@@ -456,17 +529,18 @@ impl Widget for TextInputWidget {
       if let Some((cursor_x, cursor_y, cursor_width, cursor_height)) =
         editor.cursor_geometry(physical_font_size)
       {
-        // 🎯 Coordinates returned by cursor_geometry are already in physical pixels (because physical_font_size is used)
+        // Coordinates returned by cursor_geometry are already in physical pixels (because physical_font_size is used)
         // But we still need to convert abs position and padding
         let physical_abs_x = ctx.logical_to_physical(abs_x as f32) as f64;
         let physical_abs_y = ctx.logical_to_physical(abs_y as f32) as f64;
         let physical_padding_left = ctx.logical_to_physical(padding_left);
         let physical_padding_top = ctx.logical_to_physical(padding_top);
 
-        let abs_cursor_x = physical_abs_x + physical_padding_left as f64 + cursor_x as f64;
+        let abs_cursor_x =
+          physical_abs_x + physical_padding_left as f64 + cursor_x as f64 - current_offset;
         let abs_cursor_y = physical_abs_y + physical_padding_top as f64 + cursor_y as f64;
 
-        // 🎯 Update IME cursor position
+        // Update IME cursor position
         set_ime_cursor_area(
           abs_cursor_x,
           abs_cursor_y,
@@ -503,11 +577,11 @@ impl Widget for TextInputWidget {
         let physical_padding_top = ctx.logical_to_physical(padding_top) as f64;
 
         for rect in selection_rects {
-          // 🎯 Coordinates returned by selection_geometry are already in physical coordinates (layout uses physical_font_size)
+          // Coordinates returned by selection_geometry are already in physical coordinates (layout uses physical_font_size)
           let abs_rect = Rect::new(
-            physical_abs_x + physical_padding_left + rect.min_x(),
+            physical_abs_x + physical_padding_left - current_offset + rect.min_x(),
             physical_abs_y + physical_padding_top + rect.min_y(),
-            physical_abs_x + physical_padding_left + rect.max_x(),
+            physical_abs_x + physical_padding_left - current_offset + rect.max_x(),
             physical_abs_y + physical_padding_top + rect.max_y(),
           );
 
@@ -521,6 +595,9 @@ impl Widget for TextInputWidget {
         }
       }
     }
+
+    // End clipping
+    scene.pop_layer();
   }
 }
 
@@ -538,17 +615,17 @@ impl crate::Element for TextInput {
 
   fn build(self) -> crate::Node {
     let state = self.state.clone();
-    let view_id = self.id; // 🎯 Capture view_id for use in closures
+    let view_id = self.id; // Capture view_id for use in closures
 
-    // 🎯 Setup event handlers using Interactive trait (self is Element, gets Interactive automatically)
+    // Setup event handlers using Interactive trait (self is Element, gets Interactive automatically)
     let text_input = self
-      .focusable() // 🎯 TextInput is focusable by default
+      .focusable() // TextInput is focusable by default
       .on_focus({
         let state = state.clone();
         move |_e| {
-          state.reset_blink(); // 🎯 Start async blink task
+          state.reset_blink(); // Start async blink task
 
-          // 🎯 Enable IME for text input
+          // Enable IME for text input
           crate::runtime::with_window(|window_state| {
             if let Some(window) = &window_state.redraw_requester {
               window.set_ime_allowed(true);
@@ -560,9 +637,8 @@ impl crate::Element for TextInput {
       .on_blur({
         let state = state.clone();
         move |_e| {
-          state.stop_blink(); // 🎯 Stop async blink task
+          state.stop_blink();
 
-          // 🎯 Disable IME when blur
           crate::runtime::with_window(|window_state| {
             if let Some(window) = &window_state.redraw_requester {
               window.set_ime_allowed(false);
@@ -571,9 +647,115 @@ impl crate::Element for TextInput {
           });
         }
       })
+      .on_drag_start({
+        let state = state.clone();
+        let view_id = view_id;
+        move |e| {
+          let scale_factor = crate::runtime::with_window(|s| {
+            s.redraw_requester
+              .as_ref()
+              .map(|w| w.scale_factor())
+              .unwrap_or(1.0)
+          });
+          let (abs_x, _abs_y) = state.last_layout_pos.get();
+          let scroll_offset = state.scroll_offset.get();
+          let padding_left = 12.0; // Spacing::MD
+
+          let click_x = e.start_position.x as f64 * scale_factor;
+          let abs_x_physical = abs_x * scale_factor;
+          let padding_left_physical = padding_left * scale_factor;
+
+          let local_x = (click_x - (abs_x_physical + padding_left_physical - scroll_offset)) as f32;
+          let local_y = 0.0;
+
+          let mut editor_opt = state.editor.borrow_mut();
+          if let Some(editor) = editor_opt.as_mut() {
+            // Drag start always resets selection to cursor, then drag event extends it
+            editor.move_to_point(local_x, local_y);
+            state.is_selecting.set(true);
+            state.reset_blink();
+            view_id.mark_dirty();
+          }
+        }
+      })
+      .on_drag({
+        let state = state.clone();
+        let view_id = view_id;
+        move |e| {
+          if state.is_selecting.get() {
+            let scale_factor = crate::runtime::with_window(|s| {
+              s.redraw_requester
+                .as_ref()
+                .map(|w| w.scale_factor())
+                .unwrap_or(1.0)
+            });
+            let (abs_x, _abs_y) = state.last_layout_pos.get();
+            let scroll_offset = state.scroll_offset.get();
+            let padding_left = 12.0;
+
+            let current_x = e.current_position.x as f64 * scale_factor;
+            let abs_x_physical = abs_x * scale_factor;
+            let padding_left_physical = padding_left * scale_factor;
+
+            let local_x =
+              (current_x - (abs_x_physical + padding_left_physical - scroll_offset)) as f32;
+            let local_y = 0.0;
+
+            let mut editor_opt = state.editor.borrow_mut();
+            if let Some(editor) = editor_opt.as_mut() {
+              editor.extend_selection_to_point(local_x, local_y);
+              state.reset_blink();
+              view_id.mark_dirty();
+            }
+          }
+        }
+      })
+      .on_drag_end({
+        let state = state.clone();
+        move |_e| {
+          state.is_selecting.set(false);
+        }
+      })
+      .on_mouse_down({
+        let state = state.clone();
+        let view_id = view_id;
+        move |e| {
+          if e.button != Some(winit::event::MouseButton::Left) {
+            return;
+          }
+
+          let scale_factor = crate::runtime::with_window(|s| {
+            s.redraw_requester
+              .as_ref()
+              .map(|w| w.scale_factor())
+              .unwrap_or(1.0)
+          });
+          let (abs_x, _abs_y) = state.last_layout_pos.get();
+          let scroll_offset = state.scroll_offset.get();
+          let padding_left = 12.0; // Spacing::MD
+
+          let click_x = e.position.x as f64 * scale_factor;
+          let abs_x_physical = abs_x * scale_factor;
+          let padding_left_physical = padding_left * scale_factor;
+
+          let local_x = (click_x - (abs_x_physical + padding_left_physical - scroll_offset)) as f32;
+          let local_y = 0.0;
+
+          let mut editor_opt = state.editor.borrow_mut();
+          if let Some(editor) = editor_opt.as_mut() {
+            if e.modifiers.shift_key() {
+              editor.extend_selection_to_point(local_x, local_y);
+            } else {
+              editor.move_to_point(local_x, local_y);
+              // Note: We don't set is_selecting here anymore, as drag handles selection
+            }
+            state.reset_blink();
+            view_id.mark_dirty();
+          }
+        }
+      })
       .on_keyboard({
         let state = state.clone();
-        let view_id = view_id; // 🎯 Capture view_id
         move |e| {
           if e.state != winit::event::ElementState::Pressed {
             return;
@@ -586,46 +768,120 @@ impl crate::Element for TextInput {
             let mut editor_opt = state.editor.borrow_mut();
             if let Some(editor) = editor_opt.as_mut() {
               use winit::keyboard::{Key, NamedKey};
-              handled = match &e.logical_key {
-                Key::Character(ch) => {
-                  if ch.chars().all(|c| !c.is_control()) {
-                    editor.insert_or_replace(ch.as_ref());
-                    text_changed = true;
-                    state.reset_blink(); // 🎯 Pass view_id
-                    true
-                  } else {
-                    false
+
+              // Handle Ctrl shortcut
+              if e.modifiers.control_key() || e.modifiers.super_key() {
+                // Support Cmd on Mac
+                handled = match &e.logical_key {
+                  Key::Character(ch) => match ch.as_str() {
+                    "a" => {
+                      editor.select_all();
+                      state.reset_blink();
+                      true
+                    }
+                    "c" => {
+                      if let Some(text) = editor.selected_text() {
+                        if let Ok(ctx) = clipboard_rs::ClipboardContext::new() {
+                          use clipboard_rs::Clipboard;
+                          let _ = ctx.set_text(text);
+                        }
+                      }
+                      true
+                    }
+                    "x" => {
+                      if let Some(text) = editor.selected_text() {
+                        if let Ok(ctx) = clipboard_rs::ClipboardContext::new() {
+                          use clipboard_rs::Clipboard;
+                          let _ = ctx.set_text(text);
+                        }
+                        editor.delete_selection();
+                        text_changed = true;
+                        state.reset_blink();
+                      }
+                      true
+                    }
+                    "v" => {
+                      if let Ok(ctx) = clipboard_rs::ClipboardContext::new() {
+                        use clipboard_rs::Clipboard;
+                        if let Ok(text) = ctx.get_text() {
+                          editor.insert_or_replace(&text);
+                          text_changed = true;
+                          state.reset_blink();
+                        }
+                      }
+                      true
+                    }
+                    "z" => {
+                      if e.modifiers.shift_key() {
+                          editor.redo();
+                      } else {
+                          editor.undo();
+                      }
+                      text_changed = true; // undo/redo changes text
+                      state.reset_blink();
+                      true
+                    }
+                    "y" => {
+                      editor.redo();
+                      text_changed = true;
+                      state.reset_blink();
+                      true
+                    }
+                    _ => false,
+                  },
+                  _ => false,
+                };
+              } else {
+                // Normal keys
+                handled = match &e.logical_key {
+                  Key::Character(ch) => {
+                    if ch.chars().all(|c| !c.is_control()) {
+                      editor.insert_or_replace(ch.as_ref());
+                      text_changed = true;
+                      state.reset_blink();
+                      true
+                    } else {
+                      false
+                    }
                   }
-                }
-                Key::Named(NamedKey::Backspace) => {
-                  editor.backdelete();
-                  text_changed = true;
-                  state.reset_blink(); // 🎯 Pass view_id
-                  true
-                }
-                Key::Named(NamedKey::Delete) => {
-                  editor.delete();
-                  text_changed = true;
-                  state.reset_blink(); // 🎯 Pass view_id
-                  true
-                }
-                Key::Named(NamedKey::ArrowLeft) => {
-                  editor.move_left();
-                  state.reset_blink(); // 🎯 Pass view_id
-                  true
-                }
-                Key::Named(NamedKey::ArrowRight) => {
-                  editor.move_right();
-                  state.reset_blink(); // 🎯 Pass view_id
-                  true
-                }
-                Key::Named(NamedKey::Escape) => {
-                  crate::runtime::with_window_mut(|state| state.focused_view = None);
-                  state.stop_blink();
-                  true
-                }
-                _ => false,
-              };
+                  Key::Named(NamedKey::Backspace) => {
+                    editor.backdelete();
+                    text_changed = true;
+                    state.reset_blink();
+                    true
+                  }
+                  Key::Named(NamedKey::Delete) => {
+                    editor.delete();
+                    text_changed = true;
+                    state.reset_blink();
+                    true
+                  }
+                  Key::Named(NamedKey::ArrowLeft) => {
+                    if e.modifiers.shift_key() {
+                      editor.select_left();
+                    } else {
+                      editor.move_left();
+                    }
+                    state.reset_blink();
+                    true
+                  }
+                  Key::Named(NamedKey::ArrowRight) => {
+                    if e.modifiers.shift_key() {
+                      editor.select_right();
+                    } else {
+                      editor.move_right();
+                    }
+                    state.reset_blink();
+                    true
+                  }
+                  Key::Named(NamedKey::Escape) => {
+                    crate::runtime::with_window_mut(|state| state.focused_view = None);
+                    state.stop_blink();
+                    true
+                  }
+                  _ => false,
+                };
+              }
             } else {
               handled = false;
             }
@@ -642,7 +898,6 @@ impl crate::Element for TextInput {
       })
       .on_ime({
         let state = state.clone();
-        let view_id = view_id; // 🎯 Capture view_id
         move |e| {
           use winit::event::Ime;
           match &e.ime {
@@ -651,7 +906,7 @@ impl crate::Element for TextInput {
                 let mut editor_opt = state.editor.borrow_mut();
                 if let Some(editor) = editor_opt.as_mut() {
                   editor.insert_or_replace(text);
-                  state.reset_blink(); // 🎯 Pass view_id
+                  state.reset_blink();
                   true
                 } else {
                   false
@@ -672,7 +927,7 @@ impl crate::Element for TextInput {
                 } else {
                   editor.set_compose(text);
                 }
-                state.reset_blink(); // 🎯 Pass view_id
+                state.reset_blink();
               }
               e.stop_propagation();
             }
