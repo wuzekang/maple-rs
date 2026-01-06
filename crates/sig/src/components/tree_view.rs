@@ -132,6 +132,7 @@ pub struct TreeView<T: TreeNode> {
     open_states: Signal<HashMap<u64, bool>>,
     selected: Signal<Option<T>>,
     search: Signal<String>,
+    scroll_request: Signal<Option<f32>>,
 }
 
 /// Flattened node for rendering
@@ -174,6 +175,7 @@ impl<T: TreeNode> TreeView<T> {
             open_states: Signal::new(HashMap::new()),
             selected: Signal::new(None),
             search: Signal::new(String::new()),
+            scroll_request: Signal::new(None),
         };
         
         // Setup search effect if search is enabled
@@ -340,15 +342,6 @@ impl<T: TreeNode> TreeView<T> {
     /// If the node is not currently in the flattened list (e.g., parent collapsed),
     /// this method does nothing.
     ///
-    /// # Implementation Note
-    ///
-    /// Currently requires VirtualList to expose `scroll_offset` for full functionality.
-    /// This is a placeholder implementation for future use.
-    ///
-    /// # Parameters
-    ///
-    /// - `node`: The node to scroll into view
-    ///
     /// # Example
     ///
     /// ```ignore
@@ -357,10 +350,12 @@ impl<T: TreeNode> TreeView<T> {
     /// tree_view.scroll_to_node(&target_node);  // Make it visible
     /// ```
     pub fn scroll_to_node(&self, node: &T) {
-        // Placeholder: Requires VirtualList to expose scroll_offset
-        // This will be implemented when VirtualList API is extended
-        let _index = self.find_node_index(node);
-        // TODO: Implement scrolling when VirtualList exposes scroll_offset
+        if let Some(index) = self.find_node_index(node) {
+            let offset = index as f32 * self.config.item_height;
+            // Center the item in the view if possible, but for now just scroll to top
+            // To center, we'd need viewport height info which we don't readily have here
+            *self.scroll_request.write() = Some(offset);
+        }
     }
 
     // ===== End New Methods =====
@@ -447,6 +442,7 @@ impl<T: TreeNode> TreeView<T> {
     {
         let config = self.config.clone();
         let flat_nodes = self.flat_nodes.clone();
+        let scroll_request = self.scroll_request.clone();
         
         // Wrap self in Rc for sharing across closures
         let tree_view = Rc::new(self);
@@ -466,6 +462,7 @@ impl<T: TreeNode> TreeView<T> {
             let virtual_list = VirtualList::new(flat_nodes)
                 .item_height(config.item_height)
                 .buffer_size(config.buffer_size)
+                .scroll_to(scroll_request)
                 .build(move |flat_node, _index| {
                     tree_clone.render_node_with_custom(flat_node, &custom_clone)
                 });
@@ -663,6 +660,7 @@ impl<T: TreeNode> Clone for TreeView<T> {
             open_states: self.open_states.clone(),
             selected: self.selected.clone(),
             search: self.search.clone(),
+            scroll_request: self.scroll_request.clone(),
         }
     }
 }

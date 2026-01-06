@@ -299,7 +299,6 @@ impl<T: Element> Popper<T> {
               .top(pos.y)
               .translate_x(percent(align_x))
               .translate_y(percent(align_y))
-              .pointer_events_none()
               .flex()
               .flex_col()
           })
