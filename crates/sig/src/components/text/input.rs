@@ -21,13 +21,13 @@
 //! - Optimized for code editors and desktop applications
 
 use crate::theme::{Border, FontSize, Radius, Size, Spacing};
-use crate::{Interactive, Signal, TextEditor, Widget, create_effect, spawn};
-use std::cell::{Cell, RefCell};
+use crate::{Interactive, Signal, Widget, create_effect};
 use std::rc::Rc;
 use taffy::{AvailableSpace, Size as TaffySize};
 use vello::Scene;
 use vello::kurbo::{Affine, Rect, RoundedRect};
 use vello::peniko::{Color, Fill};
+use super::input_state::InputState;
 
 // ============================================================================
 // IME Cursor Area Management
@@ -70,136 +70,9 @@ fn set_ime_cursor_area(x: f64, y: f64, width: f64, height: f64) {
 /// ```
 pub struct TextInput {
   id: crate::ViewId,
-  state: Rc<TextInputState>,
+  state: Rc<InputState>,
   placeholder: String,
   max_length: Option<usize>,
-}
-
-/// TextInput internal state
-pub struct TextInputState {
-  // Text editor core (lazy initialization, requires DPR information)
-  pub editor: RefCell<Option<TextEditor>>,
-
-  // Cursor blinking state
-  cursor_visible: Signal<bool>,
-
-  // Blink task handle (to cancel when unfocused)
-  blink_task: RefCell<Option<crate::Task>>,
-
-  // Text change callback (for two-way binding)
-  on_change: RefCell<Option<Rc<dyn Fn(String)>>>,
-
-  // Initial text (set before editor is initialized)
-  initial_text: RefCell<Option<String>>,
-
-  // Horizontal scroll offset (physical pixels)
-  scroll_offset: Cell<f64>,
-
-  // Last layout position (logical pixels)
-  last_layout_pos: Cell<(f64, f64)>,
-  // Is selecting text with mouse
-  is_selecting: Cell<bool>,
-}
-
-impl TextInputState {
-  fn new() -> Self {
-    Self {
-      editor: RefCell::new(None),
-      cursor_visible: Signal::new(true),
-      blink_task: RefCell::new(None),
-      on_change: RefCell::new(None),
-      initial_text: RefCell::new(None),
-      scroll_offset: Cell::new(0.0),
-      last_layout_pos: Cell::new((0.0, 0.0)),
-      is_selecting: Cell::new(false),
-    }
-  }
-
-  /// Start cursor blinking with tokio::time::interval
-  fn start_blink(&self) {
-    // Cancel any existing blink task
-    self.stop_blink();
-
-    // Set cursor visible immediately
-    *self.cursor_visible.write() = true;
-
-    // Start a new blink task
-    let cursor_visible = self.cursor_visible.clone();
-
-    let task = spawn(async move {
-      use tokio::time::{Duration, interval};
-
-      // Blink interval: 530ms (standard cursor blink rate)
-      let mut interval = interval(Duration::from_millis(530));
-      
-      // 🎯 The first tick completes immediately, so we consume it to avoid
-      // immediately toggling the cursor to invisible.
-      interval.tick().await;
-
-      loop {
-        interval.tick().await;
-
-        // Toggle cursor visibility
-        let current = *cursor_visible.read();
-        *cursor_visible.write() = !current;
-
-        // Request redraw
-        crate::runtime::with_window(|window_state| {
-          if let Some(window) = &window_state.redraw_requester {
-            window.request_redraw();
-          }
-        });
-      }
-    });
-
-    *self.blink_task.borrow_mut() = Some(task);
-  }
-
-  /// Stop cursor blinking
-  fn stop_blink(&self) {
-    if let Some(task) = self.blink_task.borrow_mut().take() {
-      task.cancel();
-    }
-    *self.cursor_visible.write() = false;
-  }
-
-  /// Reset cursor blinking (show cursor and restart timer)
-  fn reset_blink(&self) {
-    // Just restart the blink task
-    // This will reset the timer and make cursor visible
-    self.start_blink();
-  }
-
-  /// Trigger text change callback
-  fn notify_change(&self) {
-    let editor_opt = self.editor.borrow();
-    if let Some(editor) = editor_opt.as_ref() {
-      let text = editor.text().to_string();
-      drop(editor_opt); // Release borrowing
-
-      let on_change = self.on_change.borrow();
-      if let Some(callback) = on_change.as_ref() {
-        callback(text);
-      }
-    }
-  }
-
-  /// Ensure editor is initialized (using physical pixel font_size)
-  fn ensure_editor(&self, ctx: &crate::RenderContext, logical_font_size: f32) {
-    let mut editor_opt = self.editor.borrow_mut();
-    if editor_opt.is_none() {
-      let physical_font_size = ctx.logical_to_physical(logical_font_size);
-      let mut editor = TextEditor::with_physical_font_size(physical_font_size);
-
-      // Set initial text if it exists
-      if let Some(initial) = self.initial_text.borrow_mut().take() {
-        editor.set_text(&initial);
-        editor.move_to_text_end();
-      }
-
-      *editor_opt = Some(editor);
-    }
-  }
 }
 
 impl TextInput {
@@ -218,7 +91,7 @@ impl TextInput {
       }
     });
 
-    let state = Rc::new(TextInputState::new());
+    let state = Rc::new(InputState::new());
 
     Self {
       id,
@@ -343,7 +216,7 @@ impl Default for TextInput {
 
 /// TextInput Widget implementation
 struct TextInputWidget {
-  state: Rc<TextInputState>,
+  state: Rc<InputState>,
   placeholder: String,
   view_id: crate::ViewId, // Store ViewId for focus checking
 }
@@ -400,7 +273,7 @@ impl Widget for TextInputWidget {
     let physical_padding_right = ctx.logical_to_physical(padding_right) as f64;
     let visible_width = (physical_width - physical_padding_left - physical_padding_right).max(0.0);
 
-    let mut current_offset = self.state.scroll_offset.get();
+    let mut current_offset = self.state.scroll_offset.get().0;
     let physical_font_size = ctx.logical_to_physical(font_size);
 
     if is_focused {
@@ -426,8 +299,8 @@ impl Widget for TextInputWidget {
     }
 
     // Update state if changed (to persist for next frame or event)
-    if (current_offset - self.state.scroll_offset.get()).abs() > 0.1 {
-      self.state.scroll_offset.set(current_offset);
+    if (current_offset - self.state.scroll_offset.get().0).abs() > 0.1 {
+      self.state.scroll_offset.set((current_offset, 0.0));
     }
 
     // Coordinate conversion
@@ -658,7 +531,7 @@ impl crate::Element for TextInput {
               .unwrap_or(1.0)
           });
           let (abs_x, _abs_y) = state.last_layout_pos.get();
-          let scroll_offset = state.scroll_offset.get();
+          let scroll_offset = state.scroll_offset.get().0;
           let padding_left = 12.0; // Spacing::MD
 
           let click_x = e.start_position.x as f64 * scale_factor;
@@ -690,7 +563,7 @@ impl crate::Element for TextInput {
                 .unwrap_or(1.0)
             });
             let (abs_x, _abs_y) = state.last_layout_pos.get();
-            let scroll_offset = state.scroll_offset.get();
+            let scroll_offset = state.scroll_offset.get().0;
             let padding_left = 12.0;
 
             let current_x = e.current_position.x as f64 * scale_factor;
@@ -731,19 +604,31 @@ impl crate::Element for TextInput {
               .unwrap_or(1.0)
           });
           let (abs_x, _abs_y) = state.last_layout_pos.get();
-          let scroll_offset = state.scroll_offset.get();
+          let scroll_offset = state.scroll_offset.get().0;
           let padding_left = 12.0; // Spacing::MD
 
           let click_x = e.position.x as f64 * scale_factor;
+          let click_y = e.position.y as f64 * scale_factor; // Used for click tracking but ignored for line pos in single line input
           let abs_x_physical = abs_x * scale_factor;
           let padding_left_physical = padding_left * scale_factor;
 
           let local_x = (click_x - (abs_x_physical + padding_left_physical - scroll_offset)) as f32;
           let local_y = 0.0;
 
+          // Handle double click logic
+          let (double_click, triple_click) = state.handle_click((click_x, click_y));
+
           let mut editor_opt = state.editor.borrow_mut();
           if let Some(editor) = editor_opt.as_mut() {
-            if e.modifiers.shift_key() {
+            if triple_click {
+                 editor.select_line_at_point(local_x, local_y);
+                 // For single line input, select all is effectively select line
+                 // But select_line_at_point works too if implemented correctly
+                 // Or we can use select_all()
+                 editor.select_all();
+            } else if double_click {
+                 editor.select_word_at_point(local_x, local_y);
+            } else if e.modifiers.shift_key() {
               editor.extend_selection_to_point(local_x, local_y);
             } else {
               editor.move_to_point(local_x, local_y);

@@ -95,7 +95,7 @@ pub mod prelude {
   pub use crate::components::separator::{
     Orientation, Separator, horizontal_separator, separator, vertical_separator,
   };
-  pub use crate::components::text::{TextInput, dynamic_text, text, text_input};
+  pub use crate::components::text::{TextInput, TextArea, dynamic_text, text, text_area, text_input};
   pub use crate::layout::taffy;
   pub use crate::runtime::{on_cleanup, untrack};
   pub use crate::style::{StyleBuilder, Styleable};
