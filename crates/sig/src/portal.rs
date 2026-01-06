@@ -6,9 +6,7 @@
 //!
 //! Based on dynamic::each for efficient rendering and lifecycle management.
 
-use crate::{Dynamic, ViewId, ViewTuple, consume_context, create_effect, each, provide_context};
-use std::cell::RefCell;
-use std::rc::Rc;
+use crate::{Dynamic, ViewTuple, consume_context, each, provide_context};
 
 /// Portal item identifier
 type PortalItemId = u64;
@@ -17,9 +15,7 @@ type PortalItemId = u64;
 #[derive(Clone)]
 struct PortalItem {
   id: PortalItemId,
-  /// Store a factory function instead of the node directly
-  /// This allows the node to be created in the portal context's scope
-  factory: Rc<dyn Fn() -> crate::Node>,
+  node: crate::Node,
 }
 
 // Manual PartialEq implementation - compare by ID only
@@ -41,19 +37,18 @@ impl PortalContext {
     let items: crate::Signal<Vec<PortalItem>> = crate::Signal::new(Vec::new());
 
     // Use dynamic::each for efficient rendering
-    // The factory is called here, in the portal context's scope
-    let target = each(move || items.read().clone(), |item| (item.factory)());
+    let target = each(move || items.read().clone(), |item| item.node.clone());
 
     PortalContext { target, items }
   }
 
-  fn add_child(&self, factory: Rc<dyn Fn() -> crate::Node>) -> PortalItemId {
+  fn add_child(&self, node: crate::Node) -> PortalItemId {
     use std::sync::atomic::{AtomicU64, Ordering};
     static ITEM_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 
     let id = ITEM_ID_COUNTER.fetch_add(1, Ordering::SeqCst);
 
-    self.items.write().push(PortalItem { id, factory });
+    self.items.write().push(PortalItem { id, node });
 
     id
   }
@@ -104,11 +99,9 @@ pub fn provide() -> crate::Dynamic {
 /// Render a view into the portal with automatic cleanup
 ///
 /// This function consumes the portal context and renders the view into it.
-/// The content factory will be called in the portal context's scope, ensuring
-/// that any Signals created (e.g., from Dynamic) have the correct lifecycle.
 ///
 /// # Arguments
-/// * `content_factory` - A function that produces the view to render into the portal
+/// * `content` - The view to render into the portal
 ///
 /// # Panics
 /// Panics if called outside a scope with portal context.
@@ -119,32 +112,23 @@ pub fn provide() -> crate::Dynamic {
 /// use sig::portal;
 ///
 /// fn show_modal() {
-///     // Render modal to portal using a closure
-///     portal::child(move || {
-///         dynamic(move || {
-///             view()
-///                 .style(|s| s.padding(20.0).background(Color::WHITE))
-///                 .child(text("Modal Content"))
-///         })
-///     });
-///     
+///     // Render modal to portal
+///     portal::child(dynamic(move || {
+///         view()
+///             .style(|s| s.padding(20.0).background(Color::WHITE))
+///             .child(text("Modal Content"))
+///     }));
+///
 ///     // Automatically cleaned up when this scope is destroyed!
 /// }
 /// ```
-pub fn child<F, VT>(content_factory: F)
-where
-  F: Fn() -> VT + 'static,
-  VT: ViewTuple,
-{
+pub fn child<VT: ViewTuple>(content: VT) {
   // Consume context
   let ctx = consume_context::<PortalContext>()
     .expect("portal::child() called without portal::provide() in parent scope");
 
-  // Wrap the factory to convert ViewTuple to Node
-  let factory = Rc::new(move || content_factory().into_node());
-
   // Add child and get ID for cleanup
-  let item_id = ctx.add_child(factory);
+  let item_id = ctx.add_child(content.into_node());
 
   // Auto cleanup when scope is destroyed
   crate::on_cleanup(move || {
@@ -160,7 +144,7 @@ mod tests {
   #[test]
   fn test_portal_provide() {
     create_scope(|| {
-      let container = provide();
+      let _container = provide();
 
       // Context should be available
       let ctx = consume_context::<PortalContext>();
@@ -174,8 +158,8 @@ mod tests {
       let _container = provide();
 
       create_scope(|| {
-        // Use closure to create view
-        child(move || crate::view().name("test-view"));
+        // Directly pass view
+        child(crate::view().name("test-view"));
 
         // Child should be added to portal
         let ctx = consume_context::<PortalContext>().unwrap();
@@ -193,8 +177,8 @@ mod tests {
 
       {
         create_scope(|| {
-          // Use closure to create view
-          child(move || crate::view().name("temp-view"));
+          // Directly pass view
+          child(crate::view().name("temp-view"));
         });
         // Scope destroyed, cleanup should have run
       }
