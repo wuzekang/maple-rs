@@ -10,6 +10,9 @@ pub struct TextEditor {
     editor: PlainEditor<Brush>,
     font_cx: FontContext,
     layout_cx: LayoutContext<Brush>,
+    // Undo/Redo
+    undo_stack: Vec<String>,
+    redo_stack: Vec<String>,
 }
 
 impl TextEditor {
@@ -30,11 +33,37 @@ impl TextEditor {
             editor: PlainEditor::new(physical_font_size),
             font_cx: FontContext::default(),
             layout_cx: LayoutContext::new(),
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+        }
+    }
+
+    fn push_undo(&mut self) {
+        let text = self.editor.text().to_string();
+        // Don't push if same as last state
+        if let Some(last) = self.undo_stack.last() {
+            if last == &text {
+                return;
+            }
+        }
+        self.undo_stack.push(text);
+        self.redo_stack.clear();
+        
+        // Limit stack size
+        if self.undo_stack.len() > 100 {
+            self.undo_stack.remove(0);
         }
     }
 
     /// Set text content
     pub fn set_text(&mut self, text: &str) {
+        // usually set_text is external, maybe we shouldn't push undo here?
+        // Or maybe we should. Let's assume set_text replaces everything.
+        // If we want to support undoing external changes, we should push.
+        // But typically external changes reset history or are treated as new baseline.
+        // For now, let's NOT push undo on set_text to avoid clearing history on initial load.
+        // Or maybe check if it's different.
+        
         self.editor.set_text(text);
         self.editor
             .refresh_layout(&mut self.font_cx, &mut self.layout_cx);
@@ -53,6 +82,7 @@ impl TextEditor {
 
     /// Insert text (at cursor position or replace selection)
     pub fn insert_or_replace(&mut self, text: &str) {
+        self.push_undo();
         self.editor
             .driver(&mut self.font_cx, &mut self.layout_cx)
             .insert_or_replace_selection(text);
@@ -60,6 +90,7 @@ impl TextEditor {
 
     /// Delete character (forward delete, Delete key)
     pub fn delete(&mut self) {
+        self.push_undo();
         self.editor
             .driver(&mut self.font_cx, &mut self.layout_cx)
             .delete();
@@ -67,6 +98,7 @@ impl TextEditor {
 
     /// Backspace character (backward delete, Backspace key)
     pub fn backdelete(&mut self) {
+        self.push_undo();
         self.editor
             .driver(&mut self.font_cx, &mut self.layout_cx)
             .backdelete();
@@ -74,6 +106,7 @@ impl TextEditor {
 
     /// Delete selected text
     pub fn delete_selection(&mut self) {
+        self.push_undo();
         self.editor
             .driver(&mut self.font_cx, &mut self.layout_cx)
             .delete_selection();
@@ -266,6 +299,46 @@ impl TextEditor {
         self.editor
             .driver(&mut self.font_cx, &mut self.layout_cx)
             .clear_compose();
+    }
+
+    // ========== Undo/Redo ==========
+
+    /// Undo last action
+    pub fn undo(&mut self) {
+        if let Some(prev_text) = self.undo_stack.pop() {
+            let current_text = self.editor.text().to_string();
+            self.redo_stack.push(current_text);
+            
+            self.editor.set_text(&prev_text);
+            self.editor
+                .refresh_layout(&mut self.font_cx, &mut self.layout_cx);
+            
+            // Try to move cursor to end, as we lose cursor position
+            // Ideally we would restore cursor pos, but we don't save it yet
+            // self.move_to_text_end(); 
+            // Actually, let's keep cursor at 0 or let user move it. 
+            // Parley usually resets to start on set_text.
+            // Moving to end is safer for now.
+            // But wait, driver methods are on &mut self.
+            // self.move_to_text_end(); // This borrows self mutably, but we are in &mut self. OK.
+            
+            // To properly move cursor, we need driver.
+            self.editor.driver(&mut self.font_cx, &mut self.layout_cx).move_to_text_end();
+        }
+    }
+
+    /// Redo last undone action
+    pub fn redo(&mut self) {
+        if let Some(next_text) = self.redo_stack.pop() {
+            let current_text = self.editor.text().to_string();
+            self.undo_stack.push(current_text);
+            
+            self.editor.set_text(&next_text);
+            self.editor
+                .refresh_layout(&mut self.font_cx, &mut self.layout_cx);
+                
+            self.editor.driver(&mut self.font_cx, &mut self.layout_cx).move_to_text_end();
+        }
     }
 
     // ========== Rendering helpers ==========

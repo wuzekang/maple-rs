@@ -102,6 +102,7 @@ pub struct MouseData {
     pub button: Option<MouseButton>,
     pub state: ElementState,
     pub r#type: MouseEventType,
+    pub modifiers: winit::keyboard::ModifiersState,
 }
 
 /// Mouse event type alias
@@ -156,6 +157,7 @@ pub type WheelEvent = Event<WheelData>;
 pub struct KeyboardData {
     pub logical_key: Key,
     pub state: ElementState,
+    pub modifiers: winit::keyboard::ModifiersState,
 }
 
 /// Keyboard event type alias
