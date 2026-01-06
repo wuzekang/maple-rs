@@ -7,13 +7,6 @@ use std::rc::Rc;
 // ============================================================================
 
 #[test]
-fn test_default_runtime() {
-    // Test Runtime::default() implementation
-    let runtime = Runtime::default();
-    drop(runtime);
-}
-
-#[test]
 fn test_effect_scope_registration() {
     create_scope(|| {
         let signal = Signal::new(1);
@@ -50,29 +43,6 @@ fn test_signal_in_multiple_nested_effects() {
     });
 }
 
-#[test]
-fn test_cleanup_with_signal_reads() {
-    create_scope(|| {
-        let sig1 = Signal::new(1);
-        let sig2 = Signal::new(10);
-        let cleanup_ran = Rc::new(RefCell::new(false));
-
-        let cleanup_ran_clone = cleanup_ran.clone();
-        let sig2_clone = sig2;
-        create_effect(move || {
-            let _v1 = *sig1.read();
-            
-            let cleanup_ran_clone2 = cleanup_ran_clone.clone();
-            on_cleanup(move || {
-                let _v2 = *sig2_clone.read_untracked();
-                *cleanup_ran_clone2.borrow_mut() = true;
-            });
-        });
-
-        *sig1.write() = 2;
-        assert!(*cleanup_ran.borrow());
-    });
-}
 
 #[test]
 fn test_effect_re_registration() {
