@@ -44,10 +44,28 @@ impl Drop for RenderingGuard {
 
 /// Request a window redraw. No-op while the render pass is in flight: the
 /// damage being reported is part of the frame currently being produced.
+thread_local! {
+  /// A redraw request has already been forwarded to the window since the
+  /// last delivered RedrawRequested. winit coalesces the requests anyway,
+  /// but skipping the repeated window calls cuts ~1000 calls/frame down to
+  /// one in restyle-heavy frames. Cleared when a RedrawRequested arrives
+  /// (and on focus/resume so an occluded window can never stay gated).
+  static REDRAW_GATE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Clear the redraw gate — called when a RedrawRequested is delivered.
+pub fn clear_redraw_gate() {
+  REDRAW_GATE.with(|g| g.set(false));
+}
+
 pub fn request_redraw() {
   if is_rendering() {
     return;
   }
+  if REDRAW_GATE.with(|g| g.get()) {
+    return; // already requested; winit will deliver one RedrawRequested
+  }
+  REDRAW_GATE.with(|g| g.set(true));
   // Cached: getenv takes a global lock and request_redraw fires per dirty
   // view — a per-call env read showed up as ~6% of wall time in profiles.
   static COUNTING: std::sync::OnceLock<bool> = std::sync::OnceLock::new();

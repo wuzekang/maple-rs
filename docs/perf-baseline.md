@@ -185,3 +185,18 @@ style_bench：300 行 all_paint style 220→**173µs（-21%）**、one_paint
 16→**5µs**、scene 同降；1000 行 all_paint style 548→~580µs（+5%，代码布局
 效应，量级小于小树收益）。frame_bench 1000 行：total p50 2.6→**2.4ms**、
 scene 424→366µs。sig 98/98、sig-reactive 142/142。
+
+### #7 渲染请求去重、键盘重绘条件化、device.poll A/B 定论
+
+- **重绘请求按帧去重**：`runtime::request_redraw()` 加"本帧已请求"门（RedrawRequested
+  到达时清除，focus/resume 兜底防遮挡卡门）。效果：rest yle 重帧的窗口重绘调用从
+  **每帧 ~1014 次降到 1 次**（运行期 304315 → 301 次），帧数与节奏不变。
+- **键盘/IME 不再无条件重绘**：无处理器的按键（修饰键等）不再强制成帧；有状态
+  变更的路径由各自 effect 请求。
+- **`device.poll(PollType::Poll)` 保留**（A/B 定论）：真双盲 A/B（此前一次 A/B 因
+  替换未生效而失真，已重做）显示移除后帧总耗时 +0.3ms（maintain 工作转嫁到下
+  一次 submit/get_current_texture）且 12 秒 RSS +11MB（疑似 staging 堆积）。
+  该调用有效，注释已更新为 A/B 结论。
+
+frame_bench 1000 行：total p50 2.2-2.8ms（机器状态波动内），帧:写 302/300，
+redraw requests 301。sig 98/98、editor 构建通过。

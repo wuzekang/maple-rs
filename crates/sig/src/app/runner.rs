@@ -284,7 +284,11 @@ impl Runner {
         self.modifiers = modifiers.state();
       }
       WindowEvent::CloseRequested => event_loop.exit(),
-      WindowEvent::Focused(_focused) => {}
+      WindowEvent::Focused(_focused) => {
+        // Ungate redraw requests on (re)focus so an occluded period can
+        // never leave the gate closed.
+        crate::runtime::clear_redraw_gate();
+      }
       WindowEvent::Resized(size) => {
         if size.width != 0 && size.height != 0 {
           self.vello_app.resize(size.width, size.height);
@@ -504,10 +508,6 @@ impl Runner {
             },
           );
           dispatch_event_to_view(focused_view, &mut event);
-
-          if let Some(window) = &self.window {
-            window.request_redraw();
-          }
         }
       }
       WindowEvent::KeyboardInput { event, .. } => {
@@ -523,13 +523,13 @@ impl Runner {
             },
           );
           dispatch_event_to_view(focused_view, &mut kb_event);
-
-          if let Some(window) = &self.window {
-            window.request_redraw();
-          }
+          // No unconditional redraw here: handlers that change reactive
+          // state request frames through their own effects; key events
+          // that hit no handler must not force a frame.
         }
       }
       WindowEvent::RedrawRequested => {
+        crate::runtime::clear_redraw_gate();
         // Process the coalesced mouse update inside the render-in-flight
         // scope: hover/drag handlers mark styles dirty, and the frame
         // rendering right below picks that up — a redraw request from
@@ -560,6 +560,7 @@ impl Runner {
 
 impl ApplicationHandler<AppEvent> for Runner {
   fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+    crate::runtime::clear_redraw_gate();
     // Create window if not exists
     if self.window.is_none() {
       let attr = Window::default_attributes()
