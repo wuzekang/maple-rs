@@ -17,6 +17,31 @@ pub fn is_rendering() -> bool {
   RENDER_IN_FLIGHT.with(|f| f.get())
 }
 
+/// RAII scope for the render-in-flight flag: redraw requests issued inside
+/// are suppressed — the damage they report is part of the frame being
+/// produced right now, so scheduling another frame would render the same
+/// content twice. Drop restores the flag even on panic.
+pub struct RenderingGuard;
+
+impl RenderingGuard {
+  pub fn new() -> Self {
+    set_rendering(true);
+    Self
+  }
+}
+
+impl Default for RenderingGuard {
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
+impl Drop for RenderingGuard {
+  fn drop(&mut self) {
+    set_rendering(false);
+  }
+}
+
 /// Request a window redraw. No-op while the render pass is in flight: the
 /// damage being reported is part of the frame currently being produced.
 pub fn request_redraw() {

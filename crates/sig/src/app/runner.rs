@@ -530,7 +530,12 @@ impl Runner {
         }
       }
       WindowEvent::RedrawRequested => {
+        // Process the coalesced mouse update inside the render-in-flight
+        // scope: hover/drag handlers mark styles dirty, and the frame
+        // rendering right below picks that up — a redraw request from
+        // here would schedule a duplicate frame.
         if self.pending_mouse {
+          let _guard = crate::runtime::RenderingGuard::new();
           self.process_pending_mouse();
         }
         // 🎯 延迟初始化：在第一次渲染前初始化 GPU

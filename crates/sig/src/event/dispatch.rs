@@ -264,9 +264,9 @@ pub fn update_cursor(window: &Arc<Window>, view_id: ViewId) {
 
     // Get cursor style from view state
     let cursor = crate::runtime::with_layout(|runtime| {
-        runtime.view_states
-            .get(&view_id)
-            .map(|state| state.style.cursor)
+        runtime.styles
+            .get(&view_id.node_id)
+            .map(|style| style.cursor)
             .unwrap_or(Cursor::Default)
     });
 

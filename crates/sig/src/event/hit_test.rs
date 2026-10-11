@@ -24,9 +24,9 @@ fn hit_test_recursive(
   // 🎯 Check pointer_events first - skip if set to None
   let has_pointer_events = crate::runtime::with_layout(|runtime| {
     runtime
-      .view_states
-      .get(view)
-      .map(|state| state.style.pointer_events == crate::style::PointerEvents::Auto)
+      .styles
+      .get(&view.node_id)
+      .map(|s| s.pointer_events == crate::style::PointerEvents::Auto)
       .unwrap_or(true) // Default to Auto if not found
   });
 

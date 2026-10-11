@@ -27,12 +27,8 @@ pub struct ViewState {
   pub dirty: bool,
   /// Event handler collection (indexed by TypeId)
   pub event_handlers: EventHandlers,
-  /// Render style (final computed style)
-  pub style: Style,
   /// Style builder list (for style inheritance and computation)
   pub styles: Vec<Option<StyleBuilder>>,
-  /// Style cache (for style inheritance)
-  pub style_cache: crate::style::StylePropertyMap,
   /// Scroll offset (x, y)
   pub scroll_offset: (f32, f32),
   /// Vertical scrollbar rect (x, y, width, height) - for drag detection
@@ -74,9 +70,7 @@ impl ViewState {
       mounted: false,
       dirty: false,
       event_handlers: EventHandlers::new(),
-      style: Style::default(),
       styles: Vec::new(),
-      style_cache: [None; <crate::style::StylePropertyKey as strum::EnumCount>::COUNT],
       scroll_offset: (0.0, 0.0),
       vertical_scrollbar_rect: None,
       horizontal_scrollbar_rect: None,

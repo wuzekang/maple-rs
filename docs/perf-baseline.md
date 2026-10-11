@@ -166,3 +166,22 @@ scene 段头名变为 `render_view` 编码本体。sig 98/98。
 累计（#1 起）：all_paint 单迭代 style+effects+layout+scene 合计
 ≈4.5ms → **1.5ms（-67%）**。剩余大头为真实编码工作（render_view）与
 taffy 布局，下一步才是结构性的 scene 损伤追踪（子树缓存/边界）。
+
+### #6 实现清理：删 style_cache、合并样式双数据源、鼠标处理圈进渲染守卫
+
+评审发现的三处不合理，一并修复：
+
+- **删除 `ViewState.style_cache`**：只写不读的继承上下文快照（自 ui crate
+  移植起即死代码），且按失效模型它在构造上冗余——被跳过的子树必然上方无
+  继承变更，已存的 computed Style 天然完整。每访问节点省一次 384B 拷贝。
+- **合并样式双数据源**：`ViewState.style` 与 `styles[node_id]` 存同一结果
+  两份；现以 node 键的 `styles` map 为唯一来源（insert 返回旧值供变更检测，
+  一次哈希完成取旧+写新），hit_test/dispatch 的读取随之切换。
+- **鼠标帧处理移入渲染守卫**：`process_pending_mouse` 原先在 render-in-flight
+  标志之外执行，hover 触发的重绘请求会预约一个渲染同样内容的重复帧；现由
+  公开的 RAII `RenderingGuard` 包裹（panic 安全）。
+
+style_bench：300 行 all_paint style 220→**173µs（-21%）**、one_paint
+16→**5µs**、scene 同降；1000 行 all_paint style 548→~580µs（+5%，代码布局
+效应，量级小于小树收益）。frame_bench 1000 行：total p50 2.6→**2.4ms**、
+scene 424→366µs。sig 98/98、sig-reactive 142/142。

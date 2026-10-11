@@ -181,7 +181,7 @@ fn compute_style(view: &ViewId, ctx: &mut StyleComputeContext) {
           }
         }
         (
-          state.style.clone(),
+          Style::default(), // replaced by the insert() return value below
           runtime
             .taffy
             .style(view.node_id())
@@ -250,6 +250,13 @@ fn compute_style(view: &ViewId, ctx: &mut StyleComputeContext) {
     value.assign_to(&mut style);
   }
 
+  // Store the computed style; insert() hands back the previous value so
+  // change detection needs no separate lookup (one hash op, not two).
+  let old_style = crate::runtime::with_layout_mut(|runtime| {
+    let old = runtime.styles.insert(view.node_id(), style.clone());
+    old.unwrap_or_default()
+  });
+
   // Detect style changes and update trigger and dirty flag
   for key in StylePropertyKey::iter() {
     if key.value(&old_style) != key.value(&style) {
@@ -263,15 +270,6 @@ fn compute_style(view: &ViewId, ctx: &mut StyleComputeContext) {
       }
     }
   }
-
-  // Update styles in state (single clone: view state keeps a copy, the
-  // measure-call map takes the original)
-  crate::runtime::with_layout_mut(|runtime| {
-    if let Some(state) = runtime.view_states.get_mut(view) {
-      state.style = style.clone();
-    }
-    runtime.styles.insert(view.node_id(), style);
-  });
 
   // Update inheritable properties in context (for propagation to child
   // nodes). Each overwrite journals the previous entry; the subtree walk
@@ -352,13 +350,7 @@ pub fn compute_style_recursive(view: &ViewId, ctx: &mut StyleComputeContext) {
     });
   }
 
-  // Mark as visited and update cache (plain array copy)
   ctx.visited.insert(*view);
-  crate::runtime::with_layout_mut(|runtime| {
-    if let Some(state) = runtime.view_states.get_mut(view) {
-      state.style_cache = ctx.style;
-    }
-  });
 
   // If subtree is dirty or has inheritable property changes, recurse into child nodes
   if child_style_dirty || ctx.dirty {
