@@ -146,3 +146,23 @@ layout 场景不变。frame_bench 1000 行：style 段 1.4ms→**995µs**，帧�
 
 对照（自 #1 起累计）：all_paint 单迭代 style+effects+layout 合计
 3215µs → **1142µs（-64%）**。
+
+### #5 渲染路径 HashMap 查找换 FxHash（scene 段剖析驱动）
+
+先剖析（clean 场景隔离 scene 段）：**55% 是渲染路径的 HashMap 查找哈希**
+（`render_view` 每视图、`get_children` 每节点对 `HashMap<NodeId/ViewId, _>` 做
+SipHash——键是 slotmap 的稠密 u64）；vello 编码本体 ~25%；taffy 缓存遍历 ~8%；
+**parley 文本布局仅 ~3%**（"文本是大头"的猜测被数据否定）。
+
+修复：`LayoutState.styles`、`view_states`、`style_dirty_nodes` 换
+`rustc_hash::FxHashMap/FxHashSet`（u64 键乘法哈希）。
+
+style_bench（1000 行 p50）：clean scene 272→**141µs（-48%）**；all_paint style
+780→**548µs（-30%）**（style 段同查这些 map，连带受益）；one_paint style
+31→16µs；effects 333→283µs。frame_bench 1000 行：style 995→825µs、scene
+550→424µs，帧:写 110/100 正常。复剖析：`hash_one`/`write_u64` 从榜单消失，
+scene 段头名变为 `render_view` 编码本体。sig 98/98。
+
+累计（#1 起）：all_paint 单迭代 style+effects+layout+scene 合计
+≈4.5ms → **1.5ms（-67%）**。剩余大头为真实编码工作（render_view）与
+taffy 布局，下一步才是结构性的 scene 损伤追踪（子树缓存/边界）。

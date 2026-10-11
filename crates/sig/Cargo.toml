@@ -7,6 +7,10 @@ edition = "2024"
 image = ["dep:image"]
 
 [dependencies]
+# FxHash: dense u64 slotmap keys in the runtime maps do not need SipHash —
+# profiling showed HashMap lookups in the render walk were ~55% of scene
+# encoding time.
+rustc-hash = "2"
 generational-box = "0.7.2"
 taffy = { version = "0.7", features = ["content_size"] }
 # For performance optimizations

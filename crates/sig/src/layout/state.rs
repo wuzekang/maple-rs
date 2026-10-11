@@ -22,15 +22,15 @@ pub fn compute_layout(root_id: NodeId, available_space: Size<AvailableSpace>, ct
 pub struct LayoutState {
   pub taffy: TaffyTree,
   pub widgets: SecondaryMap<DefaultKey, Rc<dyn Widget>>,
-  pub styles: HashMap<NodeId, crate::style::Style>,
+  pub styles: rustc_hash::FxHashMap<NodeId, crate::style::Style>,
   /// View state storage (indexed by ViewId)
-  pub view_states: HashMap<ViewId, ViewState>,
+  pub view_states: rustc_hash::FxHashMap<ViewId, ViewState>,
   /// Parley font context
   pub font_context: FontContext,
   /// Parley layout context
   pub layout_context: LayoutContext<()>,
   /// Style dirty node set (collected via Dirty Bubbling)
-  pub style_dirty_nodes: HashSet<ViewId>,
+  pub style_dirty_nodes: rustc_hash::FxHashSet<ViewId>,
 }
 
 impl LayoutState {
@@ -38,11 +38,11 @@ impl LayoutState {
     Self {
       taffy: TaffyTree::new(),
       widgets: SecondaryMap::<DefaultKey, Rc<dyn Widget>>::new(),
-      styles: HashMap::new(),
-      view_states: HashMap::new(),
+      styles: rustc_hash::FxHashMap::default(),
+      view_states: rustc_hash::FxHashMap::default(),
       font_context: FontContext::new(),
       layout_context: LayoutContext::new(),
-      style_dirty_nodes: HashSet::new(),
+      style_dirty_nodes: rustc_hash::FxHashSet::default(),
     }
   }
 
