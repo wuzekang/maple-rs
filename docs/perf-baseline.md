@@ -125,3 +125,24 @@ frame_bench 1000 行：style 段 1.6→1.4ms。sig 98/98、sig-reactive 142/142�
 属性容器（`ctx.style`、`style_props`、`taffy_style_props`、`style_cache`）
 应从 `HashMap<Key, Value>` 换成 `[Option<Value>; VARIANT_COUNT]` 数组
 （strum `EnumCount`，键即下标）——哈希、rehash、迭代分配全部归零。
+
+### #4 属性容器数组化（fieldless 枚举键 → 判别式下标）
+
+依据 #3 剖析（哈希 ~33% + 分配 ~12%）。`StylePropertyKey`（16）与
+`TaffyStylePropertyKey`（50）为 fieldless 枚举，strum `EnumCount` 提供编译期
+长度。容器变更：
+
+- `StyleComputeContext.style`、compute_style 的两个局部属性映射、
+  `ViewState.style_cache`：`HashMap<Key, Value>` →
+  `[Option<Value>; Key::COUNT]`（`StylePropertyMap`/`TaffyStylePropertyMap`）
+- undo 日志改记下标；style_cache 回填从"清空+逐键 insert"变成数组赋值
+- `StyleProperty`/`TextWrap`/`PointerEvents` 补 `Copy`（载荷全是 Copy 类型，
+  `Option<StyleProperty>` 靠判别式余量零膨胀）
+
+style_bench（p50）：all_paint style 1218→**780µs（-36%）**（300 行 342→220µs
+同幅）；effects 396→333µs；all_layout style 886→783µs；one_paint/clean/
+layout 场景不变。frame_bench 1000 行：style 段 1.4ms→**995µs**，帧总耗时
+3.2→2.6ms。sig 98/98、sig-reactive 142/142。
+
+对照（自 #1 起累计）：all_paint 单迭代 style+effects+layout 合计
+3215µs → **1142µs（-64%）**。

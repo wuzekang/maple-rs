@@ -13,10 +13,11 @@
 
 use crate::ViewId;
 use crate::style::{
-  Style, StyleProperty, StylePropertyKey, StyleTrigger, TaffyStyleProperty, TaffyStylePropertyKey,
+  Style, StyleProperty, StylePropertyKey, StylePropertyMap, StyleTrigger, TaffyStyleProperty,
+  TaffyStylePropertyKey, TaffyStylePropertyMap,
 };
 use std::collections::{HashMap, HashSet};
-use strum::IntoEnumIterator;
+use strum::{EnumCount, IntoEnumIterator};
 
 /// Batch bubbling: Mark upwards from collected dirty nodes
 ///
@@ -99,8 +100,9 @@ pub fn batch_bubble_dirty_marks() {
 
 /// Style computation context
 pub struct StyleComputeContext {
-  /// Currently inherited style properties
-  pub style: HashMap<StylePropertyKey, StyleProperty>,
+  /// Currently inherited style properties, indexed by
+  /// [`StylePropertyKey`] discriminant (no hashing, no allocation).
+  pub style: StylePropertyMap,
   /// Whether to continue propagating downwards (has inheritable property changes)
   pub dirty: bool,
   /// Initial style properties
@@ -111,15 +113,15 @@ pub struct StyleComputeContext {
   pub visited: HashSet<ViewId>,
   /// Undo journal for `style`: each inherited-property overwrite records the
   /// previous entry so subtree walks restore the context with a bounded
-  /// replay instead of cloning the whole map per node.
-  style_undo: Vec<(StylePropertyKey, Option<StyleProperty>)>,
+  /// replay instead of cloning the whole map per node. Indices, not keys.
+  style_undo: Vec<(usize, Option<StyleProperty>)>,
 }
 
 impl StyleComputeContext {
   /// Create a new style computation context
   pub fn new() -> Self {
     Self {
-      style: HashMap::new(),
+      style: [None; StylePropertyKey::COUNT],
       dirty: false,
       visited: HashSet::new(),
       style_initial: StyleProperty::initial(),
@@ -136,15 +138,8 @@ impl StyleComputeContext {
   /// Replay the journal back to a mark, restoring `style` entries.
   fn undo_style_to(&mut self, mark: usize) {
     while self.style_undo.len() > mark {
-      let (key, prev) = self.style_undo.pop().unwrap();
-      match prev {
-        Some(value) => {
-          self.style.insert(key, value);
-        }
-        None => {
-          self.style.remove(&key);
-        }
-      }
+      let (idx, prev) = self.style_undo.pop().unwrap();
+      self.style[idx] = prev;
     }
   }
 }
@@ -164,17 +159,24 @@ fn compute_style(view: &ViewId, ctx: &mut StyleComputeContext) {
   // StyleBuilder on the hot path.
   let (style_props, mut taffy_style_props, old_style, old_taffy_style) =
     crate::runtime::with_layout(|runtime| {
-      let mut style_props = HashMap::<StylePropertyKey, StyleProperty>::new();
-      let mut taffy_style_props =
-        HashMap::<TaffyStylePropertyKey, TaffyStyleProperty>::new();
+      // Later builders win; a Some() slot is only filled by the first
+      // (highest-priority) builder that sets the key.
+      let mut style_props: StylePropertyMap = [None; StylePropertyKey::COUNT];
+      let mut taffy_style_props: TaffyStylePropertyMap = [None; TaffyStylePropertyKey::COUNT];
       let (old_style, old_taffy_style) = if let Some(state) = runtime.view_states.get(view) {
         for style_builder in state.styles.iter().rev() {
           if let Some(style_builder) = style_builder.as_ref() {
             for (key, value) in style_builder.taffy_style_props.iter().rev() {
-              taffy_style_props.entry(*key).or_insert(*value);
+              let slot = &mut taffy_style_props[*key as usize];
+              if slot.is_none() {
+                *slot = Some(*value);
+              }
             }
             for (key, value) in style_builder.style_props.iter().rev() {
-              style_props.entry(*key).or_insert(value.clone());
+              let slot = &mut style_props[*key as usize];
+              if slot.is_none() {
+                *slot = Some(*value);
+              }
             }
           }
         }
@@ -194,14 +196,15 @@ fn compute_style(view: &ViewId, ctx: &mut StyleComputeContext) {
 
   // Apply initial Taffy styles
   for (key, value) in &ctx.taffy_style_initial {
-    if !taffy_style_props.contains_key(key) {
-      taffy_style_props.insert(*key, *value);
+    let slot = &mut taffy_style_props[*key as usize];
+    if slot.is_none() {
+      *slot = Some(*value);
     }
   }
 
-  // Update Taffy styles
+  // Build the taffy style from whichever slots are set
   let mut taffy_style = taffy::Style::default();
-  for (_, value) in taffy_style_props {
+  for value in taffy_style_props.iter().flatten() {
     value.assign_to(&mut taffy_style);
   }
 
@@ -227,22 +230,23 @@ fn compute_style(view: &ViewId, ctx: &mut StyleComputeContext) {
 
   // Apply initial styles
   for (key, value) in &ctx.style_initial {
-    if !style_props.contains_key(key) {
+    if style_props[*key as usize].is_none() {
       value.assign_to(&mut style);
     }
   }
 
-  // Inherit inheritable properties from parent (use iterator to traverse all property keys)
+  // Inherit inheritable properties from parent
   for key in StylePropertyKey::iter() {
-    if !style_props.contains_key(&key) && key.inherited() {
-      if let Some(value) = ctx.style.get(&key) {
+    let idx = key as usize;
+    if style_props[idx].is_none() && key.inherited() {
+      if let Some(value) = ctx.style[idx] {
         value.assign_to(&mut style);
       }
     }
   }
 
   // Apply current view's style properties
-  for (_, value) in style_props.iter() {
+  for value in style_props.iter().flatten() {
     value.assign_to(&mut style);
   }
 
@@ -272,10 +276,13 @@ fn compute_style(view: &ViewId, ctx: &mut StyleComputeContext) {
   // Update inheritable properties in context (for propagation to child
   // nodes). Each overwrite journals the previous entry; the subtree walk
   // restores via the journal instead of cloning the map.
-  for (key, value) in &style_props {
-    if key.inherited() {
-      let prev = ctx.style.insert(*key, value.clone());
-      ctx.style_undo.push((*key, prev));
+  for (idx, slot) in style_props.iter().enumerate() {
+    if let Some(value) = slot
+      && StylePropertyKey::iter().nth(idx).is_some_and(|k| k.inherited())
+    {
+      let prev = ctx.style[idx];
+      ctx.style[idx] = Some(*value);
+      ctx.style_undo.push((idx, prev));
     }
   }
 
@@ -345,14 +352,11 @@ pub fn compute_style_recursive(view: &ViewId, ctx: &mut StyleComputeContext) {
     });
   }
 
-  // Mark as visited and update cache
+  // Mark as visited and update cache (plain array copy)
   ctx.visited.insert(*view);
   crate::runtime::with_layout_mut(|runtime| {
     if let Some(state) = runtime.view_states.get_mut(view) {
-      state.style_cache.clear();
-      for (key, value) in &ctx.style {
-        state.style_cache.insert(*key, value.clone());
-      }
+      state.style_cache = ctx.style;
     }
   });
 

@@ -5,7 +5,7 @@ pub mod dimension;
 
 use crate::create_effect;
 pub use dimension::*;
-use strum::EnumIter;
+use strum::{EnumCount, EnumIter};
 use taffy::{AlignContent, AlignItems, AlignSelf, Display, FlexDirection, FlexWrap};
 use taffy::{JustifyContent, Overflow, Point, Position};
 use vello::peniko::Color;
@@ -65,7 +65,7 @@ impl Default for Style {
 }
 
 /// Text wrapping
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TextWrap {
   None,
   Glyph,
@@ -96,7 +96,7 @@ impl Default for TextAlign {
 }
 
 /// Pointer events
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum PointerEvents {
   #[default]
   Auto,
@@ -119,7 +119,7 @@ pub enum StyleTrigger {
 }
 
 /// Rendering style property - used for vello rendering
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum StyleProperty {
   Background(Color),
   Color(Color),
@@ -140,7 +140,7 @@ pub enum StyleProperty {
 }
 
 /// Rendering style property key
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, EnumIter)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, EnumIter, EnumCount)]
 pub enum StylePropertyKey {
   Background,
   Color,
@@ -159,6 +159,12 @@ pub enum StylePropertyKey {
   BorderRadius,
   Cursor,
 }
+
+/// Property map keyed by enum discriminant: O(1) access, no hashing,
+/// no allocation. The enum keys are fieldless, so the key IS the index.
+pub type StylePropertyMap = [Option<StyleProperty>; StylePropertyKey::COUNT];
+pub type TaffyStylePropertyMap =
+  [Option<TaffyStyleProperty>; TaffyStylePropertyKey::COUNT];
 
 impl StylePropertyKey {
   /// Check if property is inheritable
@@ -366,7 +372,7 @@ pub enum TaffyStyleProperty {
 }
 
 /// Style property key - for deduplication and updates
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, EnumCount)]
 pub enum TaffyStylePropertyKey {
   Display,
   Overflow,
