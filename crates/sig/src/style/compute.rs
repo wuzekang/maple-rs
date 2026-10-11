@@ -182,20 +182,22 @@ fn compute_style(view: &ViewId, ctx: &mut StyleComputeContext) {
     value.assign_to(&mut taffy_style);
   }
 
-  // Detect Taffy style changes and update trigger
+  // Apply to the taffy tree ONLY when the taffy-relevant style actually
+  // changed. taffy's set_style does not compare old and new values — it
+  // marks the node layout-dirty unconditionally, so an equal-style write
+  // (e.g. a paint-only property changed) costs a full subtree relayout.
   if old_taffy_style != taffy_style {
     if style_trigger < StyleTrigger::Layout {
       style_trigger = StyleTrigger::Layout;
     }
-  }
 
-  // Apply to Taffy tree
-  crate::runtime::with_layout_mut(|runtime| {
-    runtime
-      .taffy
-      .set_style(view.node_id(), taffy_style)
-      .expect("Failed to set taffy style");
-  });
+    crate::runtime::with_layout_mut(|runtime| {
+      runtime
+        .taffy
+        .set_style(view.node_id(), taffy_style)
+        .expect("Failed to set taffy style");
+    });
+  }
 
   // Build render style
   let mut style = Style::default();

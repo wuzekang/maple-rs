@@ -59,3 +59,30 @@
 
 任何 style/layout/scene 相关优化，先跑本基准记录对比，写进本文档的
 "优化记录"章节；端到端验收用 frame_bench。
+
+## 优化记录
+
+### #1 等值 set_style 门控（Paint/Layout 分流的第一步）
+
+机制定位（`examples/taffy_setstyle_probe.rs`）：taffy 的 `set_style` 不比较新旧
+样式、无条件标脏——写入比特级相同的样式也会触发子树重排（探针数据：缓存命中
+11µs，等值 set_style 后 300µs ≈ 冷启动的 75%）。sig 在 `compute_style` 和 style
+effect 两处无条件调用 `set_style`，导致 paint-only 变更（如改背景色）照付全价。
+
+修复：两处 `set_style` 均加变更比较门控（taffy 相关属性没变就不写）。
+
+style_bench 对比（1000 行，layout 段 p50）：
+
+| 场景 | 改前 | 改后 | |
+|---|---|---|---|
+| clean | 22µs | 23µs | 不变（地板） |
+| one_paint | 230µs | **23µs** | -90%，落回地板 |
+| all_paint | 794µs | **29µs** | -96% |
+| one_layout | 227µs | 266µs | 不变（该排照排，噪声内） |
+| all_layout | 769µs | 787µs | 不变 |
+
+frame_bench（1000 行）：layout 段 850µs → **122µs（-86%）**，total p50
+4.0ms → 3.2ms，帧:写 302/300 保持。sig 测试 98/98。
+
+下一步候选（见上文优化点 2/3）：scene 损伤追踪（clean 仍 249µs）、
+属性级样式绑定（effects+style 段仍占大头）。

@@ -1525,17 +1525,23 @@ pub trait Styleable: crate::Element {
       let builder = f(StyleBuilder::default());
 
       let changed = crate::runtime::with_layout_mut(|runtime| {
-        let mut style = runtime
+        let old_style = runtime
           .taffy
           .style(node_id)
           .cloned()
           .unwrap_or(taffy::Style::DEFAULT);
+        let mut style = old_style.clone();
 
         for (_key, prop) in &builder.taffy_style_props {
           (*prop).assign_to(&mut style);
         }
 
-        let _ = runtime.taffy.set_style(node_id, style);
+        // taffy's set_style marks layout dirty even for identical styles;
+        // skip it when no taffy-relevant property changed (paint-only
+        // updates must not pay a relayout).
+        if style != old_style {
+          let _ = runtime.taffy.set_style(node_id, style);
+        }
 
         // Check if StyleBuilder changed
         if let Some(state) = runtime.view_states.get_mut(&view_id) {
