@@ -34,7 +34,6 @@ pub use runtime::{
   RenderCtxState,
   WindowState,
   clear_focus,
-  current_owner,
   current_scope_id,
   get_focused,
   is_focused,
@@ -61,6 +60,9 @@ pub use app::{AppConfig, Runner, run};
 // Render
 pub mod render;
 pub use render::*;
+
+// Per-frame pipeline timing (enable with SIG_FRAME_STATS=1)
+pub mod frame_stats;
 
 // Portal (simplified API)
 pub mod portal;

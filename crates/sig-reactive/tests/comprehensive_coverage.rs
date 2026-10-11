@@ -528,6 +528,7 @@ fn test_signalid_ordering() {
 
 #[test]
 fn test_scopeid_root_constant() {
-    let root = ScopeId::ROOT;
-    assert_eq!(root.0, 1);
+    // The root scope always exists and is stable.
+    let root = samara_signals::root_scope();
+    assert_eq!(root, samara_signals::root_scope());
 }

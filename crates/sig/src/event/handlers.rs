@@ -129,10 +129,11 @@ mod tests {
     #[test]
     fn test_add_and_dispatch() {
         let mut handlers = EventHandlers::new();
-        let mut called = false;
+        let called = std::rc::Rc::new(std::cell::Cell::new(false));
+        let called2 = called.clone();
 
-        handlers.add_handler(|_event: &mut MouseEvent| {
-            called = true;
+        handlers.add_handler(move |_event: &mut MouseEvent| {
+            called2.set(true);
         });
 
         let mut event = MouseEvent::new(ViewId::default(), MouseData {
@@ -140,25 +141,28 @@ mod tests {
             button: None,
             state: winit::event::ElementState::Pressed,
             r#type: MouseEventType::Click,
+            modifiers: Default::default(),
         });
 
         let dispatched = handlers.dispatch(&mut event);
 
         assert!(dispatched);
-        assert!(called);
+        assert!(called.get());
     }
 
     #[test]
     fn test_multiple_handlers() {
         let mut handlers = EventHandlers::new();
-        let mut count = 0;
+        let count = std::rc::Rc::new(std::cell::Cell::new(0));
+        let c1 = count.clone();
+        let c2 = count.clone();
 
-        handlers.add_handler(|_event: &mut MouseEvent| {
-            count += 1;
+        handlers.add_handler(move |_event: &mut MouseEvent| {
+            c1.set(c1.get() + 1);
         });
 
-        handlers.add_handler(|_event: &mut MouseEvent| {
-            count += 1;
+        handlers.add_handler(move |_event: &mut MouseEvent| {
+            c2.set(c2.get() + 1);
         });
 
         let mut event = MouseEvent::new(ViewId::default(), MouseData {
@@ -166,11 +170,12 @@ mod tests {
             button: None,
             state: winit::event::ElementState::Pressed,
             r#type: MouseEventType::Click,
+            modifiers: Default::default(),
         });
 
         handlers.dispatch(&mut event);
 
-        assert_eq!(count, 2);
+        assert_eq!(count.get(), 2);
     }
 
     #[test]
@@ -178,15 +183,17 @@ mod tests {
         use crate::event::types::{WheelEvent, WheelData};
 
         let mut handlers = EventHandlers::new();
-        let mut mouse_called = false;
-        let mut wheel_called = false;
+        let mouse_called = std::rc::Rc::new(std::cell::Cell::new(false));
+        let wheel_called = std::rc::Rc::new(std::cell::Cell::new(false));
+        let mc = mouse_called.clone();
+        let wc = wheel_called.clone();
 
-        handlers.add_handler(|_event: &mut MouseEvent| {
-            mouse_called = true;
+        handlers.add_handler(move |_event: &mut MouseEvent| {
+            mc.set(true);
         });
 
-        handlers.add_handler(|_event: &mut WheelEvent| {
-            wheel_called = true;
+        handlers.add_handler(move |_event: &mut WheelEvent| {
+            wc.set(true);
         });
 
         // Dispatch mouse event
@@ -195,11 +202,12 @@ mod tests {
             button: None,
             state: winit::event::ElementState::Pressed,
             r#type: MouseEventType::Click,
+            modifiers: Default::default(),
         });
         handlers.dispatch(&mut mouse_event);
 
-        assert!(mouse_called);
-        assert!(!wheel_called);
+        assert!(mouse_called.get());
+        assert!(!wheel_called.get());
 
         // Dispatch wheel event
         let mut wheel_event = WheelEvent::new(ViewId::default(), WheelData {
@@ -209,6 +217,6 @@ mod tests {
         });
         handlers.dispatch(&mut wheel_event);
 
-        assert!(wheel_called);
+        assert!(wheel_called.get());
     }
 }

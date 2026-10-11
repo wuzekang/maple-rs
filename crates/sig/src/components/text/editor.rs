@@ -67,6 +67,12 @@ impl TextEditor {
         self.editor.set_text(text);
         self.editor
             .refresh_layout(&mut self.font_cx, &mut self.layout_cx);
+        // parley keeps the cursor where it was across set_text; a full text
+        // replacement should leave the caret at the end so subsequent
+        // inserts append instead of landing at a stale offset.
+        self.editor
+            .driver(&mut self.font_cx, &mut self.layout_cx)
+            .move_to_text_end();
     }
 
     /// Get text content

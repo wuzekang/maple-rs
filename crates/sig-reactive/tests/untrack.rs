@@ -169,9 +169,10 @@ fn test_untrack_create_effect_inside() {
         assert_eq!(*outer_runs.borrow(), 2);
         assert_eq!(*inner_runs.borrow(), 2); // New inner effect ran
         
-        // Update inner signal - all inner effects run
+        // Update inner signal - only the CURRENT inner effect runs: the one
+        // created by the previous outer run was disposed on outer re-run.
         *inner_signal.write() = 20;
         assert_eq!(*outer_runs.borrow(), 2); // Outer unchanged
-        assert_eq!(*inner_runs.borrow(), 4); // Both inner effects ran
+        assert_eq!(*inner_runs.borrow(), 3); // Current inner effect ran
     });
 }

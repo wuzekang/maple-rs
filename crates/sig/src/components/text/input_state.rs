@@ -68,11 +68,7 @@ impl InputState {
                 let current = *cursor_visible.read();
                 *cursor_visible.write() = !current;
                 
-                crate::runtime::with_window(|window_state| {
-                    if let Some(window) = &window_state.redraw_requester {
-                        window.request_redraw();
-                    }
-                });
+                crate::runtime::request_redraw();
             }
         });
 

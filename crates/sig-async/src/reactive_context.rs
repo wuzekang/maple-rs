@@ -4,10 +4,8 @@
 //! inside async blocks during Future polling.
 
 use sig_reactive::Effect;
-use std::cell::RefCell;
 use std::future::Future;
 use std::pin::Pin;
-use std::rc::Rc;
 use std::task::{Context, Poll};
 
 /// A future wrapper that polls the inner future within a reactive effect context
@@ -15,35 +13,30 @@ use std::task::{Context, Poll};
 /// This ensures that any signal reads during Future::poll() are tracked as dependencies.
 pub struct ReactiveContextFuture<F> {
     inner: Pin<Box<F>>,
-    /// The effect that should be on the stack during polling
-    effect_rc: Rc<RefCell<Effect>>,
+    /// The effect whose tracking context is entered while polling
+    effect: Effect,
 }
 
 impl<F> ReactiveContextFuture<F> {
-    pub fn new(inner: F, effect_rc: Rc<RefCell<Effect>>) -> Self {
+    pub fn new(inner: F, effect: Effect) -> Self {
         Self {
             inner: Box::pin(inner),
-            effect_rc,
+            effect,
         }
     }
 }
 
 impl<F: Future> Future for ReactiveContextFuture<F> {
     type Output = F::Output;
-    
+
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = unsafe { self.get_unchecked_mut() };
-        let effect_rc = this.effect_rc.clone();
-        
-        // Push effect onto stack before polling
-        sig_reactive::push_effect(effect_rc);
-        
+
+        // Enter the effect's tracking context before polling; the guard
+        // restores the previous context on drop.
+        let _guard = this.effect.enter_context();
+
         // Poll the inner future - any signal reads will now be tracked!
-        let result = this.inner.as_mut().poll(cx);
-        
-        // Pop effect from stack after polling
-        sig_reactive::pop_effect();
-        
-        result
+        this.inner.as_mut().poll(cx)
     }
 }

@@ -13,12 +13,23 @@
 //! The reactive context mode uses a polling wrapper to maintain reactive context during
 //! Future execution, similar to Dioxus's implementation.
 
-use sig_reactive::{Signal, create_effect, runtime::untrack, current_owner};
+use sig_reactive::{Effect, Signal, create_effect, current_effect, untrack};
 use crate::{spawn, Task};
 use crate::reactive_context::ReactiveContextFuture;
-use generational_box::GenerationalBox;
+use std::cell::RefCell;
 use std::pin::Pin;
+use std::rc::Rc;
 use std::future::Future;
+
+/// The future factory stored as a Copy reactive handle so `Resource` stays `Copy`.
+type FutureFn<T> = Signal<Box<dyn FnMut() -> Pin<Box<dyn Future<Output = T>>>>>;
+
+fn box_future_fn<T: 'static, F>(mut future_fn: impl FnMut() -> F + 'static) -> FutureFn<T>
+where
+    F: Future<Output = T> + 'static,
+{
+    Signal::new(Box::new(move || Box::pin(future_fn()) as Pin<Box<dyn Future<Output = T>>>))
+}
 
 /// State of a resource
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -34,7 +45,7 @@ pub struct Resource<T: 'static> {
     value: Signal<Option<T>>,
     state: Signal<ResourceState>,
     task: Signal<Option<Task>>,
-    future_fn: GenerationalBox<Box<dyn FnMut() -> Pin<Box<dyn Future<Output = T>>>>>,
+    future_fn: FutureFn<T>,
 }
 
 // Now Resource is Copy!
@@ -48,50 +59,46 @@ impl<T: 'static> Clone for Resource<T> {
 
 impl<T: 'static> Resource<T> {
     #[allow(dead_code)]
-    fn new<F>(mut future_fn: impl FnMut() -> F + 'static) -> Self
+    fn new<F>(future_fn: impl FnMut() -> F + 'static) -> Self
     where
         F: std::future::Future<Output = T> + 'static,
     {
         let value = Signal::new(None);
         let state = Signal::new(ResourceState::Pending);
         let task_signal = Signal::new(None);
-        
-        // Store the future factory in current scope's owner
-        let future_fn_box = current_owner().insert(
-            Box::new(move || Box::pin(future_fn()) as Pin<Box<dyn Future<Output = T>>>)
-                as Box<dyn FnMut() -> Pin<Box<dyn Future<Output = T>>>>
-        );
-        
+
+        let future_fn_box = box_future_fn(future_fn);
+
         let resource = Resource {
             value,
             state,
             task: task_signal,
             future_fn: future_fn_box,
         };
-        
+
         // Don't start initial task here - let use_resource handle it via create_effect
-        
+
         resource
     }
-    
+
     /// Internal: run the task
     fn run_task(&self) {
         // Cancel old task (untracked - this is internal state)
         untrack(|| {
-            if let Some(old_task) = *self.task.read() {
+            if let Some(old_task) = &*self.task.read() {
                 old_task.cancel();
             }
         });
-        
+
         // Set state to pending (untracked - this is internal state)
         untrack(|| *self.state.write() = ResourceState::Pending);
-        
+
         // Generate future - this SHOULD track dependencies!
         let fut = (self.future_fn.write())();
-        
+
         let value = self.value;
         let state = self.state;
-        
+
         // Spawn task (untracked - this is internal state)
         let new_task = untrack(|| {
             spawn(async move {
@@ -100,55 +107,55 @@ impl<T: 'static> Resource<T> {
                 *state.write() = ResourceState::Ready;
             })
         });
-        
+
         untrack(|| *self.task.write() = Some(new_task));
     }
-    
+
     pub fn value(&self) -> Option<T>
     where
         T: Clone,
     {
         (*self.value.read()).clone()
     }
-    
+
     pub fn state(&self) -> ResourceState {
         *self.state.read()
     }
-    
+
     pub fn pending(&self) -> bool {
         self.state() == ResourceState::Pending
     }
-    
+
     pub fn ready(&self) -> bool {
         self.state() == ResourceState::Ready
     }
-    
+
     pub fn restart(&self) {
         self.run_task();
     }
-    
+
     pub fn cancel(&self) {
-        if let Some(task) = *self.task.read() {
+        if let Some(task) = &*self.task.read() {
             task.cancel();
         }
         *self.task.write() = None;
         *self.state.write() = ResourceState::Stopped;
     }
-    
+
     pub fn pause(&self) {
-        if let Some(task) = *self.task.read() {
+        if let Some(task) = &*self.task.read() {
             task.pause();
             *self.state.write() = ResourceState::Paused;
         }
     }
-    
+
     pub fn resume(&self) {
-        if let Some(task) = *self.task.read() {
+        if let Some(task) = &*self.task.read() {
             task.resume();
             *self.state.write() = ResourceState::Pending;
         }
     }
-    
+
     pub fn clear(&self) {
         *self.value.write() = None;
     }
@@ -170,7 +177,7 @@ impl<T: 'static> Resource<T> {
 ///
 /// create_scope(move || {
 ///     let user_id = Signal::new(1);
-///     
+///
 ///     // Automatically tracks user_id and restarts when it changes
 ///     let user_data = use_resource(move || {
 ///         let id = *user_id.read();  // Automatically tracked!
@@ -178,10 +185,10 @@ impl<T: 'static> Resource<T> {
 ///             format!("User {}", id)
 ///         }
 ///     });
-///     
+///
 ///     poll_tasks();
 ///     assert_eq!(user_data.value(), Some("User 1".to_string()));
-///     
+///
 ///     // When user_id changes, the resource automatically restarts
 ///     *user_id.write() = 2;
 ///     poll_tasks();
@@ -196,40 +203,36 @@ where
     let value = Signal::new(None);
     let state = Signal::new(ResourceState::Pending);
     let task_signal = Signal::new(None);
-    
-    // Store the future factory in current scope's owner
-    let future_fn_box = current_owner().insert(
-        Box::new(move || Box::pin(future_fn()) as Pin<Box<dyn Future<Output = T>>>)
-            as Box<dyn FnMut() -> Pin<Box<dyn Future<Output = T>>>>
-    );
-    
+
+    let future_fn_box = box_future_fn(future_fn);
+
     // Create the resource
     let resource = Resource {
         value,
         state,
         task: task_signal,
-        future_fn: future_fn_box,
+        future_fn: future_fn_box.clone(),
     };
-    
+
     // Use create_effect to automatically track dependencies
     // The effect will call future_fn() which reads signals and establishes dependencies
     create_effect(move || {
         // Cancel old task (untracked - we don't want to subscribe to task_signal)
         untrack(|| {
-            if let Some(old_task) = *task_signal.read() {
+            if let Some(old_task) = &*task_signal.read() {
                 old_task.cancel();
             }
         });
-        
+
         // Set state (untracked - we don't want to subscribe to state)
         untrack(|| {
             *state.write() = ResourceState::Pending;
         });
-        
+
         // Call future_fn HERE to establish dependencies
         // This is critical: future_fn() must run INSIDE the effect to track signals
         let fut = (future_fn_box.write())();
-        
+
         // Spawn task and write to signals (untracked)
         untrack(|| {
             let new_task = crate::spawn(async move {
@@ -237,11 +240,11 @@ where
                 *value.write() = Some(result);
                 *state.write() = ResourceState::Ready;
             });
-            
+
             *task_signal.write() = Some(new_task);
         });
     });
-    
+
     resource
 }
 
@@ -257,16 +260,16 @@ where
 ///
 /// create_scope(move || {
 ///     let user_id = Signal::new(1);
-///     
+///
 ///     // ✅ Can read signals inside the async block!
 ///     let user_data = use_resource_with_tracking(move || async move {
 ///         let id = *user_id.read();  // This works!
 ///         format!("User {}", id)
 ///     });
-///     
+///
 ///     poll_tasks();
 ///     assert_eq!(user_data.value(), Some("User 1".to_string()));
-///     
+///
 ///     *user_id.write() = 2;
 ///     poll_tasks();
 ///     assert_eq!(user_data.value(), Some("User 2".to_string()));
@@ -280,65 +283,57 @@ where
     let value = Signal::new(None);
     let state = Signal::new(ResourceState::Pending);
     let task_signal = Signal::new(None);
-    
-    // We need to create a shared effect_rc that will be used during polling
-    // This will be set up inside create_effect
-    let effect_rc: std::rc::Rc<std::cell::RefCell<Option<std::rc::Rc<std::cell::RefCell<sig_reactive::Effect>>>>> = 
-        std::rc::Rc::new(std::cell::RefCell::new(None));
-    
-    let effect_rc_for_future = effect_rc.clone();
-    
-    // Store the future factory in current scope's owner
-    let future_fn_box = current_owner().insert(
-        Box::new(move || {
-            let fut = future_fn();
-            
-            // Wrap with ReactiveContextFuture if we have an effect_rc
-            if let Some(ref eff_rc) = *effect_rc_for_future.borrow() {
-                let ctx_fut = ReactiveContextFuture::new(fut, eff_rc.clone());
-                Box::pin(ctx_fut) as Pin<Box<dyn Future<Output = T>>>
-            } else {
-                // Fallback: just box the future normally
-                Box::pin(fut) as Pin<Box<dyn Future<Output = T>>>
-            }
-        }) as Box<dyn FnMut() -> Pin<Box<dyn Future<Output = T>>>>
-    );
-    
+
+    // The effect handle captured on the first run; futures created later wrap
+    // themselves so their polls execute inside that effect's tracking context.
+    let effect_cell: Rc<RefCell<Option<Effect>>> = Rc::new(RefCell::new(None));
+    let effect_for_future = effect_cell.clone();
+
+    let future_fn_box: FutureFn<T> = Signal::new(Box::new(move || {
+        let fut = future_fn();
+
+        // Wrap with ReactiveContextFuture if we have an effect handle
+        if let Some(effect) = effect_for_future.borrow().clone() {
+            let ctx_fut = ReactiveContextFuture::new(fut, effect);
+            Box::pin(ctx_fut) as Pin<Box<dyn Future<Output = T>>>
+        } else {
+            // Fallback: just box the future normally
+            Box::pin(fut) as Pin<Box<dyn Future<Output = T>>>
+        }
+    }));
+
     // Create the resource
     let resource = Resource {
         value,
         state,
         task: task_signal,
-        future_fn: future_fn_box,
+        future_fn: future_fn_box.clone(),
     };
-    
+
     // Use create_effect to automatically track dependencies
     let _eff = create_effect(move || {
-        // Get the current effect_rc from the runtime
-        // This is the effect we're running inside right now!
-        let current_effect_rc = sig_reactive::current_effect();
-        
-        // Store it so the future can use it during polling
-        if let Some(ref eff_rc) = current_effect_rc {
-            *effect_rc.borrow_mut() = Some(eff_rc.clone());
+        // Capture the effect we're running inside right now, so futures
+        // created below can re-enter its tracking context during polling.
+        if let Some(effect) = current_effect() {
+            *effect_cell.borrow_mut() = Some(effect);
         }
-        
+
         // Cancel old task (untracked)
         untrack(|| {
-            if let Some(old_task) = *task_signal.read() {
+            if let Some(old_task) = &*task_signal.read() {
                 old_task.cancel();
             }
         });
-        
+
         // Set state (untracked)
         untrack(|| {
             *state.write() = ResourceState::Pending;
         });
-        
+
         // Call future_fn to create the future
         // The future is now wrapped with ReactiveContextFuture
         let fut = (future_fn_box.write())();
-        
+
         // Spawn task (untracked)
         untrack(|| {
             let new_task = crate::spawn(async move {
@@ -346,10 +341,10 @@ where
                 *value.write() = Some(result);
                 *state.write() = ResourceState::Ready;
             });
-            
+
             *task_signal.write() = Some(new_task);
         });
     });
-    
+
     resource
 }

@@ -50,8 +50,8 @@ fn test_zombie_effect_prevention() {
         }
     }); 
     // Effect 结束 -> Runtime Flush -> 尝试运行内部 Effect
-    // 延迟销毁模式下：Scope 依然存活 -> Effect 执行 -> run_count + 1
-    // 然后 Scope 才会被销毁
+    // samara 语义：remove_scope 立即销毁节点，已销毁的 effect 绝不再执行
+    // （zombie 预防更彻底：不是延迟销毁，而是销毁即失效）
     
-    assert_eq!(*run_count.borrow(), 2, "Effect runs once more before deferred destruction");
+    assert_eq!(*run_count.borrow(), 1, "Effect never runs after its scope is destroyed");
 }

@@ -213,14 +213,16 @@ fn test_cleanup_in_nested_effects() {
         assert_eq!(*outer_cleanups.borrow(), 0);
         assert_eq!(*inner_cleanups.borrow(), 1); // First inner effect cleanup
         
-        // Update outer signal - outer reruns (cleanup), creates new inner effect
+        // Update outer signal - outer reruns (cleanup), creates new inner effect.
+        // alien-signals semantics: nodes created inside an effect are disposed
+        // and re-created on each run, so the OLD inner effect's cleanup runs too.
         *outer_signal.write() = 2;
         assert_eq!(*outer_cleanups.borrow(), 1); // Outer cleanup
-        assert_eq!(*inner_cleanups.borrow(), 1); // Old inner cleanups
+        assert_eq!(*inner_cleanups.borrow(), 2); // Old inner disposed with outer rerun
         
-        // Update inner signal again - triggers ALL inner effects
+        // Update inner signal again - the (new) inner effect reruns
         *inner_signal.write() = 30;
         assert_eq!(*outer_cleanups.borrow(), 1);
-        assert_eq!(*inner_cleanups.borrow(), 3); // Both inner effects cleanup
+        assert_eq!(*inner_cleanups.borrow(), 3);
     });
 }

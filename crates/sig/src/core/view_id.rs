@@ -211,11 +211,7 @@ impl ViewId {
       // If view state doesn't exist, the node has been cleaned up, silently ignore
     });
 
-    crate::runtime::with_window(|window_state| {
-      if let Some(window) = &window_state.redraw_requester {
-        window.request_redraw();
-      }
-    });
+    crate::runtime::request_redraw();
   }
 
   /// Set style
@@ -259,11 +255,7 @@ impl ViewId {
     match trigger {
       StyleTrigger::None => {}
       StyleTrigger::Composite | StyleTrigger::Paint | StyleTrigger::Layout => {
-        crate::runtime::with_window(|window_state| {
-          if let Some(window) = &window_state.redraw_requester {
-            window.request_redraw();
-          }
-        });
+        crate::runtime::request_redraw();
       }
     }
   }
@@ -277,11 +269,7 @@ impl ViewId {
       runtime.style_dirty_nodes.insert(*self);
     });
 
-    crate::runtime::with_window(|window_state| {
-      if let Some(window) = &window_state.redraw_requester {
-        window.request_redraw();
-      }
-    });
+    crate::runtime::request_redraw();
   }
 
   // ============================================================================

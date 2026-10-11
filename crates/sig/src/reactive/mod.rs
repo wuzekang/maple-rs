@@ -10,7 +10,6 @@
 pub use sig_reactive::{
   Effect,
   ReadGuard,
-  Runtime,
 
   ScopeId,
   // Core types
@@ -24,15 +23,12 @@ pub use sig_reactive::{
   create_effect,
   create_scope,
   current_effect,
-  current_owner,
   current_scope_id,
   has_context,
   // Runtime functions
   on_cleanup,
-  pop_effect,
   // Context API
   provide_context,
-  push_effect,
   remove_scope,
 
   untrack,
@@ -76,8 +72,3 @@ pub use sig_async::{
 // ============================================================================
 // Type aliases for compatibility
 // ============================================================================
-
-/// Alias for sig_reactive::Runtime
-///
-/// This maintains compatibility with code that uses ReactiveState.
-pub type ReactiveState = sig_reactive::Runtime;

@@ -32,11 +32,7 @@ impl View {
       id.set_children(children.clone());
 
       // Request redraw since the subtree structure has changed
-      crate::runtime::with_window(|window_state| {
-        if let Some(window) = &window_state.redraw_requester {
-          window.request_redraw();
-        }
-      });
+      crate::runtime::request_redraw();
     });
 
     View { id, children: nodes }

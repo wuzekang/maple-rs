@@ -9,7 +9,7 @@
 //! - `app` - Window redraw and timing
 //! - `render` - Render context
 
-pub use crate::reactive::{current_owner, current_scope_id, on_cleanup, remove_scope, untrack};
+pub use crate::reactive::{current_scope_id, on_cleanup, remove_scope, untrack};
 
 // Re-export from feature modules
 pub use crate::app::runtime::*;

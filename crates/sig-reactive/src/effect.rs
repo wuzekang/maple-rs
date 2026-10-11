@@ -1,109 +1,49 @@
-use std::cell::RefCell;
-use std::rc::Rc;
+//! Effect and scope constructors — facade over `samara-signals`.
 
-use super::runtime::{self, Effect, RUNTIME};
+use samara_signals as samara;
+
 pub use super::runtime::ScopeId;
+pub use super::runtime::Effect;
 
-/// Create a new reactive effect
-pub fn create_effect<F: FnMut() + 'static>(f: F) -> Effect {
-    let callback = Rc::new(RefCell::new(Box::new(f) as Box<dyn FnMut()>));
-
-    // 1. Create scope
-    let (parent, scope_id) = RUNTIME.with(|runtime| {
-        let mut state = runtime.borrow_mut();
-        let parent = state.current_scope_id();
-        let id = state.create_scope("effect", parent);
-        (parent, id)
-    });
-
-    let effect = Effect {
-        callback: callback.clone(),
-        scope_id,
-    };
-
-    let rc = Rc::new(RefCell::new(effect.clone()));
-
-    // 2. Register effect in runtime and parent
-    RUNTIME.with(|runtime| {
-        let mut state = runtime.borrow_mut();
-        
-        if let Some(parent) = parent {
-            if let Some(Some(scope)) = state.scopes.get_mut(&parent) {
-                scope.effects.push(rc.clone());
-            }
-        }
-        
-        state.effects.push(rc.clone());
-        
-        // Prepare for initial run
-        state.effect_depth += 1;
-        state.scope_stack.push(scope_id);
-    });
-
-    // 3. Initial run
-    (callback.borrow_mut())();
-
-    // 4. Cleanup after run
-    RUNTIME.with(|runtime| {
-        let mut state = runtime.borrow_mut();
-        state.effect_depth -= 1;
-        state.scope_stack.pop();
-        state.effects.pop();
-    });
-    
-    // 5. Flush any effects triggered by initial run
-    runtime::flush_pending_effects();
-
-    effect
+/// Create a new reactive effect.
+///
+/// The closure runs once immediately; it re-runs whenever any signal it
+/// read (tracked) changes. Dependencies are re-collected on every run.
+///
+/// Bodies are batched: signal writes inside an effect mark downstream
+/// effects dirty but defer their runs (deduplicated) until the outermost
+/// effect body completes — sig's historical execution semantics, layered
+/// on samara's eager propagation.
+pub fn create_effect<F: FnMut() + 'static>(mut f: F) -> Effect {
+  Effect {
+    inner: samara::effect_recursive(move || {
+      samara::start_batch();
+      f();
+      samara::end_batch();
+    }),
+  }
 }
 
-/// Create a new scope
+/// Run `f` inside a fresh child scope, then dispose that scope: cleanups
+/// registered inside (directly or by child scopes) run when `f` returns.
 pub fn create_scope<F: FnOnce() + 'static>(f: F) {
-    let id = RUNTIME.with(|runtime| {
-        let mut state = runtime.borrow_mut();
-        let parent = state.current_scope_id();
-        let id = state.create_scope("scope", parent);
-        state.scope_stack.push(id);
-        id
-    });
-
-    f();
-
-    RUNTIME.with(|runtime| {
-        let mut state = runtime.borrow_mut();
-        state.remove_scope(id);
-        state.scope_stack.pop();
-    });
-    
-    // Process the removal
-    runtime::flush_pending_effects();
+  samara::scope(f).dispose();
 }
 
-/// Create a child scope wrapper
+/// Create a child-scope wrapper bound to the scope current at call time.
+///
+/// Each invocation of the returned closure runs the function in a NEW child
+/// scope of that captured parent and returns the result together with the
+/// scope id, which the caller may later pass to [`super::runtime::remove_scope`].
 pub fn as_child_scope<F, Args, R>(f: F) -> impl Fn(Args) -> (R, ScopeId)
 where
-    F: Fn(Args) -> R + 'static,
-    Args: 'static,
-    R: 'static,
+  F: Fn(Args) -> R + 'static,
+  Args: 'static,
+  R: 'static,
 {
-    let current = RUNTIME.with(|runtime| {
-        runtime.borrow().current_scope_id().expect("as_child_scope must be called within a scope")
-    });
-
-    move |args: Args| -> (R, ScopeId) {
-        let id = RUNTIME.with(|runtime| {
-            let mut state = runtime.borrow_mut();
-            let id = state.create_scope("child_scope", Some(current));
-            state.scope_stack.push(id);
-            id
-        });
-
-        let result = f(args);
-
-        RUNTIME.with(|runtime| {
-            runtime.borrow_mut().scope_stack.pop();
-        });
-
-        (result, id)
-    }
+  let scoped = samara::scoped(f);
+  move |args: Args| -> (R, ScopeId) {
+    let (result, scope) = scoped(args);
+    (result, ScopeId { inner: scope })
+  }
 }

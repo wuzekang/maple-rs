@@ -1,5 +1,46 @@
 //! Window system runtime - window state and redraw management
 
+use std::cell::Cell;
+
+thread_local! {
+  /// True while the render pass is producing a frame. Damage discovered
+  /// mid-render is already being drawn; requesting another frame from inside
+  /// the pass made the loop self-sustaining (continuous vsync rendering).
+  static RENDER_IN_FLIGHT: Cell<bool> = const { Cell::new(false) };
+}
+
+pub fn set_rendering(v: bool) {
+  RENDER_IN_FLIGHT.with(|f| f.set(v));
+}
+
+pub fn is_rendering() -> bool {
+  RENDER_IN_FLIGHT.with(|f| f.get())
+}
+
+/// Request a window redraw. No-op while the render pass is in flight: the
+/// damage being reported is part of the frame currently being produced.
+pub fn request_redraw() {
+  if is_rendering() {
+    return;
+  }
+  if std::env::var("SIG_FRAME_STATS").is_ok() {
+    REDRAW_REQUESTS.with(|c| c.set(c.get() + 1));
+  }
+  with_window(|window_state| {
+    if let Some(window) = &window_state.redraw_requester {
+      window.request_redraw();
+    }
+  });
+}
+
+thread_local! {
+  static REDRAW_REQUESTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+pub fn redraw_request_count() -> usize {
+  REDRAW_REQUESTS.with(|c| c.get())
+}
+
 use std::cell::RefCell;
 use std::sync::Arc;
 use std::time::Instant;

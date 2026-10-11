@@ -213,11 +213,7 @@ where
           });
 
           // Request redraw
-          crate::runtime::with_window(|window_state| {
-            if let Some(window) = &window_state.redraw_requester {
-              window.request_redraw();
-            }
-          });
+          crate::runtime::request_redraw();
 
           // Update internal scroll signal to keep in sync
           *scroll_offset.write() = target_offset;

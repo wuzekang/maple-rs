@@ -14,7 +14,6 @@ futures-channel = "0.3"
 slotmap = "1.1.1"
 
 # Generational box for Copy types
-generational-box = "0.7.2"
 
 [dev-dependencies]
 tokio = { version = "1.0", features = ["time", "rt", "macros"] }

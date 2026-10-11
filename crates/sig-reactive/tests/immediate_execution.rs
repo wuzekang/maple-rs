@@ -150,9 +150,11 @@ fn test_nested_effects() {
         // New inner effect runs once
         assert_eq!(*inner_counter.borrow(), 3);
         
-        // Update inner signal again - triggers BOTH inner effects (old and new)
+        // Update inner signal again - only the CURRENT inner effect runs:
+        // children created inside an effect are disposed and re-created on
+        // each run, so the old inner effect no longer subscribes.
         *inner_signal.write() = 30;
-        assert_eq!(*inner_counter.borrow(), 5); // Both inner effects run
+        assert_eq!(*inner_counter.borrow(), 4); // New inner effect runs
     });
 }
 
@@ -193,12 +195,12 @@ fn test_nested_effects_with_different_signals() {
         
         execution_log.borrow_mut().clear();
         
-        // Update signal_b - should trigger all existing inner effects
+        // Update signal_b - only the current inner effect runs: the one from
+        // the initial outer run was disposed when the outer effect re-ran.
         *signal_b.write() = 200;
         {
             let log = execution_log.borrow();
-            // Two inner effects should run (one from initial, one from update)
-            assert_eq!(log.len(), 2);
+            assert_eq!(log.len(), 1);
             assert!(log.iter().all(|s| s.starts_with("inner: b=200")));
         }
     });
@@ -288,8 +290,9 @@ fn test_nested_effect_with_outer_reads_after_inner() {
             assert!(log.iter().any(|s| s == "inner: b=100"));
             assert!(log.iter().any(|s| s == "inner-reads-a: a=2"));
             
-            // Old inner effect also runs (because it reads signal_a)
-            assert_eq!(log.iter().filter(|s| s.starts_with("inner-reads-a:")).count(), 2);
+            // The old inner effect was disposed on outer re-run (children are
+            // disposed and re-created), so only the new inner read lands.
+            assert_eq!(log.iter().filter(|s| s.starts_with("inner-reads-a:")).count(), 1);
         }
         
         execution_log.borrow_mut().clear();
@@ -319,8 +322,9 @@ fn test_nested_effect_with_outer_reads_after_inner() {
             // Outer effect should NOT run
             assert!(!log.iter().any(|s| s.starts_with("outer-")));
             
-            // All inner effects run (3 of them: initial + from signal_a update + from signal_c update)
-            assert_eq!(log.iter().filter(|s| *s == "inner: b=200").count(), 3);
+            // Only the CURRENT inner effect runs: earlier ones were disposed
+            // when the outer effect re-ran (children disposed and re-created).
+            assert_eq!(log.iter().filter(|s| *s == "inner: b=200").count(), 1);
         }
     });
 }

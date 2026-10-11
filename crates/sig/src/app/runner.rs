@@ -35,6 +35,10 @@ pub struct Runner {
 
   modifiers: winit::keyboard::ModifiersState,
 
+  // Latest mouse position not yet processed; mouse-move processing is
+  // coalesced to once per rendered frame instead of per OS event.
+  pending_mouse: bool,
+
   // Future for waiting on task messages
   wait_for_work: Option<Pin<Box<dyn Future<Output = ()> + 'static>>>,
   waker: std::task::Waker,
@@ -82,6 +86,7 @@ impl Runner {
       drag_state: DragState::default(),
       hover_top_view: None, // 🎯 Initialize hover_top_view
       modifiers: winit::keyboard::ModifiersState::default(),
+      pending_mouse: false,
       wait_for_work: None,
       waker,
     }
@@ -131,6 +136,143 @@ impl Runner {
     }
   }
 
+
+  /// Process the latest mouse position once per frame: drag state, hit
+  /// testing, hover enter/leave and cursor updates.
+  fn process_pending_mouse(&mut self) {
+    self.pending_mouse = false;
+    let Some(pos) = self.cursor_pos else {
+      return;
+    };
+    let Some(view) = &self.root_view else {
+      return;
+    };
+    // 🎯 Handle drag logic
+    if let Some(drag_target_id) = self.drag_state.target {
+      let distance = (pos - self.drag_state.start_position).length();
+
+      if !self.drag_state.is_dragging && distance > self.drag_state.threshold {
+        // Drag start: exceeded threshold
+        self.drag_state.is_dragging = true;
+
+        if !self.drag_state.is_scrollbar_drag {
+          // Normal drag event
+          let mut event = DragEvent::new(
+            drag_target_id,
+            DragData {
+              r#type: DragEventType::DragStart,
+              start_position: self.drag_state.start_position,
+              current_position: pos,
+              delta: Vec2::ZERO,
+              total_delta: pos - self.drag_state.start_position,
+            },
+          );
+          dispatch_event_to_view(drag_target_id, &mut event);
+        }
+
+        self.drag_state.last_position = pos;
+      } else if self.drag_state.is_dragging {
+        // Drag in progress
+        let delta = pos - self.drag_state.last_position;
+        let total_delta = pos - self.drag_state.start_position;
+
+        // 🎯 Handle scrollbar dragging
+        if self.drag_state.is_scrollbar_drag {
+          let handled = crate::event::handler::scroll::handle_scrollbar_drag(
+            drag_target_id,
+            delta,
+            self.drag_state.scrollbar_direction_vertical,
+          );
+          if handled {
+            if let Some(window) = &self.window {
+              window.request_redraw();
+            }
+          }
+        } else {
+          // 普通拖拽事件
+          let mut event = DragEvent::new(
+            drag_target_id,
+            DragData {
+              r#type: DragEventType::Drag,
+              start_position: self.drag_state.start_position,
+              current_position: pos,
+              delta,
+              total_delta,
+            },
+          );
+          dispatch_event_to_view(drag_target_id, &mut event);
+        }
+
+        self.drag_state.last_position = pos;
+      }
+    }
+
+    // Perform hit test to find target
+    if let Some(path) = hit_test(&view, pos, Vec2::ZERO) {
+      // Build new hovered set from path (target and all ancestors)
+      let new_hovered: HashSet<ViewId> = path.iter().copied().collect();
+
+      // Find entered and leaved views
+      let entered = &new_hovered - &self.hovered;
+      let leaved = &self.hovered - &new_hovered;
+
+      // Trigger MouseEnter for newly hovered views
+      for view_id in entered.iter() {
+        let mut event = MouseEvent::new(
+          *view_id,
+          MouseData {
+            position: pos,
+            button: None,
+            state: ElementState::Pressed,
+            r#type: MouseEventType::MouseEnter,
+            modifiers: self.modifiers,
+          },
+        );
+        dispatch_event_to_view(*view_id, &mut event);
+      }
+
+      // Trigger MouseLeave for no longer hovered views
+      for view_id in leaved.iter() {
+        let mut event = MouseEvent::new(
+          *view_id,
+          MouseData {
+            position: pos,
+            button: None,
+            state: ElementState::Pressed,
+            r#type: MouseEventType::MouseLeave,
+            modifiers: self.modifiers,
+          },
+        );
+        dispatch_event_to_view(*view_id, &mut event);
+      }
+
+      // Update hovered set
+      self.hovered = new_hovered;
+
+      // Update cursor based on the topmost hovered view (first in path)
+      if let Some(target_view) = path.first() {
+        // 🎯 Update hover_top_view for AABB debug drawing
+        self.hover_top_view = Some(*target_view);
+
+        if let Some(window) = &self.window {
+          update_cursor(window, *target_view);
+        }
+
+        let mut event = MouseEvent::new(
+          *target_view,
+          MouseData {
+            position: pos,
+            button: None,
+            state: ElementState::Pressed,
+            r#type: MouseEventType::MouseMove,
+            modifiers: self.modifiers,
+          },
+        );
+        dispatch_event(&view, &mut event);
+      }
+    }
+  }
+
   fn handle_event(
     &mut self,
     event_loop: &ActiveEventLoop,
@@ -156,138 +298,19 @@ impl Runner {
         }
       }
       WindowEvent::CursorMoved { position, .. } => {
-        // 🎯 Convert physical pixels to logical pixels
+        // Coalesce: store the latest position and process at the frame
+        // boundary. Hit testing walks the view tree; doing it per OS mouse
+        // event (up to ~125Hz) starves the render budget on large trees.
         let scale_factor = self.vello_app.get_scale_factor().unwrap_or(1.0);
         let pos = Vec2::new(
           (position.x / scale_factor) as f32,
           (position.y / scale_factor) as f32,
         );
         self.cursor_pos = Some(pos);
-
-        if let Some(view) = &self.root_view {
-          // 🎯 Handle drag logic
-          if let Some(drag_target_id) = self.drag_state.target {
-            let distance = (pos - self.drag_state.start_position).length();
-
-            if !self.drag_state.is_dragging && distance > self.drag_state.threshold {
-              // Drag start: exceeded threshold
-              self.drag_state.is_dragging = true;
-
-              if !self.drag_state.is_scrollbar_drag {
-                // Normal drag event
-                let mut event = DragEvent::new(
-                  drag_target_id,
-                  DragData {
-                    r#type: DragEventType::DragStart,
-                    start_position: self.drag_state.start_position,
-                    current_position: pos,
-                    delta: Vec2::ZERO,
-                    total_delta: pos - self.drag_state.start_position,
-                  },
-                );
-                dispatch_event_to_view(drag_target_id, &mut event);
-              }
-
-              self.drag_state.last_position = pos;
-            } else if self.drag_state.is_dragging {
-              // Drag in progress
-              let delta = pos - self.drag_state.last_position;
-              let total_delta = pos - self.drag_state.start_position;
-
-              // 🎯 Handle scrollbar dragging
-              if self.drag_state.is_scrollbar_drag {
-                let handled = crate::event::handler::scroll::handle_scrollbar_drag(
-                  drag_target_id,
-                  delta,
-                  self.drag_state.scrollbar_direction_vertical,
-                );
-                if handled {
-                  if let Some(window) = &self.window {
-                    window.request_redraw();
-                  }
-                }
-              } else {
-                // 普通拖拽事件
-                let mut event = DragEvent::new(
-                  drag_target_id,
-                  DragData {
-                    r#type: DragEventType::Drag,
-                    start_position: self.drag_state.start_position,
-                    current_position: pos,
-                    delta,
-                    total_delta,
-                  },
-                );
-                dispatch_event_to_view(drag_target_id, &mut event);
-              }
-
-              self.drag_state.last_position = pos;
-            }
-          }
-
-          // Perform hit test to find target
-          if let Some(path) = hit_test(&view, pos, Vec2::ZERO) {
-            // Build new hovered set from path (target and all ancestors)
-            let new_hovered: HashSet<ViewId> = path.iter().copied().collect();
-
-            // Find entered and leaved views
-            let entered = &new_hovered - &self.hovered;
-            let leaved = &self.hovered - &new_hovered;
-
-            // Trigger MouseEnter for newly hovered views
-            for view_id in entered.iter() {
-              let mut event = MouseEvent::new(
-                *view_id,
-                MouseData {
-                  position: pos,
-                  button: None,
-                  state: ElementState::Pressed,
-                  r#type: MouseEventType::MouseEnter,
-                  modifiers: self.modifiers,
-                },
-              );
-              dispatch_event_to_view(*view_id, &mut event);
-            }
-
-            // Trigger MouseLeave for no longer hovered views
-            for view_id in leaved.iter() {
-              let mut event = MouseEvent::new(
-                *view_id,
-                MouseData {
-                  position: pos,
-                  button: None,
-                  state: ElementState::Pressed,
-                  r#type: MouseEventType::MouseLeave,
-                  modifiers: self.modifiers,
-                },
-              );
-              dispatch_event_to_view(*view_id, &mut event);
-            }
-
-            // Update hovered set
-            self.hovered = new_hovered;
-
-            // Update cursor based on the topmost hovered view (first in path)
-            if let Some(target_view) = path.first() {
-              // 🎯 Update hover_top_view for AABB debug drawing
-              self.hover_top_view = Some(*target_view);
-
-              if let Some(window) = &self.window {
-                update_cursor(window, *target_view);
-              }
-
-              let mut event = MouseEvent::new(
-                *target_view,
-                MouseData {
-                  position: pos,
-                  button: None,
-                  state: ElementState::Pressed,
-                  r#type: MouseEventType::MouseMove,
-                  modifiers: self.modifiers,
-                },
-              );
-              dispatch_event(&view, &mut event);
-            }
+        if !self.pending_mouse {
+          self.pending_mouse = true;
+          if let Some(window) = &self.window {
+            window.request_redraw();
           }
         }
       }
@@ -507,6 +530,9 @@ impl Runner {
         }
       }
       WindowEvent::RedrawRequested => {
+        if self.pending_mouse {
+          self.process_pending_mouse();
+        }
         // 🎯 延迟初始化：在第一次渲染前初始化 GPU
         // 这样可以避免在 resumed() 中阻塞主线程，确保窗口焦点正常获取
         if !self.vello_app.has_state() {
@@ -582,6 +608,7 @@ impl ApplicationHandler<AppEvent> for Runner {
     match event {
       AppEvent::PollTasks => {
         // 🎯 Dioxus-style: Continuously poll until pending
+        let mut did_work = false;
         loop {
           // Poll the wait_for_work future
           let has_async_work = self.poll_wait_for_work();
@@ -595,11 +622,21 @@ impl ApplicationHandler<AppEvent> for Runner {
           if !has_async_work && !has_more_work {
             break; // No more work, return to event loop
           }
+          did_work = true;
         }
 
-        // Request a redraw if tasks modified the UI
-        if let Some(window) = &self.window {
-          window.request_redraw();
+        // Only request a redraw when polling actually ran tasks. Reactive
+        // updates already request redraws through their own effects; an
+        // unconditional request here made every logical update render two
+        // frames (the second present then blocks on vsync).
+        // Only request a redraw when polling actually ran tasks. Reactive
+        // updates already request redraws through their own effects; an
+        // unconditional request here made every logical update render an
+        // extra frame.
+        if did_work {
+          if let Some(window) = &self.window {
+            window.request_redraw();
+          }
         }
       }
     }

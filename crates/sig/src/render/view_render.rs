@@ -374,11 +374,7 @@ pub fn render_view(
       });
 
       // Request redraw to apply new offset
-      crate::runtime::with_window(|window_state| {
-        if let Some(window) = &window_state.redraw_requester {
-          window.request_redraw();
-        }
-      });
+      crate::runtime::request_redraw();
     }
   }
 

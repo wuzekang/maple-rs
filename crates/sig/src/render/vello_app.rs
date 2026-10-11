@@ -87,6 +87,17 @@ impl VelloApp {
 
   pub fn render(&mut self, view: &ViewId, hover_top_view: Option<ViewId>) {
     if let Some(state) = &mut self.state {
+      crate::runtime::set_rendering(true);
+      struct RenderingGuard;
+      impl Drop for RenderingGuard {
+        fn drop(&mut self) {
+          crate::runtime::set_rendering(false);
+        }
+      }
+      let _rendering = RenderingGuard;
+      let timing = crate::frame_stats::enabled();
+      let mut seg = crate::frame_stats::FrameSegments::default();
+
       let width = state.surface.config.width;
       let height = state.surface.config.height;
       let dev_id = state.surface.dev_id;
@@ -105,26 +116,37 @@ impl VelloApp {
         height: taffy::AvailableSpace::Definite(logical_height),
       };
 
+      let t_style = std::time::Instant::now();
+
       // 🎯 Compute styles before layout computation (ensure inheritance is correct)
-      //
-      // 1. Batch bubbling: Mark upwards from collected dirty nodes (parent-child relationships are stable)
-      // 2. Compute styles: Use Dirty Bubbling pruning traversal
-      // 3. Style computation internally triggers necessary repaints via request_repaint
       crate::style::compute::batch_bubble_dirty_marks();
 
       let mut style_ctx = crate::style::compute::StyleComputeContext::new();
       crate::style::compute::compute_style_recursive(view, &mut style_ctx);
 
-      view.compute_layout(available_space, &render_ctx);
+      if timing {
+        seg.style = t_style.elapsed();
+      }
 
+      let t_layout = std::time::Instant::now();
+      view.compute_layout(available_space, &render_ctx);
+      if timing {
+        seg.layout = t_layout.elapsed();
+      }
+
+      let t_scene = std::time::Instant::now();
       // Reset scene
       self.scene.reset();
 
       // 🎯 Render view, passing render context
       render_view(&mut self.scene, *view, 0.0, 0.0, &render_ctx, hover_top_view);
+      if timing {
+        seg.scene = t_scene.elapsed();
+      }
 
       let device_handle = &self.context.devices[dev_id];
 
+      let t_raster = std::time::Instant::now();
       // Render to texture
       self.renderers[dev_id]
         .as_mut()
@@ -138,11 +160,15 @@ impl VelloApp {
             base_color: Color::new([0.95, 0.95, 0.97, 1.0]), // Light background
             width,
             height,
-            antialiasing_method: AaConfig::Msaa16,
+            antialiasing_method: AaConfig::Area,
           },
         )
         .expect("failed to render to surface");
+      if timing {
+        seg.raster = t_raster.elapsed();
+      }
 
+      let t_present = std::time::Instant::now();
       // Blit to surface
       let surface_texture = state
         .surface
@@ -171,6 +197,11 @@ impl VelloApp {
 
       // Poll device to keep UI responsive
       device_handle.device.poll(wgpu::PollType::Poll).unwrap();
+
+      if timing {
+        seg.present = t_present.elapsed();
+        crate::frame_stats::record(seg);
+      }
     }
   }
 

@@ -2,8 +2,8 @@
 name = "sig-reactive"
 version = "0.1.0"
 edition = "2024"
-description = "Fine-grained reactive system for sig UI framework"
+description = "Fine-grained reactive system for sig UI framework (facade over samara-signals)"
 
 [dependencies]
-generational-box = "0.7.2"
+samara-signals = { path = "../../../samara/crates/signals" }
 slotmap = "1.1.1"
