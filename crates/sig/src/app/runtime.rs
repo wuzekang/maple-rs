@@ -23,7 +23,10 @@ pub fn request_redraw() {
   if is_rendering() {
     return;
   }
-  if std::env::var("SIG_FRAME_STATS").is_ok() {
+  // Cached: getenv takes a global lock and request_redraw fires per dirty
+  // view — a per-call env read showed up as ~6% of wall time in profiles.
+  static COUNTING: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+  if *COUNTING.get_or_init(|| std::env::var("SIG_FRAME_STATS").is_ok()) {
     REDRAW_REQUESTS.with(|c| c.set(c.get() + 1));
   }
   with_window(|window_state| {

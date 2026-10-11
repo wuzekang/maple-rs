@@ -157,6 +157,9 @@ fn main() {
     .nth(2)
     .and_then(|s| s.parse().ok())
     .unwrap_or(200);
+  // Optional scenario filter (3rd arg): run only that scenario, for
+  // attaching a sampling profiler.
+  let only: Option<String> = std::env::args().nth(3);
 
   eprintln!("style_bench: rows={rows} iterations={iters} (p50/p95 per segment)");
   eprint!("  {:<12}", "scenario");
@@ -165,9 +168,16 @@ fn main() {
   }
   eprintln!();
 
-  run_scenario("clean", rows, iters, Mutation::Clean);
-  run_scenario("one_paint", rows, iters, Mutation::OnePaint);
-  run_scenario("all_paint", rows, iters, Mutation::AllPaint);
-  run_scenario("one_layout", rows, iters, Mutation::OneLayout);
-  run_scenario("all_layout", rows, iters, Mutation::AllLayout);
+  let all: [(&str, Mutation); 5] = [
+    ("clean", Mutation::Clean),
+    ("one_paint", Mutation::OnePaint),
+    ("all_paint", Mutation::AllPaint),
+    ("one_layout", Mutation::OneLayout),
+    ("all_layout", Mutation::AllLayout),
+  ];
+  for (name, m) in all {
+    if only.as_deref().is_none_or(|f| f == name) {
+      run_scenario(name, rows, iters, m);
+    }
+  }
 }

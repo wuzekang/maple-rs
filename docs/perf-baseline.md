@@ -104,3 +104,24 @@ frame_bench 1000 行：style 段 1.6→1.4ms。sig 98/98、sig-reactive 142/142�
 剩余成本是结构性的（每节点 HashMap 哈希、`StylePropertyKey::iter()` 全枚举
 遍历 ×2、`style_cache` 每节点重建）。下一步候选：fieldless 枚举键 → 定长
 数组索引（消掉全部属性映射的哈希与分配）。
+
+### #3 剖析：style 段瓶颈定位（macOS `sample`，all_paint 1000 行 × 8s）
+
+方法：`sample <pid> 8` 采样 release 二进制（workspace 带 debug=1 符号），
+只跑 all_paint 场景。先修掉一个自伤：request_redraw 的计数器每次调用读
+`SIG_FRAME_STATS` 环境变量（getenv 带全局锁，占 wall ~6.6%），改 OnceLock 缓存。
+
+主线程采样归组（约 6800 样本）：
+
+| 桶 | 采样占比 | 内容 |
+|---|---|---|
+| HashMap 机制开销 | **~33%** | `hash_one`（RandomState/SipHash 哈希 fieldless 枚举键！）×3 实例 + `reserve_rehash` + `Iter::next` + insert |
+| 分配/内存拷贝 | ~12% | malloc/free 家族、memmove、RawVec 释放、Vec::clone |
+| 变更检测全枚举扫描 | ~8% | `StylePropertyKey::value` × 全 variant 遍历 + `PartialEq::ne` + `Option::cloned` |
+| 真实属性工作 | ~40% | compute_style 主体、taffy `assign_to`、render_view（scene 段）、taffy layout、samara effect run |
+
+结论：style 段约六成时间是纯机制开销（哈希/分配/枚举扫描），四成是真实工作。
+第一优先级：`StylePropertyKey`/`TaffyStylePropertyKey` 均为 fieldless 枚举，
+属性容器（`ctx.style`、`style_props`、`taffy_style_props`、`style_cache`）
+应从 `HashMap<Key, Value>` 换成 `[Option<Value>; VARIANT_COUNT]` 数组
+（strum `EnumCount`，键即下标）——哈希、rehash、迭代分配全部归零。
