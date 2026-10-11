@@ -1,0 +1,61 @@
+# 性能基准（style 优化前基线）
+
+日期：2026-10-11 · 分支：`wip`（commit `0f9e235`，samara 引擎 + 渲染循环修复后）
+机器：Apple Silicon (M-series), macOS, release 构建
+
+## 基准工具
+
+- `crates/sig/examples/style_bench.rs` — 无头 CPU 基准（无窗口/无 GPU），分场景测
+  四段：effects（信号写引发的闭包重跑）/ style（bubble + compute）/ layout（taffy）/ scene（vello 编码）。
+  运行：`cargo run --release -p sig --example style_bench -- [rows] [iters]`
+- `crates/sig/examples/frame_bench.rs` — 端到端窗口基准（含 GPU/vsync）。
+  运行：`SIG_FRAME_STATS=1 cargo run --release -p sig --example frame_bench -- [rows] [flips]`
+
+## style_bench 基线（p50/p95，µs）
+
+### 1000 行
+
+| 场景 | effects | style | layout | scene |
+|---|---|---|---|---|
+| clean（无任何变化） | 0/0 | 0/0 | 22/37 | 236/354 |
+| one_paint（1 行改背景色） | 0/2 | 29/47 | 230/363 | 250/469 |
+| all_paint（全部改背景色） | 465/630 | 1391/1706 | 794/940 | 324/593 |
+| one_layout（1 行改高度） | 0/1 | 29/44 | 227/373 | 241/497 |
+| all_layout（全部改高度） | 357/519 | 977/1322 | 769/931 | 283/565 |
+
+### 300 行
+
+| 场景 | effects | style | layout | scene |
+|---|---|---|---|---|
+| clean | 0/0 | 0/0 | 6/10 | 92/123 |
+| one_paint | 0/1 | 10/14 | 68/93 | 93/135 |
+| all_paint | 121/158 | 392/497 | 231/283 | 96/175 |
+| one_layout | 0/0 | 9/12 | 69/84 | 83/101 |
+| all_layout | 94/133 | 285/345 | 222/269 | 86/152 |
+
+## frame_bench 端到端基线（p50，µs）
+
+| 场景 | style | layout | scene | raster | present | total | 帧:写 |
+|---|---|---|---|---|---|---|---|
+| 300 行 × 300 写 | ~580 | ~290 | ~250 | ~810 | 109 | 2000 | 301/300 |
+| 1000 行 × 300 写 | ~1900 | ~850 | ~530 | ~780 | 106 | 4000 | 301/300 |
+
+（空闲渲染为零；每逻辑更新实际工作量对比旧引擎基线：300 行 -45%，1000 行 -33%。）
+
+## 基线揭示的优化点（按预期收益排序）
+
+1. **Paint/Layout 未分流（最大）**：`one_paint` 的 layout 段 230µs ≈ `one_layout`
+   的 227µs——改一个背景色触发全量重排。`StyleTrigger::{Paint,Layout}` 枚举
+   已存在但未接线。目标：paint 级变更短路 taffy `set_style` 与 layout。
+   预期：`one_paint` 总耗时 ~500µs → ~60µs；`all_paint` 省去 ~800µs layout。
+2. **scene 无条件全量重建**：`clean` 场景 scene 仍要 236µs。损伤追踪
+   （只重编码受影响子树）是独立优化轴。
+3. **effects 段 ~0.5µs/行**：属性级样式绑定（background 绑信号）可消掉
+   闭包整体重跑，收益约 1/3 个 style 段。
+4. **style 段 O(脏) 已成立**（clean=0µs，1 脏=29µs）——脏标记/冒泡机制
+   本身健康，不需要"继承依赖登记"这类结构改造（预期收益低于 1、2）。
+
+## 规则
+
+任何 style/layout/scene 相关优化，先跑本基准记录对比，写进本文档的
+"优化记录"章节；端到端验收用 frame_bench。
