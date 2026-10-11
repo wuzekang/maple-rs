@@ -1543,14 +1543,11 @@ pub trait Styleable: crate::Element {
           let _ = runtime.taffy.set_style(node_id, style);
         }
 
-        // Check if StyleBuilder changed
+        // Check if StyleBuilder changed; store by move (no builder clone)
         if let Some(state) = runtime.view_states.get_mut(&view_id) {
           if index < state.styles.len() {
-            let prev = &state.styles[index];
-            let next = Some(builder.clone());
-            let changed = prev != &next;
-
-            state.styles[index] = next;
+            let changed = state.styles[index].as_ref() != Some(&builder);
+            state.styles[index] = Some(builder);
             return changed;
           }
         }

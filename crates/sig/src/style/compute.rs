@@ -109,6 +109,10 @@ pub struct StyleComputeContext {
   pub taffy_style_initial: Vec<(TaffyStylePropertyKey, TaffyStyleProperty)>,
   /// Visited views (avoid duplicate computation)
   pub visited: HashSet<ViewId>,
+  /// Undo journal for `style`: each inherited-property overwrite records the
+  /// previous entry so subtree walks restore the context with a bounded
+  /// replay instead of cloning the whole map per node.
+  style_undo: Vec<(StylePropertyKey, Option<StyleProperty>)>,
 }
 
 impl StyleComputeContext {
@@ -120,6 +124,27 @@ impl StyleComputeContext {
       visited: HashSet::new(),
       style_initial: StyleProperty::initial(),
       taffy_style_initial: TaffyStyleProperty::initial(),
+      style_undo: Vec::new(),
+    }
+  }
+
+  /// Mark the current undo length; restore with [`Self::undo_style_to`].
+  fn undo_mark(&self) -> usize {
+    self.style_undo.len()
+  }
+
+  /// Replay the journal back to a mark, restoring `style` entries.
+  fn undo_style_to(&mut self, mark: usize) {
+    while self.style_undo.len() > mark {
+      let (key, prev) = self.style_undo.pop().unwrap();
+      match prev {
+        Some(value) => {
+          self.style.insert(key, value);
+        }
+        None => {
+          self.style.remove(&key);
+        }
+      }
     }
   }
 }
@@ -134,40 +159,38 @@ impl Default for StyleComputeContext {
 fn compute_style(view: &ViewId, ctx: &mut StyleComputeContext) {
   let mut style_trigger = StyleTrigger::None;
 
-  let mut style_props = HashMap::<StylePropertyKey, StyleProperty>::new();
-  let mut taffy_style_props = HashMap::<TaffyStylePropertyKey, TaffyStyleProperty>::new();
-
-  // Get state from runtime and iterate through style builders (backwards, later ones have higher priority)
-  let (styles, old_style, old_taffy_style) = crate::runtime::with_layout(|runtime| {
-    if let Some(state) = runtime.view_states.get(view) {
-      let taffy_style = runtime
-        .taffy
-        .style(view.node_id())
-        .cloned()
-        .unwrap_or_default();
-      (state.styles.clone(), state.style.clone(), taffy_style)
-    } else {
-      (Vec::new(), Style::default(), taffy::Style::default())
-    }
-  });
-
-  // Iterate through style builders backwards (later ones have higher priority)
-  for style_builder in styles.iter().rev() {
-    if let Some(style_builder) = style_builder.as_ref() {
-      // Collect Taffy style properties (deduplicated)
-      for (key, value) in style_builder.taffy_style_props.iter().rev() {
-        if !taffy_style_props.contains_key(key) {
-          taffy_style_props.insert(*key, *value);
+  // Merge style builders (backwards, later ones have higher priority) under
+  // the read borrow. Building the prop maps in place avoids cloning every
+  // StyleBuilder on the hot path.
+  let (style_props, mut taffy_style_props, old_style, old_taffy_style) =
+    crate::runtime::with_layout(|runtime| {
+      let mut style_props = HashMap::<StylePropertyKey, StyleProperty>::new();
+      let mut taffy_style_props =
+        HashMap::<TaffyStylePropertyKey, TaffyStyleProperty>::new();
+      let (old_style, old_taffy_style) = if let Some(state) = runtime.view_states.get(view) {
+        for style_builder in state.styles.iter().rev() {
+          if let Some(style_builder) = style_builder.as_ref() {
+            for (key, value) in style_builder.taffy_style_props.iter().rev() {
+              taffy_style_props.entry(*key).or_insert(*value);
+            }
+            for (key, value) in style_builder.style_props.iter().rev() {
+              style_props.entry(*key).or_insert(value.clone());
+            }
+          }
         }
-      }
-      // Collect render style properties (deduplicated)
-      for (key, value) in style_builder.style_props.iter().rev() {
-        if !style_props.contains_key(key) {
-          style_props.insert(*key, value.clone());
-        }
-      }
-    }
-  }
+        (
+          state.style.clone(),
+          runtime
+            .taffy
+            .style(view.node_id())
+            .cloned()
+            .unwrap_or_default(),
+        )
+      } else {
+        (Style::default(), taffy::Style::default())
+      };
+      (style_props, taffy_style_props, old_style, old_taffy_style)
+    });
 
   // Apply initial Taffy styles
   for (key, value) in &ctx.taffy_style_initial {
@@ -237,22 +260,22 @@ fn compute_style(view: &ViewId, ctx: &mut StyleComputeContext) {
     }
   }
 
-  // Update styles in state
+  // Update styles in state (single clone: view state keeps a copy, the
+  // measure-call map takes the original)
   crate::runtime::with_layout_mut(|runtime| {
-    // Update render styles to styles (for measure calls)
-    runtime.styles.insert(view.node_id(), style.clone());
-
-    // Update view state
     if let Some(state) = runtime.view_states.get_mut(view) {
       state.style = style.clone();
     }
+    runtime.styles.insert(view.node_id(), style);
   });
 
-  // Update inheritable properties in context (for propagation to child nodes)
+  // Update inheritable properties in context (for propagation to child
+  // nodes). Each overwrite journals the previous entry; the subtree walk
+  // restores via the journal instead of cloning the map.
   for (key, value) in &style_props {
     if key.inherited() {
-      ctx.style.remove(key);
-      ctx.style.insert(*key, value.clone());
+      let prev = ctx.style.insert(*key, value.clone());
+      ctx.style_undo.push((*key, prev));
     }
   }
 
@@ -309,7 +332,7 @@ pub fn compute_style_recursive(view: &ViewId, ctx: &mut StyleComputeContext) {
   }
 
   let dirty = ctx.dirty;
-  let saved_style = ctx.style.clone();
+  let undo_mark = ctx.undo_mark();
 
   // If this node is dirty, compute style
   if style_dirty {
@@ -350,7 +373,7 @@ pub fn compute_style_recursive(view: &ViewId, ctx: &mut StyleComputeContext) {
   }
 
   ctx.dirty = dirty;
-  ctx.style = saved_style;
+  ctx.undo_style_to(undo_mark);
 }
 
 /// Get the computed cursor style for a view

@@ -86,3 +86,21 @@ frame_bench（1000 行）：layout 段 850µs → **122µs（-86%）**，total p
 
 下一步候选（见上文优化点 2/3）：scene 损伤追踪（clean 仍 249µs）、
 属性级样式绑定（effects+style 段仍占大头）。
+
+### #2 style 热路径分配消除
+
+每脏节点/每访问节点的分配清理（语义不变）：
+
+- `compute_style`：`state.styles.clone()`（整个 StyleBuilder 向量深拷贝）→ 在读
+  借用内直接合并属性映射；末尾双 `style.clone()` → 单克隆
+- `compute_style_recursive`：每节点克隆整个继承上下文 HashMap
+  （`ctx.style.clone()`）→ undo 日志（记录被覆盖的继承键，子树走完按日志回放）
+- style effect：变更比较后的 `builder.clone()` → move 存储
+
+style_bench（1000 行 p50）：all_paint style 1352→1218µs（-10%）、effects
+469→396µs（-16%）；all_layout style 971→886µs。one_paint/clean 不变。
+frame_bench 1000 行：style 段 1.6→1.4ms。sig 98/98、sig-reactive 142/142。
+
+剩余成本是结构性的（每节点 HashMap 哈希、`StylePropertyKey::iter()` 全枚举
+遍历 ×2、`style_cache` 每节点重建）。下一步候选：fieldless 枚举键 → 定长
+数组索引（消掉全部属性映射的哈希与分配）。
